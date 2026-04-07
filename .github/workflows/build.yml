@@ -23,7 +23,7 @@ jobs:
           gradle-version: '8.8'
 
       - name: Build
-        run: chmod +x gradlew && ./gradlew clean build --no-build-cache --rerun-tasks
+        run: gradle clean build --no-build-cache --rerun-tasks
 
       - name: List build outputs
         run: ls -la build/libs/
