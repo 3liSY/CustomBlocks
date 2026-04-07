@@ -92,16 +92,14 @@ public class ColorSquareItem extends Item {
                 }
             }
         }
-        // 3. No color found in name at all
+        // 3. No color in name — treat whole ID as base, append color as suffix
         if (baseName == null) {
-            if (player != null)
-                player.sendMessage(
-                    Text.literal("§c[CustomBlocks] Block name has no recognised color (black/yellow/green). Can't swap."), true);
-            return ActionResult.FAIL;
+            baseName  = current.customId;
+            useSuffix = true;
         }
 
         String targetId = useSuffix
-            ? baseName + "_" + colorSuffix          // 28_lam_yellow
+            ? baseName + "_" + colorSuffix          // jupiter_yellow  /  28_lam_yellow
             : colorPrefix + baseName;               // yellow_alef
 
         // Already this color?
