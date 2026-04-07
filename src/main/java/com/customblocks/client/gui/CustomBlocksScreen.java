@@ -1,778 +1,1010 @@
+// 
+// Decompiled by Procyon v0.6.0
+// 
+
 package com.customblocks.client.gui;
 
+import java.lang.invoke.CallSite;
+import java.lang.reflect.UndeclaredThrowableException;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.StringConcatFactory;
+import java.lang.invoke.MethodType;
+import java.lang.invoke.MethodHandles;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.Collection;
+import net.minecraft.class_1935;
+import net.minecraft.class_1799;
 import com.customblocks.CustomBlocksMod;
-import com.customblocks.SlotManager;
 import com.customblocks.client.texture.TextureCache;
+import net.minecraft.class_332;
+import net.minecraft.class_364;
+import java.util.ArrayList;
+import net.minecraft.class_2561;
+import net.minecraft.class_342;
+import net.minecraft.class_4185;
+import com.customblocks.SlotManager;
+import java.util.List;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.item.ItemStack;
-import net.minecraft.text.Text;
-
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
+import net.minecraft.class_437;
 
 @Environment(EnvType.CLIENT)
-public class CustomBlocksScreen extends Screen {
-
-    // ── Layout ────────────────────────────────────────────────────────────────
-    private static final int CELL   = 68;
-    private static final int GAP    = 5;
-    private static final int PAD    = 10;
+public class CustomBlocksScreen extends class_437
+{
+    private static final int CELL = 68;
+    private static final int GAP = 5;
+    private static final int PAD = 10;
     private static final int RIGHT_W = 230;
-    private int cols = 5;
-
-    // ── Themes ────────────────────────────────────────────────────────────────
-    private boolean darkTheme = true;
-
-    private int cBg()        { return darkTheme ? 0xF2_0C0C14 : 0xF2_E8E8F0; }
-    private int cPanel()     { return darkTheme ? 0xFF_141420 : 0xFF_D0D0E0; }
-    private int cPanel2()    { return darkTheme ? 0xFF_0E0E1A : 0xFF_C0C0D8; }
-    private int cBorder()    { return darkTheme ? 0xFF_222238 : 0xFF_8080A0; }
-    private int cBorderHi()  { return darkTheme ? 0xFF_5555EE : 0xFF_2255CC; }
-    private int cSelected()  { return darkTheme ? 0xFF_0E2010 : 0xFF_B0FFB0; }
-    private int cSelBdr()    { return darkTheme ? 0xFF_44FF44 : 0xFF_008800; }
-    private int cHovered()   { return darkTheme ? 0xFF_1A1A36 : 0xFF_D8D8FF; }
-    private int cText()      { return darkTheme ? 0xFF_FFFFFF : 0xFF_111111; }
-    private int cGrey()      { return darkTheme ? 0xFF_AAAAAA : 0xFF_444466; }
-    private int cDim()       { return darkTheme ? 0xFF_555577 : 0xFF_888899; }
-    private static final int C_GOLD   = 0xFF_FFD700;
-    private static final int C_GREEN  = 0xFF_44FF44;
-    private static final int C_RED    = 0xFF_FF4444;
-    private static final int C_YELLOW = 0xFF_FFCC00;
-    private static final int C_BLUE   = 0xFF_66AAFF;
-    private static final int C_ORANGE = 0xFF_FF9900;
-    private static final int C_GLOW   = 0xFF_FFE840;
-
-    // ── Window geometry ───────────────────────────────────────────────────────
-    private int px, py, pw, ph;
-    private int gridW() { return cols * (CELL + GAP) - GAP; }
-
-    // ── State ─────────────────────────────────────────────────────────────────
-    private String selectedId = null;
-    private int scroll = 0;
-    private String search = "";
-    private int sortMode = 0;
-    private boolean sortAsc = true;
-    private final List<SlotManager.SlotData> filtered = new ArrayList<>();
-    private boolean bulkDeleteMode = false;
-    private final List<String> bulkSelected = new ArrayList<>();
-
-    private String statusMsg = "";
-    private int statusColor = C_GREEN;
-    private long statusUntil = 0;
-
-    private enum Panel { NONE, CREATE, RENAME, RETEXTURE, PROPERTIES, URL_LIST }
-    private Panel activePanel = Panel.NONE;
-
-    // ── Right-panel buttons ───────────────────────────────────────────────────
-    private ButtonWidget btnCreate, btnGive1, btnGive64, btnGivePlayer,
-                         btnRename, btnRetexture, btnProperties,
-                         btnCopyId, btnBulkDelete, btnUrlList,
-                         btnExport, btnReload, btnDelete, btnTheme;
-
-    // ── Sort / view ───────────────────────────────────────────────────────────
-    private ButtonWidget btnSortName, btnSortSlot, btnSortGlow, btnSortSound,
-                         btnSortDir, btnColsM, btnColsP;
-
-    // ── CREATE panel ──────────────────────────────────────────────────────────
-    private TextFieldWidget fldCreateId, fldCreateName, fldCreateUrl;
-    private ButtonWidget    btnCreateOk, btnCreateCancel;
-
-    // ── RENAME panel ──────────────────────────────────────────────────────────
-    private TextFieldWidget fldRenameNew;
-    private ButtonWidget    btnRenameOk, btnRenameCancel;
-
-    // ── RETEXTURE panel ───────────────────────────────────────────────────────
-    private TextFieldWidget fldRetextureUrl;
-    private ButtonWidget    btnRetextureOk, btnRetextureCancel;
-
-    // ── GIVE TO PLAYER panel (inline in right panel) ──────────────────────────
-    private TextFieldWidget fldGivePlayer;
-    private ButtonWidget    btnGivePlayerOk, btnGivePlayerCancel;
-    private boolean         showGivePlayerPanel = false;
-
-    // ── PROPERTIES panel ──────────────────────────────────────────────────────
-    private ButtonWidget btnGlowM, btnGlowP;
-    private ButtonWidget btnH0, btnHSoft, btnHNorm, btnHHard, btnHMax;
-    private ButtonWidget btnSStone, btnSWood, btnSMetal, btnSGlass,
-                         btnSGrass, btnSSand, btnSWool;
-    private ButtonWidget btnPropClose;
-
-    // ── URL LIST panel ────────────────────────────────────────────────────────
-    // Format: one "id name url" per line (5 lines)
-    private TextFieldWidget[] fldUrlLines = new TextFieldWidget[5];
-    private ButtonWidget btnUrlOk, btnUrlCancel;
-
-    // ── Search ────────────────────────────────────────────────────────────────
-    private TextFieldWidget fldSearch;
-
-    public CustomBlocksScreen() { super(Text.literal("Custom Blocks")); }
-
-    // ── Init ──────────────────────────────────────────────────────────────────
-    @Override
-    protected void init() {
-        activePanel = Panel.NONE;
-        showGivePlayerPanel = false;
-        bulkDeleteMode = false;
-        bulkSelected.clear();
-
-        pw = gridW() + RIGHT_W + PAD * 3;
-        ph = Math.min(height - 16, 520);
-        px = (width  - pw) / 2;
-        py = (height - ph) / 2;
-
-        rebuildFiltered();
-
-        // Search
-        fldSearch = new TextFieldWidget(textRenderer, px + PAD, py + PAD + 14, gridW() - 2, 16, Text.literal(""));
-        fldSearch.setPlaceholder(Text.literal("Search blocks..."));
-        fldSearch.setChangedListener(s -> { search = s; scroll = 0; rebuildFiltered(); });
-        addDrawableChild(fldSearch);
-
-        // Sort row
-        int sy = py + PAD + 32;
-        int sbase = px + PAD;
-        int sw = (gridW() - 2 - 3*3 - 22 - 22 - 3) / 4;
-        btnSortName  = mkBtn(sbase,             sy, sw,   "Name",  b -> setSort(0));
-        btnSortSlot  = mkBtn(sbase + sw+3,      sy, sw,   "Slot",  b -> setSort(1));
-        btnSortGlow  = mkBtn(sbase + (sw+3)*2,  sy, sw,   "Glow",  b -> setSort(2));
-        btnSortSound = mkBtn(sbase + (sw+3)*3,  sy, sw,   "Sound", b -> setSort(3));
-        btnSortDir   = mkBtn(sbase + (sw+3)*4+1,sy, 18,   "^",     b -> { sortAsc=!sortAsc; rebuildFiltered(); });
-        btnColsM     = mkBtn(sbase + (sw+3)*4+22,sy, 18,  "-",     b -> { if(cols>3){cols--;reinit();} });
-        btnColsP     = mkBtn(sbase + (sw+3)*4+43,sy, 18,  "+",     b -> { if(cols<8){cols++;reinit();} });
-        for (ButtonWidget b : new ButtonWidget[]{btnSortName,btnSortSlot,btnSortGlow,btnSortSound,btnSortDir,btnColsM,btnColsP})
-            addDrawableChild(b);
-
-        // Right-panel buttons
-        int bx = px + PAD + gridW() + PAD;
-        int by = py + PAD + 14;
-        int bw = RIGHT_W - PAD;
-        int half = bw/2 - 2;
-        btnTheme      = mkBtn(bx, by,       bw,    darkTheme ? "Light Mode" : "Dark Mode", b -> { darkTheme=!darkTheme; reinit(); });
-        btnCreate     = mkBtn(bx, by+26,    bw,    "New Block",      b -> openPanel(Panel.CREATE));
-        btnGive1      = mkBtn(bx, by+52,    half,  "Give x1",        b -> doGive(1, null));
-        btnGive64     = mkBtn(bx+half+4,by+52,half,"Give x64",       b -> doGive(64, null));
-        btnGivePlayer = mkBtn(bx, by+78,    bw,    "Give to Player", b -> toggleGivePlayerPanel());
-        btnRename     = mkBtn(bx, by+104,   bw,    "Rename",         b -> openPanel(Panel.RENAME));
-        btnRetexture  = mkBtn(bx, by+130,   bw,    "Change Texture", b -> openPanel(Panel.RETEXTURE));
-        btnProperties = mkBtn(bx, by+156,   bw,    "Properties",     b -> openPanel(Panel.PROPERTIES));
-        btnCopyId     = mkBtn(bx, by+182,   bw,    "Copy ID",        b -> doCopyId());
-        btnUrlList    = mkBtn(bx, by+208,   half,  "URL Import",     b -> openPanel(Panel.URL_LIST));
-        btnExport     = mkBtn(bx+half+4,by+208,half,"Export",        b -> doExport());
-        btnBulkDelete = mkBtn(bx, by+234,   half,  "Bulk Delete",    b -> toggleBulkDelete());
-        btnReload     = mkBtn(bx+half+4,by+234,half,"Reload Tex",    b -> doReloadTex());
-        btnDelete     = mkBtn(bx, by+260,   bw,    "Delete Block",   b -> doDelete());
-
-        for (ButtonWidget b : new ButtonWidget[]{btnTheme,btnCreate,btnGive1,btnGive64,
-                btnGivePlayer,btnRename,btnRetexture,btnProperties,btnCopyId,
-                btnUrlList,btnExport,btnBulkDelete,btnReload,btnDelete})
-            addDrawableChild(b);
-        updateButtonStates();
-
-        // Give-to-player inline panel (under the button)
-        fldGivePlayer    = mkField(bx, by+80, bw, "Player name");
-        btnGivePlayerOk  = mkBtn(bx,       by+98, half, "Give",   b -> doGiveToPlayer());
-        btnGivePlayerCancel = mkBtn(bx+half+4, by+98, half, "Cancel", b -> hideGivePlayerPanel());
-
-        // Sub-panels (added to children only when opened)
-        int spY = py + ph - 118;
-        fldCreateId   = mkField(px+PAD, spY,      gridW()-2, "id — letters/numbers/underscores only");
-        fldCreateName = mkField(px+PAD, spY+22,   gridW()-2, "Display Name");
-        fldCreateUrl  = mkField(px+PAD, spY+44,   gridW()-2, "https://image-url.png");
-        fldCreateUrl.setMaxLength(512);
-        btnCreateOk     = mkBtn(px+PAD,      spY+66, 80,  "Create", b -> doCreate());
-        btnCreateCancel = mkBtn(px+PAD+84,   spY+66, 70,  "Cancel", b -> closePanel());
-
-        fldRenameNew    = mkField(px+PAD, spY+22,  gridW()-2, "New display name");
-        btnRenameOk     = mkBtn(px+PAD,     spY+44, 80,  "Rename", b -> doRename());
-        btnRenameCancel = mkBtn(px+PAD+84,  spY+44, 70,  "Cancel", b -> closePanel());
-
-        fldRetextureUrl = mkField(px+PAD, spY+22, gridW()-2, "https://new-image.png");
-        fldRetextureUrl.setMaxLength(512);
-        btnRetextureOk     = mkBtn(px+PAD,    spY+44, 80, "Apply",  b -> doRetexture());
-        btnRetextureCancel = mkBtn(px+PAD+84, spY+44, 70, "Cancel", b -> closePanel());
-
-        // URL list panel (5 lines of "id name url")
-        int ulY = spY - 10;
-        for (int i = 0; i < 5; i++) {
-            fldUrlLines[i] = mkField(px+PAD, ulY + i*20, gridW()-2, "id name https://url.png  (line "+(i+1)+")");
-            fldUrlLines[i].setMaxLength(512);
-        }
-        btnUrlOk     = mkBtn(px+PAD,    ulY+102, 80,  "Import", b -> doUrlListImport());
-        btnUrlCancel = mkBtn(px+PAD+84, ulY+102, 70,  "Cancel", b -> closePanel());
-
-        // Properties panel
-        int propY = by + 300;
-        btnGlowM  = mkBtn(bx,      propY+18, 20, "-", b -> adjustGlow(-1));
-        btnGlowP  = mkBtn(bx+140,  propY+18, 20, "+", b -> adjustGlow(+1));
-        int hw = (bw-8)/5;
-        btnH0     = mkBtn(bx,          propY+44, hw, "0",    b -> setHard(0f));
-        btnHSoft  = mkBtn(bx+(hw+2),   propY+44, hw, "Soft", b -> setHard(0.5f));
-        btnHNorm  = mkBtn(bx+(hw+2)*2, propY+44, hw, "Norm", b -> setHard(1.5f));
-        btnHHard  = mkBtn(bx+(hw+2)*3, propY+44, hw, "Hard", b -> setHard(5.0f));
-        btnHMax   = mkBtn(bx+(hw+2)*4, propY+44, hw, "MAX",  b -> setHard(-1f));
-        int sw2 = (bw-12)/7;
-        btnSStone = mkBtn(bx,          propY+70, sw2, "Stn", b -> setSound("stone"));
-        btnSWood  = mkBtn(bx+(sw2+2),  propY+70, sw2, "Wd",  b -> setSound("wood"));
-        btnSMetal = mkBtn(bx+(sw2+2)*2,propY+70, sw2, "Mtl", b -> setSound("metal"));
-        btnSGlass = mkBtn(bx+(sw2+2)*3,propY+70, sw2, "Gls", b -> setSound("glass"));
-        btnSGrass = mkBtn(bx+(sw2+2)*4,propY+70, sw2, "Grs", b -> setSound("grass"));
-        btnSSand  = mkBtn(bx+(sw2+2)*5,propY+70, sw2, "Snd", b -> setSound("sand"));
-        btnSWool  = mkBtn(bx+(sw2+2)*6,propY+70, sw2, "Wl",  b -> setSound("wool"));
-        btnPropClose = mkBtn(bx, propY+96, bw, "Done", b -> closePanel());
+    private int cols;
+    private boolean darkTheme;
+    private static final int C_GOLD = -10496;
+    private static final int C_GREEN = -12255420;
+    private static final int C_RED = -48060;
+    private static final int C_YELLOW = -13312;
+    private static final int C_BLUE = -10048769;
+    private static final int C_ORANGE = -26368;
+    private static final int C_GLOW = -6080;
+    private int px;
+    private int py;
+    private int pw;
+    private int ph;
+    private String selectedId;
+    private int scroll;
+    private String search;
+    private int sortMode;
+    private boolean sortAsc;
+    private final List<SlotManager.SlotData> filtered;
+    private boolean bulkDeleteMode;
+    private final List<String> bulkSelected;
+    private String statusMsg;
+    private int statusColor;
+    private long statusUntil;
+    private Panel activePanel;
+    private class_4185 btnCreate;
+    private class_4185 btnGive1;
+    private class_4185 btnGive64;
+    private class_4185 btnGivePlayer;
+    private class_4185 btnRename;
+    private class_4185 btnRetexture;
+    private class_4185 btnProperties;
+    private class_4185 btnCopyId;
+    private class_4185 btnBulkDelete;
+    private class_4185 btnUrlList;
+    private class_4185 btnExport;
+    private class_4185 btnReload;
+    private class_4185 btnDelete;
+    private class_4185 btnTheme;
+    private class_4185 btnSortName;
+    private class_4185 btnSortSlot;
+    private class_4185 btnSortGlow;
+    private class_4185 btnSortSound;
+    private class_4185 btnSortDir;
+    private class_4185 btnColsM;
+    private class_4185 btnColsP;
+    private class_342 fldCreateId;
+    private class_342 fldCreateName;
+    private class_342 fldCreateUrl;
+    private class_4185 btnCreateOk;
+    private class_4185 btnCreateCancel;
+    private class_342 fldRenameNew;
+    private class_4185 btnRenameOk;
+    private class_4185 btnRenameCancel;
+    private class_342 fldRetextureUrl;
+    private class_4185 btnRetextureOk;
+    private class_4185 btnRetextureCancel;
+    private class_342 fldGivePlayer;
+    private class_4185 btnGivePlayerOk;
+    private class_4185 btnGivePlayerCancel;
+    private boolean showGivePlayerPanel;
+    private class_4185 btnGlowM;
+    private class_4185 btnGlowP;
+    private class_4185 btnH0;
+    private class_4185 btnHSoft;
+    private class_4185 btnHNorm;
+    private class_4185 btnHHard;
+    private class_4185 btnHMax;
+    private class_4185 btnSStone;
+    private class_4185 btnSWood;
+    private class_4185 btnSMetal;
+    private class_4185 btnSGlass;
+    private class_4185 btnSGrass;
+    private class_4185 btnSSand;
+    private class_4185 btnSWool;
+    private class_4185 btnPropClose;
+    private class_342[] fldUrlLines;
+    private class_4185 btnUrlOk;
+    private class_4185 btnUrlCancel;
+    private class_342 fldSearch;
+    
+    private int cBg() {
+        return this.darkTheme ? -234091500 : -219617040;
     }
-
-    private void reinit() { resize(client, this.width, this.height); }
-
-    // ── Render ────────────────────────────────────────────────────────────────
-    @Override
-    public void render(DrawContext ctx, int mx, int my, float delta) {
-        renderBackground(ctx, mx, my, delta);
-
-        // Outer glow
-        ctx.fill(px-3,py-3,px+pw+3,py+ph+3, 0x33_5555FF);
-        ctx.fill(px-1,py-1,px+pw+1,py+ph+1, cBorderHi());
-        ctx.fill(px,py,px+pw,py+ph, cBg());
-
-        // Title bar
-        ctx.fillGradient(px,py,px+pw,py+16, darkTheme?0xFF_1A1A40:0xFF_4040AA, cBg());
-        ctx.drawCenteredTextWithShadow(textRenderer, "Custom Blocks", px+pw/2, py+4, C_GOLD);
-
-        // Divider
-        ctx.fill(px+PAD+gridW()+PAD-1, py+16, px+PAD+gridW()+PAD, py+ph-4, cBorder());
-
-        // Header labels
-        ctx.drawTextWithShadow(textRenderer, "Blocks  (" + filtered.size() + " shown)", px+PAD, py+PAD+3, cGrey());
-        ctx.drawTextWithShadow(textRenderer,
-            "Sort: " + new String[]{"Name","Slot","Glow","Sound"}[sortMode] + (sortAsc?" ^":" v"),
-            px+PAD+gridW()-55, py+PAD+3, cDim());
-
-        // Slot usage bar
-        int used=SlotManager.usedSlots(), max=SlotManager.MAX_SLOTS;
-        float pct=used/(float)max;
-        int barX=px+PAD, barY=py+ph-8, barW=gridW()-2;
-        ctx.fill(barX,barY,barX+barW,barY+4, darkTheme?0xFF_1A1A2E:0xFF_AAAACC);
-        int fillClr = pct<.6f?0xFF_44BB44:pct<.9f?C_YELLOW:C_RED;
-        ctx.fill(barX,barY,barX+(int)(barW*pct),barY+4, fillClr);
-        ctx.drawTextWithShadow(textRenderer, used+"/"+max+" slots", barX, barY-9, cDim());
-
-        // Bulk delete banner
-        if (bulkDeleteMode) {
-            ctx.fill(px,py+ph-20,px+pw,py+ph, 0xCC_550000);
-            ctx.drawCenteredTextWithShadow(textRenderer,
-                "BULK DELETE MODE — click blocks to select ("+bulkSelected.size()+" selected) — press DELETE to confirm, ESC to cancel",
-                px+pw/2, py+ph-16, C_RED);
-        }
-
-        drawGrid(ctx, mx, my);
-        drawRightPanel(ctx, mx, my);
-
-        // Status toast
-        if (System.currentTimeMillis() < statusUntil)
-            ctx.drawCenteredTextWithShadow(textRenderer, statusMsg, px+pw/2, py+ph+6, statusColor);
-
-        drawActivePanel(ctx);
-        super.render(ctx, mx, my, delta);
+    
+    private int cPanel() {
+        return this.darkTheme ? -15461344 : -3092256;
     }
-
-    private void drawGrid(DrawContext ctx, int mx, int my) {
-        int gx = px+PAD;
-        int gy = py+52;    // below search + sort buttons
-        int gh = py+ph-20;
-
-        ctx.enableScissor(gx, gy, gx+gridW(), gh);
-
-        for (int i=0; i<filtered.size(); i++) {
-            int col = i%cols;
-            int row = i/cols;
-            int cx  = gx+col*(CELL+GAP);
-            int cy  = gy+row*(CELL+GAP)-scroll;
-            if (cy+CELL<gy || cy>gh) continue;
-
-            SlotManager.SlotData data = filtered.get(i);
-            boolean sel = bulkDeleteMode
-                ? bulkSelected.contains(data.customId)
-                : data.customId.equals(selectedId);
-            boolean hov = mx>=cx&&mx<cx+CELL&&my>=cy&&my<cy+CELL;
-
-            // Cell bg
-            int bg = sel ? cSelected() : (hov ? cHovered() : cPanel());
-            ctx.fill(cx,cy,cx+CELL,cy+CELL, bg);
-
-            // Border
-            int bdr = sel ? cSelBdr() : (hov ? cBorderHi() : cBorder());
-            ctx.drawBorder(cx,cy,CELL,CELL,bdr);
-
-            // Texture or colored placeholder
-            int pad=4, tw=CELL-pad*2-12;
-            if (data.texture != null && data.texture.length > 0) {
-                TextureCache.TexInfo tex = TextureCache.getOrLoad(data.customId, data.texture);
-                ctx.drawTexture(tex.id(), cx+pad, cy+pad, 0f, 0f, tw, tw, tex.width(), tex.height());
-            } else {
-                // Placeholder: colored tile + first letter
-                int tileColor = stringToColor(data.customId);
-                ctx.fill(cx+pad, cy+pad, cx+pad+tw, cy+pad+tw, tileColor);
-                String ltr = data.displayName.isEmpty() ? "?" : String.valueOf(data.displayName.charAt(0)).toUpperCase();
-                ctx.drawCenteredTextWithShadow(textRenderer, ltr, cx+pad+tw/2, cy+pad+tw/2-4, 0xFFFFFFFF);
-            }
-
-            // Badges
-            if (data.lightLevel > 0) {
-                ctx.fill(cx+CELL-15,cy,cx+CELL,cy+11, 0xDD_FFC800);
-                ctx.drawTextWithShadow(textRenderer, String.valueOf(data.lightLevel), cx+CELL-13, cy+2, 0xFF_000000);
-            }
-            if (data.hardness < 0) {
-                ctx.fill(cx,cy,cx+11,cy+11, 0xDD_FF3333);
-                ctx.drawTextWithShadow(textRenderer, "U", cx+2, cy+2, 0xFF_FFFFFF);
-            }
-
-            // Name label
-            String lbl = data.displayName.length()>8 ? data.displayName.substring(0,7)+"." : data.displayName;
-            ctx.drawCenteredTextWithShadow(textRenderer, lbl, cx+CELL/2, cy+CELL-10, sel?C_GREEN:cText());
-
-            // Sound dot (bottom-left)
-            int soundColor = switch(data.soundType) {
-                case "wood"  -> 0xFF_AA7733;
-                case "metal" -> 0xFF_AABBCC;
-                case "glass" -> 0xFF_88EEFF;
-                case "grass" -> 0xFF_55CC55;
-                case "sand"  -> 0xFF_DDCC88;
-                case "wool"  -> 0xFF_FF88BB;
-                default      -> 0xFF_888899;
-            };
-            ctx.fill(cx+2,cy+CELL-5,cx+6,cy+CELL-1, soundColor);
-        }
-
-        ctx.disableScissor();
-
-        if (filtered.isEmpty()) {
-            ctx.drawCenteredTextWithShadow(textRenderer,
-                search.isEmpty() ? "No blocks yet — press New Block!" : "No match for \""+search+"\"",
-                gx+gridW()/2, py+52+60, cGrey());
-        }
+    
+    private int cPanel2() {
+        return this.darkTheme ? -15856102 : -4144936;
     }
-
-    private void drawRightPanel(DrawContext ctx, int mx, int my) {
-        int rx = px+PAD+gridW()+PAD+2;
-        int ry = py+PAD;
-        int rw = RIGHT_W-PAD-4;
-
-        SlotManager.SlotData data = selectedId!=null ? SlotManager.getById(selectedId) : null;
-
-        // Header
-        ctx.fill(rx-2, ry, rx+rw+2, ry+14, darkTheme?0xFF_0E0E28:0xFF_B0B0D8);
-        ctx.drawCenteredTextWithShadow(textRenderer, data!=null ? data.displayName : "No Selection", rx+rw/2, ry+3, C_GOLD);
-
-        if (data == null) {
-            ctx.drawCenteredTextWithShadow(textRenderer, "select a block from the grid", rx+rw/2, ry+30, cDim());
+    
+    private int cBorder() {
+        return this.darkTheme ? -14540232 : -8355680;
+    }
+    
+    private int cBorderHi() {
+        return this.darkTheme ? -11184658 : -14527028;
+    }
+    
+    private int cSelected() {
+        return this.darkTheme ? -15851504 : -5177424;
+    }
+    
+    private int cSelBdr() {
+        return this.darkTheme ? -12255420 : -16742400;
+    }
+    
+    private int cHovered() {
+        return this.darkTheme ? -15066570 : -2565889;
+    }
+    
+    private int cText() {
+        return this.darkTheme ? -1 : -15658735;
+    }
+    
+    private int cGrey() {
+        return this.darkTheme ? -5592406 : -12303258;
+    }
+    
+    private int cDim() {
+        return this.darkTheme ? -11184777 : -7829351;
+    }
+    
+    private int gridW() {
+        return this.cols * 73 - 5;
+    }
+    
+    public CustomBlocksScreen() {
+        super((class_2561)class_2561.method_43470("Custom Blocks"));
+        this.cols = 5;
+        this.darkTheme = true;
+        this.selectedId = null;
+        this.scroll = 0;
+        this.search = "";
+        this.sortMode = 0;
+        this.sortAsc = true;
+        this.filtered = new ArrayList<SlotManager.SlotData>();
+        this.bulkDeleteMode = false;
+        this.bulkSelected = new ArrayList<String>();
+        this.statusMsg = "";
+        this.statusColor = -12255420;
+        this.statusUntil = 0L;
+        this.activePanel = Panel.NONE;
+        this.showGivePlayerPanel = false;
+        this.fldUrlLines = new class_342[5];
+    }
+    
+    protected void method_25426() {
+        this.activePanel = Panel.NONE;
+        this.showGivePlayerPanel = false;
+        this.bulkDeleteMode = false;
+        this.bulkSelected.clear();
+        this.pw = this.gridW() + 230 + 30;
+        this.ph = Math.min(this.field_22790 - 16, 520);
+        this.px = (this.field_22789 - this.pw) / 2;
+        this.py = (this.field_22790 - this.ph) / 2;
+        this.rebuildFiltered();
+        (this.fldSearch = new class_342(this.field_22793, this.px + 10, this.py + 10 + 14, this.gridW() - 2, 16, (class_2561)class_2561.method_43470(""))).method_47404((class_2561)class_2561.method_43470("Search blocks..."));
+        this.fldSearch.method_1863(s -> {
+            this.search = s;
+            this.scroll = 0;
+            this.rebuildFiltered();
             return;
+        });
+        this.method_37063((class_364)this.fldSearch);
+        final int sy = this.py + 10 + 32;
+        final int sbase = this.px + 10;
+        final int sw = (this.gridW() - 2 - 9 - 22 - 22 - 3) / 4;
+        this.btnSortName = this.mkBtn(sbase, sy, sw, "Name", b -> this.setSort(0));
+        this.btnSortSlot = this.mkBtn(sbase + sw + 3, sy, sw, "Slot", b -> this.setSort(1));
+        this.btnSortGlow = this.mkBtn(sbase + (sw + 3) * 2, sy, sw, "Glow", b -> this.setSort(2));
+        this.btnSortSound = this.mkBtn(sbase + (sw + 3) * 3, sy, sw, "Sound", b -> this.setSort(3));
+        this.btnSortDir = this.mkBtn(sbase + (sw + 3) * 4 + 1, sy, 18, "^", b -> {
+            this.sortAsc = !this.sortAsc;
+            this.rebuildFiltered();
+        });
+        this.btnColsM = this.mkBtn(sbase + (sw + 3) * 4 + 22, sy, 18, "-", b -> {
+            if (this.cols > 3) {
+                --this.cols;
+                this.reinit();
+            }
+        });
+        this.btnColsP = this.mkBtn(sbase + (sw + 3) * 4 + 43, sy, 18, "+", b -> {
+            if (this.cols < 8) {
+                ++this.cols;
+                this.reinit();
+            }
+        });
+        for (final class_4185 b : new class_4185[] { this.btnSortName, this.btnSortSlot, this.btnSortGlow, this.btnSortSound, this.btnSortDir, this.btnColsM, this.btnColsP }) {
+            this.method_37063((class_364)b);
         }
-
-        // 3D item preview (uses baked model — shows actual in-game look)
-        int pvX = rx + (rw-80)/2;
-        int pvY = ry+18;
-        ctx.fill(pvX-3,pvY-3,pvX+83,pvY+83, cBorder());
-        ctx.fill(pvX-2,pvY-2,pvX+82,pvY+82, cPanel2());
-        // Scale up 5x the 16x16 item render for a big crisp preview
-        ctx.getMatrices().push();
-        float scale = 5.0f;
-        ctx.getMatrices().scale(scale, scale, 1f);
-        ItemStack stack = new ItemStack(CustomBlocksMod.SLOT_ITEMS[data.index]);
-        ctx.drawItem(stack, (int)((pvX)/scale), (int)((pvY)/scale));
-        ctx.getMatrices().pop();
-
-        // Info rows
-        int iy = pvY+86;
-        ctx.drawTextWithShadow(textRenderer, "ID: ", rx, iy, cDim());
-        ctx.drawTextWithShadow(textRenderer, data.customId, rx+18, iy, cGrey());
-
-        ctx.drawTextWithShadow(textRenderer, "Slot: " + data.index, rx, iy+11, cDim());
-
-        // Properties bar
-        int tagY = iy+24;
-        ctx.fill(rx,tagY,rx+rw,tagY+30, darkTheme?0x33_FFFFFF:0x33_000000);
-
-        String glowStr = data.lightLevel>0 ? "Glow "+data.lightLevel : "No glow";
-        ctx.drawTextWithShadow(textRenderer, glowStr, rx+3, tagY+2, data.lightLevel>0?C_GLOW:cDim());
-
-        String hardStr = data.hardness<0 ? "Unbreakable"
-                       : data.hardness==0 ? "Instant"
-                       : data.hardness<=0.5f ? "Soft"
-                       : data.hardness<=2.5f ? "Normal" : "Hard";
-        ctx.drawTextWithShadow(textRenderer, hardStr, rx+3, tagY+13, C_BLUE);
-        ctx.drawTextWithShadow(textRenderer, cap(data.soundType), rx+rw-40, tagY+13, C_ORANGE);
-
-        // Give-to-player panel
-        if (showGivePlayerPanel) {
-            int gpy2 = iy + 56;
-            ctx.fill(rx-2, gpy2-2, rx+rw+2, gpy2+40, darkTheme?0xEE_0D1A0D:0xEE_C0D8C0);
-            ctx.drawBorder(rx-2, gpy2-2, rw+4, 42, C_GREEN);
-            ctx.drawTextWithShadow(textRenderer, "Player:", rx, gpy2, cGrey());
+        final int bx = this.px + 10 + this.gridW() + 10;
+        final int by = this.py + 10 + 14;
+        final int bw = 220;
+        final int half = bw / 2 - 2;
+        this.btnTheme = this.mkBtn(bx, by, bw, this.darkTheme ? "Light Mode" : "Dark Mode", b -> {
+            this.darkTheme = !this.darkTheme;
+            this.reinit();
+        });
+        this.btnCreate = this.mkBtn(bx, by + 26, bw, "New Block", b -> this.openPanel(Panel.CREATE));
+        this.btnGive1 = this.mkBtn(bx, by + 52, half, "Give x1", b -> this.doGive(1, null));
+        this.btnGive64 = this.mkBtn(bx + half + 4, by + 52, half, "Give x64", b -> this.doGive(64, null));
+        this.btnGivePlayer = this.mkBtn(bx, by + 78, bw, "Give to Player", b -> this.toggleGivePlayerPanel());
+        this.btnRename = this.mkBtn(bx, by + 104, bw, "Rename", b -> this.openPanel(Panel.RENAME));
+        this.btnRetexture = this.mkBtn(bx, by + 130, bw, "Change Texture", b -> this.openPanel(Panel.RETEXTURE));
+        this.btnProperties = this.mkBtn(bx, by + 156, bw, "Properties", b -> this.openPanel(Panel.PROPERTIES));
+        this.btnCopyId = this.mkBtn(bx, by + 182, bw, "Copy ID", b -> this.doCopyId());
+        this.btnUrlList = this.mkBtn(bx, by + 208, half, "URL Import", b -> this.openPanel(Panel.URL_LIST));
+        this.btnExport = this.mkBtn(bx + half + 4, by + 208, half, "Export", b -> this.doExport());
+        this.btnBulkDelete = this.mkBtn(bx, by + 234, half, "Bulk Delete", b -> this.toggleBulkDelete());
+        this.btnReload = this.mkBtn(bx + half + 4, by + 234, half, "Reload Tex", b -> this.doReloadTex());
+        this.btnDelete = this.mkBtn(bx, by + 260, bw, "Delete Block", b -> this.doDelete());
+        for (final class_4185 b2 : new class_4185[] { this.btnTheme, this.btnCreate, this.btnGive1, this.btnGive64, this.btnGivePlayer, this.btnRename, this.btnRetexture, this.btnProperties, this.btnCopyId, this.btnUrlList, this.btnExport, this.btnBulkDelete, this.btnReload, this.btnDelete }) {
+            this.method_37063((class_364)b2);
         }
-
-        // Properties overlay
-        if (activePanel==Panel.PROPERTIES) {
-            int bx = rx-2;
-            int propY = py+PAD+14 + 300;
-            ctx.fill(bx, propY-18, bx+rw+4, propY+110, darkTheme?0xEE_0D0D22:0xEE_CCCCEE);
-            ctx.drawBorder(bx, propY-18, rw+4, 128, cBorderHi());
-            ctx.drawCenteredTextWithShadow(textRenderer, "Properties", rx+rw/2, propY-14, 0xFF_AADDFF);
-            ctx.drawTextWithShadow(textRenderer, "Glow: "+data.lightLevel+" / 15", rx, propY+2, C_GLOW);
-            ctx.drawTextWithShadow(textRenderer, "Hardness:", rx, propY+30, C_BLUE);
-            ctx.drawTextWithShadow(textRenderer, "Sound:", rx, propY+56, C_ORANGE);
+        this.updateButtonStates();
+        this.fldGivePlayer = this.mkField(bx, by + 80, bw, "Player name");
+        this.btnGivePlayerOk = this.mkBtn(bx, by + 98, half, "Give", b -> this.doGiveToPlayer());
+        this.btnGivePlayerCancel = this.mkBtn(bx + half + 4, by + 98, half, "Cancel", b -> this.hideGivePlayerPanel());
+        final int spY = this.py + this.ph - 118;
+        this.fldCreateId = this.mkField(this.px + 10, spY, this.gridW() - 2, "id \u2014 letters/numbers/underscores only");
+        this.fldCreateName = this.mkField(this.px + 10, spY + 22, this.gridW() - 2, "Display Name");
+        (this.fldCreateUrl = this.mkField(this.px + 10, spY + 44, this.gridW() - 2, "https://image-url.png")).method_1880(512);
+        this.btnCreateOk = this.mkBtn(this.px + 10, spY + 66, 80, "Create", b -> this.doCreate());
+        this.btnCreateCancel = this.mkBtn(this.px + 10 + 84, spY + 66, 70, "Cancel", b -> this.closePanel());
+        this.fldRenameNew = this.mkField(this.px + 10, spY + 22, this.gridW() - 2, "New display name");
+        this.btnRenameOk = this.mkBtn(this.px + 10, spY + 44, 80, "Rename", b -> this.doRename());
+        this.btnRenameCancel = this.mkBtn(this.px + 10 + 84, spY + 44, 70, "Cancel", b -> this.closePanel());
+        (this.fldRetextureUrl = this.mkField(this.px + 10, spY + 22, this.gridW() - 2, "https://new-image.png")).method_1880(512);
+        this.btnRetextureOk = this.mkBtn(this.px + 10, spY + 44, 80, "Apply", b -> this.doRetexture());
+        this.btnRetextureCancel = this.mkBtn(this.px + 10 + 84, spY + 44, 70, "Cancel", b -> this.closePanel());
+        final int ulY = spY - 10;
+        for (int i = 0; i < 5; ++i) {
+            (this.fldUrlLines[i] = this.mkField(this.px + 10, ulY + i * 20, this.gridW() - 2, "id name https://url.png  (line " + (i + 1))).method_1880(512);
         }
+        this.btnUrlOk = this.mkBtn(this.px + 10, ulY + 102, 80, "Import", b -> this.doUrlListImport());
+        this.btnUrlCancel = this.mkBtn(this.px + 10 + 84, ulY + 102, 70, "Cancel", b -> this.closePanel());
+        final int propY = by + 300;
+        this.btnGlowM = this.mkBtn(bx, propY + 18, 20, "-", b -> this.adjustGlow(-1));
+        this.btnGlowP = this.mkBtn(bx + 140, propY + 18, 20, "+", b -> this.adjustGlow(1));
+        final int hw = (bw - 8) / 5;
+        this.btnH0 = this.mkBtn(bx, propY + 44, hw, "0", b -> this.setHard(0.0f));
+        this.btnHSoft = this.mkBtn(bx + (hw + 2), propY + 44, hw, "Soft", b -> this.setHard(0.5f));
+        this.btnHNorm = this.mkBtn(bx + (hw + 2) * 2, propY + 44, hw, "Norm", b -> this.setHard(1.5f));
+        this.btnHHard = this.mkBtn(bx + (hw + 2) * 3, propY + 44, hw, "Hard", b -> this.setHard(5.0f));
+        this.btnHMax = this.mkBtn(bx + (hw + 2) * 4, propY + 44, hw, "MAX", b -> this.setHard(-1.0f));
+        final int sw2 = (bw - 12) / 7;
+        this.btnSStone = this.mkBtn(bx, propY + 70, sw2, "Stn", b -> this.setSound("stone"));
+        this.btnSWood = this.mkBtn(bx + (sw2 + 2), propY + 70, sw2, "Wd", b -> this.setSound("wood"));
+        this.btnSMetal = this.mkBtn(bx + (sw2 + 2) * 2, propY + 70, sw2, "Mtl", b -> this.setSound("metal"));
+        this.btnSGlass = this.mkBtn(bx + (sw2 + 2) * 3, propY + 70, sw2, "Gls", b -> this.setSound("glass"));
+        this.btnSGrass = this.mkBtn(bx + (sw2 + 2) * 4, propY + 70, sw2, "Grs", b -> this.setSound("grass"));
+        this.btnSSand = this.mkBtn(bx + (sw2 + 2) * 5, propY + 70, sw2, "Snd", b -> this.setSound("sand"));
+        this.btnSWool = this.mkBtn(bx + (sw2 + 2) * 6, propY + 70, sw2, "Wl", b -> this.setSound("wool"));
+        this.btnPropClose = this.mkBtn(bx, propY + 96, bw, "Done", b -> this.closePanel());
     }
-
-    private void drawActivePanel(DrawContext ctx) {
-        if (activePanel==Panel.NONE||activePanel==Panel.PROPERTIES) return;
-        int spY = py+ph-118;
-        int spW = gridW()+2;
-        int bdrColor = 0;
-        String title = "";
-        switch (activePanel) {
-            case CREATE -> { bdrColor=cBorderHi(); title="Create New Block"; }
-            case RENAME -> { bdrColor=0xFF_44AA44; title="Rename: "+selectedId; }
-            case RETEXTURE -> { bdrColor=C_ORANGE; title="Change Texture: "+selectedId; }
-            case URL_LIST -> { bdrColor=0xFF_AA44AA; title="URL List Import  (format: id name https://url.png)"; spY=py+ph-130; }
-            default -> { return; }
-        }
-        int top = activePanel==Panel.URL_LIST ? spY-12 : spY-16;
-        ctx.fill(px+PAD-2, top, px+PAD+spW, py+ph-4, darkTheme?0xEE_0D0D1E:0xEE_DDDDFF);
-        ctx.fill(px+PAD-2, top, px+PAD+spW, top+1, bdrColor);
-        ctx.fill(px+PAD-2, py+ph-5, px+PAD+spW, py+ph-4, bdrColor);
-        ctx.drawTextWithShadow(textRenderer, title, px+PAD, top+3, bdrColor);
-        if (activePanel==Panel.CREATE) {
-            ctx.drawTextWithShadow(textRenderer, "ID:",    px+PAD, spY-2,  cGrey());
-            ctx.drawTextWithShadow(textRenderer, "Name:",  px+PAD, spY+20, cGrey());
-            ctx.drawTextWithShadow(textRenderer, "URL:",   px+PAD, spY+42, cGrey());
-        }
-        if (activePanel==Panel.RENAME)    ctx.drawTextWithShadow(textRenderer, "New name:", px+PAD, spY+20, cGrey());
-        if (activePanel==Panel.RETEXTURE) ctx.drawTextWithShadow(textRenderer, "Image URL:", px+PAD, spY+20, cGrey());
-        if (activePanel==Panel.URL_LIST) {
-            for (int i=0;i<5;i++)
-                ctx.drawTextWithShadow(textRenderer, (i+1)+":", px+PAD, spY+i*20-2, cDim());
-        }
+    
+    private void reinit() {
+        this.method_25410(this.field_22787, this.field_22789, this.field_22790);
     }
-
-    // ── Input ─────────────────────────────────────────────────────────────────
-    @Override
-    public boolean mouseClicked(double mx, double my, int btn) {
-        int gx=px+PAD, gy=py+52, gh=py+ph-20;
-        if (activePanel==Panel.NONE||activePanel==Panel.PROPERTIES) {
-            if (mx>=gx&&mx<gx+gridW()&&my>=gy&&my<gh) {
-                int col=((int)mx-gx)/(CELL+GAP);
-                int row=((int)my-gy+scroll)/(CELL+GAP);
-                int idx=row*cols+col;
-                if (col<cols&&idx>=0&&idx<filtered.size()) {
-                    String id=filtered.get(idx).customId;
-                    if (bulkDeleteMode) {
-                        if (bulkSelected.contains(id)) bulkSelected.remove(id);
-                        else bulkSelected.add(id);
-                    } else {
-                        selectedId=id;
-                        if (activePanel==Panel.PROPERTIES) closePanel();
-                        updateButtonStates();
+    
+    public void method_25394(final class_332 ctx, final int mx, final int my, final float delta) {
+        this.method_25420(ctx, mx, my, delta);
+        ctx.method_25294(this.px - 3, this.py - 3, this.px + this.pw + 3, this.py + this.ph + 3, 861230591);
+        ctx.method_25294(this.px - 1, this.py - 1, this.px + this.pw + 1, this.py + this.ph + 1, this.cBorderHi());
+        ctx.method_25294(this.px, this.py, this.px + this.pw, this.py + this.ph, this.cBg());
+        ctx.method_25296(this.px, this.py, this.px + this.pw, this.py + 16, this.darkTheme ? -15066560 : -12566358, this.cBg());
+        ctx.method_25300(this.field_22793, "Custom Blocks", this.px + this.pw / 2, this.py + 4, -10496);
+        ctx.method_25294(this.px + 10 + this.gridW() + 10 - 1, this.py + 16, this.px + 10 + this.gridW() + 10, this.py + this.ph - 4, this.cBorder());
+        ctx.method_25303(this.field_22793, "Blocks  (" + this.filtered.size() + " shown)", this.px + 10, this.py + 10 + 3, this.cGrey());
+        ctx.method_25303(this.field_22793, "Sort: " + (new String[] { "Name", "Slot", "Glow", "Sound" })[this.sortMode] + (this.sortAsc ? " ^" : " v"), this.px + 10 + this.gridW() - 55, this.py + 10 + 3, this.cDim());
+        final int used = SlotManager.usedSlots();
+        final int max = 512;
+        final float pct = used / (float)max;
+        final int barX = this.px + 10;
+        final int barY = this.py + this.ph - 8;
+        final int barW = this.gridW() - 2;
+        ctx.method_25294(barX, barY, barX + barW, barY + 4, this.darkTheme ? -15066578 : -5592372);
+        final int fillClr = (pct < 0.6f) ? -12272828 : ((pct < 0.9f) ? -13312 : -48060);
+        ctx.method_25294(barX, barY, barX + (int)(barW * pct), barY + 4, fillClr);
+        ctx.method_25303(this.field_22793, used + "/" + max + " slots", barX, barY - 9, this.cDim());
+        if (this.bulkDeleteMode) {
+            ctx.method_25294(this.px, this.py + this.ph - 20, this.px + this.pw, this.py + this.ph, -866844672);
+            ctx.method_25300(this.field_22793, "BULK DELETE MODE \u2014 click blocks to select (" + this.bulkSelected.size() + " selected) \u2014 press DELETE to confirm, ESC to cancel", this.px + this.pw / 2, this.py + this.ph - 16, -48060);
+        }
+        this.drawGrid(ctx, mx, my);
+        this.drawRightPanel(ctx, mx, my);
+        if (System.currentTimeMillis() < this.statusUntil) {
+            ctx.method_25300(this.field_22793, this.statusMsg, this.px + this.pw / 2, this.py + this.ph + 6, this.statusColor);
+        }
+        this.drawActivePanel(ctx);
+        super.method_25394(ctx, mx, my, delta);
+    }
+    
+    private void drawGrid(final class_332 ctx, final int mx, final int my) {
+        final int gx = this.px + 10;
+        final int gy = this.py + 52;
+        final int gh = this.py + this.ph - 20;
+        ctx.method_44379(gx, gy, gx + this.gridW(), gh);
+        for (int i = 0; i < this.filtered.size(); ++i) {
+            final int col = i % this.cols;
+            final int row = i / this.cols;
+            final int cx = gx + col * 73;
+            final int cy = gy + row * 73 - this.scroll;
+            if (cy + 68 >= gy) {
+                if (cy <= gh) {
+                    final SlotManager.SlotData data = this.filtered.get(i);
+                    final boolean sel = this.bulkDeleteMode ? this.bulkSelected.contains(data.customId) : data.customId.equals(this.selectedId);
+                    final boolean hov = mx >= cx && mx < cx + 68 && my >= cy && my < cy + 68;
+                    final int bg = sel ? this.cSelected() : (hov ? this.cHovered() : this.cPanel());
+                    ctx.method_25294(cx, cy, cx + 68, cy + 68, bg);
+                    final int bdr = sel ? this.cSelBdr() : (hov ? this.cBorderHi() : this.cBorder());
+                    ctx.method_49601(cx, cy, 68, 68, bdr);
+                    final int pad = 4;
+                    final int tw = 68 - pad * 2 - 12;
+                    if (data.texture != null && data.texture.length > 0) {
+                        final TextureCache.TexInfo tex = TextureCache.getOrLoad(data.customId, data.texture);
+                        ctx.method_25290(tex.id(), cx + pad, cy + pad, 0.0f, 0.0f, tw, tw, tex.width(), tex.height());
                     }
-                    return true;
+                    else {
+                        final int tileColor = stringToColor(data.customId);
+                        ctx.method_25294(cx + pad, cy + pad, cx + pad + tw, cy + pad + tw, tileColor);
+                        final String ltr = data.displayName.isEmpty() ? "?" : String.valueOf(data.displayName.charAt(0)).toUpperCase();
+                        ctx.method_25300(this.field_22793, ltr, cx + pad + tw / 2, cy + pad + tw / 2 - 4, -1);
+                    }
+                    if (data.lightLevel > 0) {
+                        ctx.method_25294(cx + 68 - 15, cy, cx + 68, cy + 11, -570439680);
+                        ctx.method_25303(this.field_22793, String.valueOf(data.lightLevel), cx + 68 - 13, cy + 2, -16777216);
+                    }
+                    if (data.hardness < 0.0f) {
+                        ctx.method_25294(cx, cy, cx + 11, cy + 11, -570477773);
+                        ctx.method_25303(this.field_22793, "U", cx + 2, cy + 2, -1);
+                    }
+                    final String lbl = (data.displayName.length() > 8) ? data.displayName.substring(0, 7) : data.displayName;
+                    ctx.method_25300(this.field_22793, lbl, cx + 34, cy + 68 - 10, sel ? -12255420 : this.cText());
+                    final String soundType = data.soundType;
+                    final int soundColor = switch (soundType) {
+                        case "wood" -> -5605581;
+                        case "metal" -> -5588020;
+                        case "glass" -> -7803137;
+                        case "grass" -> -11154347;
+                        case "sand" -> -2241400;
+                        case "wool" -> -30533;
+                        default -> -7829351;
+                    };
+                    ctx.method_25294(cx + 2, cy + 68 - 5, cx + 6, cy + 68 - 1, soundColor);
                 }
             }
         }
-        return super.mouseClicked(mx, my, btn);
+        ctx.method_44380();
+        if (this.filtered.isEmpty()) {
+            ctx.method_25300(this.field_22793, this.search.isEmpty() ? "No blocks yet \u2014 press New Block!" : ("No match for \"" + this.search), gx + this.gridW() / 2, this.py + 52 + 60, this.cGrey());
+        }
     }
-
-    @Override
-    public boolean mouseScrolled(double mx, double my, double hx, double vy) {
-        int rows=(int)Math.ceil(filtered.size()/(double)cols);
-        int gy=py+52, gh=py+ph-20;
-        int vis=(gh-gy)/(CELL+GAP);
-        scroll=(int)Math.max(0,Math.min(Math.max(0,rows-vis)*(CELL+GAP), scroll-vy*(CELL+GAP)));
+    
+    private void drawRightPanel(final class_332 ctx, final int mx, final int my) {
+        final int rx = this.px + 10 + this.gridW() + 10 + 2;
+        final int ry = this.py + 10;
+        final int rw = 216;
+        final SlotManager.SlotData data = (this.selectedId != null) ? SlotManager.getById(this.selectedId) : null;
+        ctx.method_25294(rx - 2, ry, rx + rw + 2, ry + 14, this.darkTheme ? -15856088 : -5197608);
+        ctx.method_25300(this.field_22793, (data != null) ? data.displayName : "No Selection", rx + rw / 2, ry + 3, -10496);
+        if (data == null) {
+            ctx.method_25300(this.field_22793, "select a block from the grid", rx + rw / 2, ry + 30, this.cDim());
+            return;
+        }
+        final int pvX = rx + (rw - 80) / 2;
+        final int pvY = ry + 18;
+        ctx.method_25294(pvX - 3, pvY - 3, pvX + 83, pvY + 83, this.cBorder());
+        ctx.method_25294(pvX - 2, pvY - 2, pvX + 82, pvY + 82, this.cPanel2());
+        ctx.method_51448().method_22903();
+        final float scale = 5.0f;
+        ctx.method_51448().method_22905(scale, scale, 1.0f);
+        final class_1799 stack = new class_1799((class_1935)CustomBlocksMod.SLOT_ITEMS[data.index]);
+        ctx.method_51427(stack, (int)(pvX / scale), (int)(pvY / scale));
+        ctx.method_51448().method_22909();
+        final int iy = pvY + 86;
+        ctx.method_25303(this.field_22793, "ID: ", rx, iy, this.cDim());
+        ctx.method_25303(this.field_22793, data.customId, rx + 18, iy, this.cGrey());
+        ctx.method_25303(this.field_22793, "Slot: " + data.index, rx, iy + 11, this.cDim());
+        final int tagY = iy + 24;
+        ctx.method_25294(rx, tagY, rx + rw, tagY + 30, this.darkTheme ? 872415231 : 855638016);
+        final String glowStr = (data.lightLevel > 0) ? ("Glow " + data.lightLevel) : "No glow";
+        ctx.method_25303(this.field_22793, glowStr, rx + 3, tagY + 2, (data.lightLevel > 0) ? -6080 : this.cDim());
+        final String hardStr = (data.hardness < 0.0f) ? "Unbreakable" : ((data.hardness == 0.0f) ? "Instant" : ((data.hardness <= 0.5f) ? "Soft" : ((data.hardness <= 2.5f) ? "Normal" : "Hard")));
+        ctx.method_25303(this.field_22793, hardStr, rx + 3, tagY + 13, -10048769);
+        ctx.method_25303(this.field_22793, cap(data.soundType), rx + rw - 40, tagY + 13, -26368);
+        if (this.showGivePlayerPanel) {
+            final int gpy2 = iy + 56;
+            ctx.method_25294(rx - 2, gpy2 - 2, rx + rw + 2, gpy2 + 40, this.darkTheme ? -301131251 : -289351488);
+            ctx.method_49601(rx - 2, gpy2 - 2, rw + 4, 42, -12255420);
+            ctx.method_25303(this.field_22793, "Player:", rx, gpy2, this.cGrey());
+        }
+        if (this.activePanel == Panel.PROPERTIES) {
+            final int bx = rx - 2;
+            final int propY = this.py + 10 + 14 + 300;
+            ctx.method_25294(bx, propY - 18, bx + rw + 4, propY + 110, this.darkTheme ? -301134558 : -288568082);
+            ctx.method_49601(bx, propY - 18, rw + 4, 128, this.cBorderHi());
+            ctx.method_25300(this.field_22793, "Properties", rx + rw / 2, propY - 14, -5579265);
+            ctx.method_25303(this.field_22793, "Glow: " + data.lightLevel + " / 15", rx, propY + 2, -6080);
+            ctx.method_25303(this.field_22793, "Hardness:", rx, propY + 30, -10048769);
+            ctx.method_25303(this.field_22793, "Sound:", rx, propY + 56, -26368);
+        }
+    }
+    
+    private void drawActivePanel(final class_332 ctx) {
+        if (this.activePanel == Panel.NONE || this.activePanel == Panel.PROPERTIES) {
+            return;
+        }
+        int spY = this.py + this.ph - 118;
+        final int spW = this.gridW() + 2;
+        int bdrColor = 0;
+        String title = "";
+        switch (this.activePanel.ordinal()) {
+            case 1: {
+                bdrColor = this.cBorderHi();
+                title = "Create New Block";
+                break;
+            }
+            case 2: {
+                bdrColor = -12277180;
+                title = "Rename: " + this.selectedId;
+                break;
+            }
+            case 3: {
+                bdrColor = -26368;
+                title = "Change Texture: " + this.selectedId;
+                break;
+            }
+            case 5: {
+                bdrColor = -5618518;
+                title = "URL List Import  (format: id name https://url.png)";
+                spY = this.py + this.ph - 130;
+                break;
+            }
+            default: {
+                return;
+            }
+        }
+        final int top = (this.activePanel == Panel.URL_LIST) ? (spY - 12) : (spY - 16);
+        ctx.method_25294(this.px + 10 - 2, top, this.px + 10 + spW, this.py + this.ph - 4, this.darkTheme ? -301134562 : -287449601);
+        ctx.method_25294(this.px + 10 - 2, top, this.px + 10 + spW, top + 1, bdrColor);
+        ctx.method_25294(this.px + 10 - 2, this.py + this.ph - 5, this.px + 10 + spW, this.py + this.ph - 4, bdrColor);
+        ctx.method_25303(this.field_22793, title, this.px + 10, top + 3, bdrColor);
+        if (this.activePanel == Panel.CREATE) {
+            ctx.method_25303(this.field_22793, "ID:", this.px + 10, spY - 2, this.cGrey());
+            ctx.method_25303(this.field_22793, "Name:", this.px + 10, spY + 20, this.cGrey());
+            ctx.method_25303(this.field_22793, "URL:", this.px + 10, spY + 42, this.cGrey());
+        }
+        if (this.activePanel == Panel.RENAME) {
+            ctx.method_25303(this.field_22793, "New name:", this.px + 10, spY + 20, this.cGrey());
+        }
+        if (this.activePanel == Panel.RETEXTURE) {
+            ctx.method_25303(this.field_22793, "Image URL:", this.px + 10, spY + 20, this.cGrey());
+        }
+        if (this.activePanel == Panel.URL_LIST) {
+            for (int i = 0; i < 5; ++i) {
+                ctx.method_25303(this.field_22793, "" + (i + 1), this.px + 10, spY + i * 20 - 2, this.cDim());
+            }
+        }
+    }
+    
+    public boolean method_25402(final double mx, final double my, final int btn) {
+        final int gx = this.px + 10;
+        final int gy = this.py + 52;
+        final int gh = this.py + this.ph - 20;
+        if ((this.activePanel == Panel.NONE || this.activePanel == Panel.PROPERTIES) && mx >= gx && mx < gx + this.gridW() && my >= gy && my < gh) {
+            final int col = ((int)mx - gx) / 73;
+            final int row = ((int)my - gy + this.scroll) / 73;
+            final int idx = row * this.cols + col;
+            if (col < this.cols && idx >= 0 && idx < this.filtered.size()) {
+                final String id = this.filtered.get(idx).customId;
+                if (this.bulkDeleteMode) {
+                    if (this.bulkSelected.contains(id)) {
+                        this.bulkSelected.remove(id);
+                    }
+                    else {
+                        this.bulkSelected.add(id);
+                    }
+                }
+                else {
+                    this.selectedId = id;
+                    if (this.activePanel == Panel.PROPERTIES) {
+                        this.closePanel();
+                    }
+                    this.updateButtonStates();
+                }
+                return true;
+            }
+        }
+        return super.method_25402(mx, my, btn);
+    }
+    
+    public boolean method_25401(final double mx, final double my, final double hx, final double vy) {
+        final int rows = (int)Math.ceil(this.filtered.size() / (double)this.cols);
+        final int gy = this.py + 52;
+        final int gh = this.py + this.ph - 20;
+        final int vis = (gh - gy) / 73;
+        this.scroll = (int)Math.max(0.0, Math.min(Math.max(0, rows - vis) * 73, this.scroll - vy * 73.0));
         return true;
     }
-
-    @Override
-    public boolean keyPressed(int key, int scan, int mods) {
-        // ESC
-        if (key==256) {
-            if (bulkDeleteMode) { bulkDeleteMode=false; bulkSelected.clear(); return true; }
-            if (showGivePlayerPanel) { hideGivePlayerPanel(); return true; }
-            if (activePanel!=Panel.NONE) { closePanel(); return true; }
-            close(); return true;
-        }
-        // DELETE key in bulk mode
-        if (key==261 && bulkDeleteMode && !bulkSelected.isEmpty()) {
-            doConfirmBulkDelete();
+    
+    public boolean method_25404(final int key, final int scan, final int mods) {
+        if (key == 256) {
+            if (this.bulkDeleteMode) {
+                this.bulkDeleteMode = false;
+                this.bulkSelected.clear();
+                return true;
+            }
+            if (this.showGivePlayerPanel) {
+                this.hideGivePlayerPanel();
+                return true;
+            }
+            if (this.activePanel != Panel.NONE) {
+                this.closePanel();
+                return true;
+            }
+            this.method_25419();
             return true;
         }
-        return super.keyPressed(key, scan, mods);
+        else {
+            if (key == 261 && this.bulkDeleteMode && !this.bulkSelected.isEmpty()) {
+                this.doConfirmBulkDelete();
+                return true;
+            }
+            return super.method_25404(key, scan, mods);
+        }
     }
-
-    // ── Panel management ──────────────────────────────────────────────────────
-    private void openPanel(Panel p) {
-        closePanel();
-        activePanel=p;
-        switch (p) {
-            case CREATE -> {
-                fldCreateId.setText(""); fldCreateName.setText(""); fldCreateUrl.setText("");
-                addDrawableChild(fldCreateId); addDrawableChild(fldCreateName);
-                addDrawableChild(fldCreateUrl); addDrawableChild(btnCreateOk); addDrawableChild(btnCreateCancel);
-                setFocused(fldCreateId);
+    
+    private void openPanel(final Panel p) {
+        this.closePanel();
+        this.activePanel = p;
+        switch (p.ordinal()) {
+            case 1: {
+                this.fldCreateId.method_1852("");
+                this.fldCreateName.method_1852("");
+                this.fldCreateUrl.method_1852("");
+                this.method_37063((class_364)this.fldCreateId);
+                this.method_37063((class_364)this.fldCreateName);
+                this.method_37063((class_364)this.fldCreateUrl);
+                this.method_37063((class_364)this.btnCreateOk);
+                this.method_37063((class_364)this.btnCreateCancel);
+                this.method_25395((class_364)this.fldCreateId);
+                break;
             }
-            case RENAME -> {
-                SlotManager.SlotData d=SlotManager.getById(selectedId);
-                fldRenameNew.setText(d!=null?d.displayName:"");
-                addDrawableChild(fldRenameNew); addDrawableChild(btnRenameOk); addDrawableChild(btnRenameCancel);
-                setFocused(fldRenameNew);
+            case 2: {
+                final SlotManager.SlotData d = SlotManager.getById(this.selectedId);
+                this.fldRenameNew.method_1852((d != null) ? d.displayName : "");
+                this.method_37063((class_364)this.fldRenameNew);
+                this.method_37063((class_364)this.btnRenameOk);
+                this.method_37063((class_364)this.btnRenameCancel);
+                this.method_25395((class_364)this.fldRenameNew);
+                break;
             }
-            case RETEXTURE -> {
-                fldRetextureUrl.setText("");
-                addDrawableChild(fldRetextureUrl); addDrawableChild(btnRetextureOk); addDrawableChild(btnRetextureCancel);
-                setFocused(fldRetextureUrl);
+            case 3: {
+                this.fldRetextureUrl.method_1852("");
+                this.method_37063((class_364)this.fldRetextureUrl);
+                this.method_37063((class_364)this.btnRetextureOk);
+                this.method_37063((class_364)this.btnRetextureCancel);
+                this.method_25395((class_364)this.fldRetextureUrl);
+                break;
             }
-            case URL_LIST -> {
-                for (TextFieldWidget f : fldUrlLines) { f.setText(""); addDrawableChild(f); }
-                addDrawableChild(btnUrlOk); addDrawableChild(btnUrlCancel);
-                setFocused(fldUrlLines[0]);
+            case 5: {
+                for (final class_342 f : this.fldUrlLines) {
+                    f.method_1852("");
+                    this.method_37063((class_364)f);
+                }
+                this.method_37063((class_364)this.btnUrlOk);
+                this.method_37063((class_364)this.btnUrlCancel);
+                this.method_25395((class_364)this.fldUrlLines[0]);
+                break;
             }
-            case PROPERTIES -> {
-                for (ButtonWidget b : new ButtonWidget[]{btnGlowM,btnGlowP,btnH0,btnHSoft,btnHNorm,
-                        btnHHard,btnHMax,btnSStone,btnSWood,btnSMetal,btnSGlass,btnSGrass,
-                        btnSSand,btnSWool,btnPropClose})
-                    addDrawableChild(b);
+            case 4: {
+                for (final class_4185 b : new class_4185[] { this.btnGlowM, this.btnGlowP, this.btnH0, this.btnHSoft, this.btnHNorm, this.btnHHard, this.btnHMax, this.btnSStone, this.btnSWood, this.btnSMetal, this.btnSGlass, this.btnSGrass, this.btnSSand, this.btnSWool, this.btnPropClose }) {
+                    this.method_37063((class_364)b);
+                }
+                break;
             }
         }
     }
-
+    
     private void closePanel() {
-        activePanel=Panel.NONE;
-        remove(fldCreateId); remove(fldCreateName); remove(fldCreateUrl);
-        remove(btnCreateOk); remove(btnCreateCancel);
-        remove(fldRenameNew); remove(btnRenameOk); remove(btnRenameCancel);
-        remove(fldRetextureUrl); remove(btnRetextureOk); remove(btnRetextureCancel);
-        for (TextFieldWidget f : fldUrlLines) remove(f);
-        remove(btnUrlOk); remove(btnUrlCancel);
-        remove(btnGlowM); remove(btnGlowP);
-        remove(btnH0); remove(btnHSoft); remove(btnHNorm); remove(btnHHard); remove(btnHMax);
-        remove(btnSStone); remove(btnSWood); remove(btnSMetal); remove(btnSGlass);
-        remove(btnSGrass); remove(btnSSand); remove(btnSWool); remove(btnPropClose);
+        this.activePanel = Panel.NONE;
+        this.method_37066((class_364)this.fldCreateId);
+        this.method_37066((class_364)this.fldCreateName);
+        this.method_37066((class_364)this.fldCreateUrl);
+        this.method_37066((class_364)this.btnCreateOk);
+        this.method_37066((class_364)this.btnCreateCancel);
+        this.method_37066((class_364)this.fldRenameNew);
+        this.method_37066((class_364)this.btnRenameOk);
+        this.method_37066((class_364)this.btnRenameCancel);
+        this.method_37066((class_364)this.fldRetextureUrl);
+        this.method_37066((class_364)this.btnRetextureOk);
+        this.method_37066((class_364)this.btnRetextureCancel);
+        for (final class_342 f : this.fldUrlLines) {
+            this.method_37066((class_364)f);
+        }
+        this.method_37066((class_364)this.btnUrlOk);
+        this.method_37066((class_364)this.btnUrlCancel);
+        this.method_37066((class_364)this.btnGlowM);
+        this.method_37066((class_364)this.btnGlowP);
+        this.method_37066((class_364)this.btnH0);
+        this.method_37066((class_364)this.btnHSoft);
+        this.method_37066((class_364)this.btnHNorm);
+        this.method_37066((class_364)this.btnHHard);
+        this.method_37066((class_364)this.btnHMax);
+        this.method_37066((class_364)this.btnSStone);
+        this.method_37066((class_364)this.btnSWood);
+        this.method_37066((class_364)this.btnSMetal);
+        this.method_37066((class_364)this.btnSGlass);
+        this.method_37066((class_364)this.btnSGrass);
+        this.method_37066((class_364)this.btnSSand);
+        this.method_37066((class_364)this.btnSWool);
+        this.method_37066((class_364)this.btnPropClose);
     }
-
+    
     private void toggleGivePlayerPanel() {
-        if (selectedId==null) return;
-        showGivePlayerPanel=!showGivePlayerPanel;
-        if (showGivePlayerPanel) {
-            fldGivePlayer.setText("");
-            addDrawableChild(fldGivePlayer); addDrawableChild(btnGivePlayerOk); addDrawableChild(btnGivePlayerCancel);
-            setFocused(fldGivePlayer);
-        } else {
-            hideGivePlayerPanel();
+        if (this.selectedId == null) {
+            return;
+        }
+        this.showGivePlayerPanel = !this.showGivePlayerPanel;
+        if (this.showGivePlayerPanel) {
+            this.fldGivePlayer.method_1852("");
+            this.method_37063((class_364)this.fldGivePlayer);
+            this.method_37063((class_364)this.btnGivePlayerOk);
+            this.method_37063((class_364)this.btnGivePlayerCancel);
+            this.method_25395((class_364)this.fldGivePlayer);
+        }
+        else {
+            this.hideGivePlayerPanel();
         }
     }
-
+    
     private void hideGivePlayerPanel() {
-        showGivePlayerPanel=false;
-        remove(fldGivePlayer); remove(btnGivePlayerOk); remove(btnGivePlayerCancel);
+        this.showGivePlayerPanel = false;
+        this.method_37066((class_364)this.fldGivePlayer);
+        this.method_37066((class_364)this.btnGivePlayerOk);
+        this.method_37066((class_364)this.btnGivePlayerCancel);
     }
-
+    
     private void toggleBulkDelete() {
-        bulkDeleteMode=!bulkDeleteMode;
-        bulkSelected.clear();
-        btnBulkDelete.setMessage(Text.literal(bulkDeleteMode?"Cancel Bulk":"Bulk Delete"));
-        closePanel();
+        this.bulkDeleteMode = !this.bulkDeleteMode;
+        this.bulkSelected.clear();
+        this.btnBulkDelete.method_25355((class_2561)class_2561.method_43470(this.bulkDeleteMode ? "Cancel Bulk" : "Bulk Delete"));
+        this.closePanel();
     }
-
-    // ── Actions ───────────────────────────────────────────────────────────────
+    
     private void doCreate() {
-        String id=fldCreateId.getText().trim().toLowerCase().replaceAll("[^a-z0-9_]","_");
-        String name=fldCreateName.getText().trim();
-        String url=fldCreateUrl.getText().trim();
-        if (id.isEmpty())   { status("Enter an ID!",C_RED); return; }
-        if (name.isEmpty()) { status("Enter a name!",C_RED); return; }
-        if (url.isEmpty())  { status("Paste a URL!",C_RED); return; }
-        if (name.contains("_")) { status("Name cannot contain underscores — use spaces.",C_RED); return; }
-        if (SlotManager.hasId(id)) { status("'"+id+"' already exists!",C_RED); return; }
-        if (SlotManager.freeSlots()==0) { status("All "+SlotManager.MAX_SLOTS+" slots full!",C_RED); return; }
-        closePanel();
-        status("Downloading...",C_YELLOW);
-        // name uses _ as word separator in the command (server replaces _ back to spaces)
-        send("customblock createurl "+id+" "+name.replace(" ","_")+" "+url);
+        final String id = this.fldCreateId.method_1882().trim().toLowerCase().replaceAll("[^a-z0-9_]", "_");
+        final String name = this.fldCreateName.method_1882().trim();
+        final String url = this.fldCreateUrl.method_1882().trim();
+        if (id.isEmpty()) {
+            this.status("Enter an ID!", -48060);
+            return;
+        }
+        if (name.isEmpty()) {
+            this.status("Enter a name!", -48060);
+            return;
+        }
+        if (url.isEmpty()) {
+            this.status("Paste a URL!", -48060);
+            return;
+        }
+        if (name.contains("_")) {
+            this.status("Name cannot contain underscores \u2014 use spaces.", -48060);
+            return;
+        }
+        if (SlotManager.hasId(id)) {
+            this.status("'" + id + "' already exists!", -48060);
+            return;
+        }
+        if (SlotManager.freeSlots() == 0) {
+            this.status("All 512 slots full!", -48060);
+            return;
+        }
+        this.closePanel();
+        this.status("Downloading...", -13312);
+        this.send("customblock createurl " + id + " " + name.replace(" ", "_") + " " + url);
     }
-
+    
     private void doRename() {
-        if (selectedId==null) return;
-        String name=fldRenameNew.getText().trim();
-        if (name.isEmpty()) { status("Enter a name!",C_RED); return; }
-        if (name.contains("_")) { status("Name cannot contain underscores — use spaces.",C_RED); return; }
-        closePanel();
-        send("customblock rename "+selectedId+" "+name.replace(" ","_"));
-        status("Renamed!",C_GREEN);
-        rebuildFiltered();
+        if (this.selectedId == null) {
+            return;
+        }
+        final String name = this.fldRenameNew.method_1882().trim();
+        if (name.isEmpty()) {
+            this.status("Enter a name!", -48060);
+            return;
+        }
+        if (name.contains("_")) {
+            this.status("Name cannot contain underscores \u2014 use spaces.", -48060);
+            return;
+        }
+        this.closePanel();
+        this.send("customblock rename " + this.selectedId + " " + name.replace(" ", "_"));
+        this.status("Renamed!", -12255420);
+        this.rebuildFiltered();
     }
-
+    
     private void doRetexture() {
-        if (selectedId==null) return;
-        String url=fldRetextureUrl.getText().trim();
-        if (url.isEmpty()) { status("Paste a URL!",C_RED); return; }
-        closePanel();
-        send("customblock retexture "+selectedId+" "+url);
-        status("Downloading texture...",C_YELLOW);
+        if (this.selectedId == null) {
+            return;
+        }
+        final String url = this.fldRetextureUrl.method_1882().trim();
+        if (url.isEmpty()) {
+            this.status("Paste a URL!", -48060);
+            return;
+        }
+        this.closePanel();
+        this.send("customblock retexture " + this.selectedId + " " + url);
+        this.status("Downloading texture...", -13312);
     }
-
-    private void doGive(int amount, String player) {
-        if (selectedId==null) return;
-        String cmd="customblock give "+selectedId+" "+amount;
-        if (player!=null&&!player.isEmpty()) cmd+=" "+player;
-        send(cmd);
-        status("Gave "+amount+"x "+selectedId+(player!=null?" to "+player:""),C_GREEN);
+    
+    private void doGive(final int amount, final String player) {
+        if (this.selectedId == null) {
+            return;
+        }
+        String cmd = "customblock give " + this.selectedId + " " + amount;
+        if (player != null && !player.isEmpty()) {
+            cmd = cmd + " " + player;
+        }
+        this.send(cmd);
+        this.status("Gave " + amount + "x " + this.selectedId + ((player != null) ? /* invokedynamic(!) */ProcyonInvokeDynamicHelper_1.invoke(player) : ""), -12255420);
     }
-
+    
     private void doGiveToPlayer() {
-        if (selectedId==null) return;
-        String player=fldGivePlayer.getText().trim();
-        if (player.isEmpty()) { status("Enter player name!",C_RED); return; }
-        doGive(1, player);
-        hideGivePlayerPanel();
+        if (this.selectedId == null) {
+            return;
+        }
+        final String player = this.fldGivePlayer.method_1882().trim();
+        if (player.isEmpty()) {
+            this.status("Enter player name!", -48060);
+            return;
+        }
+        this.doGive(1, player);
+        this.hideGivePlayerPanel();
     }
-
+    
     private void doDelete() {
-        if (selectedId==null) return;
-        String idToDelete = selectedId;
-        send("customblock delete "+idToDelete);
-        status("Deleted '"+idToDelete+"'",C_RED);
-        // Optimistic client-side removal so block disappears immediately from grid
-        // (server will confirm via "remove" SlotUpdatePayload shortly after)
+        if (this.selectedId == null) {
+            return;
+        }
+        final String idToDelete = this.selectedId;
+        this.send("customblock delete " + idToDelete);
+        this.status("Deleted '" + idToDelete, -48060);
         TextureCache.invalidate(idToDelete);
         SlotManager.remove(idToDelete);
-        selectedId=null;
-        rebuildFiltered();
-        updateButtonStates();
+        this.selectedId = null;
+        this.rebuildFiltered();
+        this.updateButtonStates();
     }
-
+    
     private void doConfirmBulkDelete() {
-        for (String id : new ArrayList<>(bulkSelected)) {
-            send("customblock delete "+id);
+        for (String id : new ArrayList(this.bulkSelected)) {
+            this.send("customblock delete " + id);
             TextureCache.invalidate(id);
         }
-        status("Deleted "+bulkSelected.size()+" blocks",C_RED);
-        bulkSelected.clear();
-        bulkDeleteMode=false;
-        btnBulkDelete.setMessage(Text.literal("Bulk Delete"));
-        selectedId=null;
-        rebuildFiltered();
-        updateButtonStates();
+        this.status("Deleted " + this.bulkSelected.size() + " blocks", -48060);
+        this.bulkSelected.clear();
+        this.bulkDeleteMode = false;
+        this.btnBulkDelete.method_25355((class_2561)class_2561.method_43470("Bulk Delete"));
+        this.selectedId = null;
+        this.rebuildFiltered();
+        this.updateButtonStates();
     }
-
+    
     private void doCopyId() {
-        if (selectedId==null) return;
-        client.keyboard.setClipboard(selectedId);
-        status("Copied: "+selectedId,C_GREEN);
+        if (this.selectedId == null) {
+            return;
+        }
+        this.field_22787.field_1774.method_1455(this.selectedId);
+        this.status("Copied: " + this.selectedId, -12255420);
     }
-
+    
     private void doExport() {
-        send("customblock export");
-        status("Exported to config/customblocks/export.json",C_GREEN);
+        this.send("customblock export");
+        this.status("Exported to config/customblocks/export.json", -12255420);
     }
-
+    
     private void doReloadTex() {
         TextureCache.invalidateAll();
-        status("All textures cleared — will reload on next render",C_YELLOW);
+        this.status("All textures cleared \u2014 will reload on next render", -13312);
     }
-
+    
     private void doUrlListImport() {
-        int count=0;
-        for (TextFieldWidget f : fldUrlLines) {
-            String line=f.getText().trim();
-            if (line.isEmpty()) continue;
-            String[] parts=line.split("\\s+",3);
-            if (parts.length<3) { status("Line format: id name url",C_RED); return; }
-            String id=parts[0].toLowerCase().replaceAll("[^a-z0-9_]","_");
-            String name=parts[1].replace("_"," ");
-            String url=parts[2];
-            if (SlotManager.hasId(id)) continue;
-            send("customblock createurl "+id+" "+name.replace(" ","_")+" "+url);
-            count++;
+        int count = 0;
+        final class_342[] fldUrlLines = this.fldUrlLines;
+        for (int length = fldUrlLines.length, i = 0; i < length; ++i) {
+            final class_342 f = fldUrlLines[i];
+            final String line = f.method_1882().trim();
+            if (!line.isEmpty()) {
+                final String[] parts = line.split("\\s+", 3);
+                if (parts.length < 3) {
+                    this.status("Line format: id name url", -48060);
+                    return;
+                }
+                final String id = parts[0].toLowerCase().replaceAll("[^a-z0-9_]", "_");
+                final String name = parts[1].replace("_", " ");
+                final String url = parts[2];
+                if (!SlotManager.hasId(id)) {
+                    this.send("customblock createurl " + id + " " + name.replace(" ", "_") + " " + url);
+                    ++count;
+                }
+            }
         }
-        closePanel();
-        status("Queued "+count+" download(s)...",C_YELLOW);
+        this.closePanel();
+        this.status("Queued " + count + " download(s)...", -13312);
     }
-
-    private void adjustGlow(int d) {
-        if (selectedId==null) return;
-        SlotManager.SlotData data=SlotManager.getById(selectedId);
-        if (data==null) return;
-        send("customblock setglow "+selectedId+" "+Math.max(0,Math.min(15,data.lightLevel+d)));
+    
+    private void adjustGlow(final int d) {
+        if (this.selectedId == null) {
+            return;
+        }
+        final SlotManager.SlotData data = SlotManager.getById(this.selectedId);
+        if (data == null) {
+            return;
+        }
+        this.send("customblock setglow " + this.selectedId + " " + Math.max(0, Math.min(15, data.lightLevel + d)));
     }
-    private void setHard(float v) { if (selectedId!=null) send("customblock sethardness "+selectedId+" "+v); }
-    private void setSound(String t) { if (selectedId!=null) send("customblock setsound "+selectedId+" "+t); }
-    private void setSort(int m) {
-        if (sortMode==m) sortAsc=!sortAsc; else { sortMode=m; sortAsc=true; }
-        rebuildFiltered();
+    
+    private void setHard(final float v) {
+        if (this.selectedId != null) {
+            this.send("customblock sethardness " + this.selectedId + " " + v);
+        }
     }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    
+    private void setSound(final String t) {
+        if (this.selectedId != null) {
+            this.send("customblock setsound " + this.selectedId + " " + t);
+        }
+    }
+    
+    private void setSort(final int m) {
+        if (this.sortMode == m) {
+            this.sortAsc = !this.sortAsc;
+        }
+        else {
+            this.sortMode = m;
+            this.sortAsc = true;
+        }
+        this.rebuildFiltered();
+    }
+    
     private void rebuildFiltered() {
-        filtered.clear();
-        String q=search.toLowerCase();
-        for (SlotManager.SlotData d : SlotManager.allSlots()) {
-            if (d.customId.equals("tab_icon")) continue; // never show tab_icon in grid
-            if (q.isEmpty()||d.customId.contains(q)||d.displayName.toLowerCase().contains(q))
-                filtered.add(d);
+        this.filtered.clear();
+        final String q = this.search.toLowerCase();
+        final Iterator<SlotManager.SlotData> iterator = SlotManager.allSlots().iterator();
+        SlotManager.SlotData d = null;
+        while (iterator.hasNext()) {
+            d = iterator.next();
+            if (d.customId.equals("tab_icon")) {
+                continue;
+            }
+            if (!q.isEmpty() && !d.customId.contains(q) && !d.displayName.toLowerCase().contains(q)) {
+                continue;
+            }
+            this.filtered.add(d);
         }
-        Comparator<SlotManager.SlotData> cmp = switch(sortMode) {
+        Comparator<SlotManager.SlotData> cmp = switch (this.sortMode) {
             case 1 -> Comparator.comparingInt(d -> d.index);
-            case 2 -> Comparator.comparingInt((SlotManager.SlotData d)->d.lightLevel).reversed();
+            case 2 -> Comparator.comparingInt(d -> d.lightLevel).reversed();
             case 3 -> Comparator.comparing(d -> d.soundType);
             default -> Comparator.comparing(d -> d.displayName.toLowerCase());
         };
-        if (!sortAsc) cmp=cmp.reversed();
-        filtered.sort(cmp);
+        if (!this.sortAsc) {
+            cmp = cmp.reversed();
+        }
+        this.filtered.sort(cmp);
     }
-
+    
     private void updateButtonStates() {
-        boolean has=selectedId!=null&&SlotManager.getById(selectedId)!=null;
-        for (ButtonWidget b : new ButtonWidget[]{btnGive1,btnGive64,btnGivePlayer,btnRename,
-                btnRetexture,btnProperties,btnCopyId,btnDelete})
-            b.active=has;
+        final boolean has = this.selectedId != null && SlotManager.getById(this.selectedId) != null;
+        for (final class_4185 b : new class_4185[] { this.btnGive1, this.btnGive64, this.btnGivePlayer, this.btnRename, this.btnRetexture, this.btnProperties, this.btnCopyId, this.btnDelete }) {
+            b.field_22763 = has;
+        }
     }
-
-    /** Deterministic colour from string — used for no-texture placeholder tiles */
-    private static int stringToColor(String s) {
-        int hash=s.hashCode();
-        int r=60+((hash>>16)&0xFF)%120;
-        int g=60+((hash>>8)&0xFF)%120;
-        int b=60+(hash&0xFF)%120;
-        return 0xFF_000000|(r<<16)|(g<<8)|b;
+    
+    private static int stringToColor(final String s) {
+        final int hash = s.hashCode();
+        final int r = 60 + (hash >> 16 & 0xFF) % 120;
+        final int g = 60 + (hash >> 8 & 0xFF) % 120;
+        final int b = 60 + (hash & 0xFF) % 120;
+        return 0xFF000000 | r << 16 | g << 8 | b;
     }
-
-    private void status(String msg, int color) {
-        statusMsg=msg; statusColor=color; statusUntil=System.currentTimeMillis()+3500;
+    
+    private void status(final String msg, final int color) {
+        this.statusMsg = msg;
+        this.statusColor = color;
+        this.statusUntil = System.currentTimeMillis() + 3500L;
     }
-
-    private void send(String cmd) {
-        if (client.player == null || client.player.networkHandler == null) {
-            status("Not connected to server!", C_RED);
+    
+    private void send(final String cmd) {
+        if (this.field_22787.field_1724 == null || this.field_22787.field_1724.field_3944 == null) {
+            this.status("Not connected to server!", -48060);
             return;
         }
-        client.player.networkHandler.sendChatCommand(cmd);
+        this.field_22787.field_1724.field_3944.method_45730(cmd);
     }
-
-    private static String cap(String s) {
-        return (s==null||s.isEmpty())?"":Character.toUpperCase(s.charAt(0))+s.substring(1);
+    
+    private static String cap(final String s) {
+        return (s == null || s.isEmpty()) ? "" : (Character.toUpperCase(s.charAt(0)) + s.substring(1));
     }
-
-    private ButtonWidget mkBtn(int x,int y,int w,String lbl,ButtonWidget.PressAction a) {
-        return ButtonWidget.builder(Text.literal(lbl),a).dimensions(x,y,w,20).build();
+    
+    private class_4185 mkBtn(final int x, final int y, final int w, final String lbl, final class_4185.class_4241 a) {
+        return class_4185.method_46430((class_2561)class_2561.method_43470(lbl), a).method_46434(x, y, w, 20).method_46431();
     }
-
-    private TextFieldWidget mkField(int x,int y,int w,String placeholder) {
-        TextFieldWidget f=new TextFieldWidget(textRenderer,x,y,w,16,Text.literal(""));
-        f.setPlaceholder(Text.literal(placeholder));
+    
+    private class_342 mkField(final int x, final int y, final int w, final String placeholder) {
+        final class_342 f = new class_342(this.field_22793, x, y, w, 16, (class_2561)class_2561.method_43470(""));
+        f.method_47404((class_2561)class_2561.method_43470(placeholder));
         return f;
     }
-
-    @Override public boolean shouldPause() { return false; }
+    
+    public boolean method_25421() {
+        return false;
+    }
+    
+    private enum Panel
+    {
+        NONE, 
+        CREATE, 
+        RENAME, 
+        RETEXTURE, 
+        PROPERTIES, 
+        URL_LIST;
+    }
+    
+    // This helper class was generated by Procyon to approximate the behavior of an
+    // 'invokedynamic' instruction that it doesn't know how to interpret.
+    private static final class ProcyonInvokeDynamicHelper_1
+    {
+        private static final MethodHandles.Lookup LOOKUP = MethodHandles.lookup();
+        private static MethodHandle handle;
+        private static volatile int fence;
+        
+        private static MethodHandle handle() {
+            final MethodHandle handle = ProcyonInvokeDynamicHelper_1.handle;
+            if (handle != null)
+                return handle;
+            return ProcyonInvokeDynamicHelper_1.ensureHandle();
+        }
+        
+        private static MethodHandle ensureHandle() {
+            ProcyonInvokeDynamicHelper_1.fence = 0;
+            MethodHandle handle = ProcyonInvokeDynamicHelper_1.handle;
+            if (handle == null) {
+                MethodHandles.Lookup lookup = ProcyonInvokeDynamicHelper_1.LOOKUP;
+                try {
+                    handle = ((CallSite)StringConcatFactory.makeConcatWithConstants(lookup, "makeConcatWithConstants", MethodType.methodType(String.class, String.class), " to \u0001")).dynamicInvoker();
+                }
+                catch (Throwable t) {
+                    throw new UndeclaredThrowableException(t);
+                }
+                ProcyonInvokeDynamicHelper_1.fence = 1;
+                ProcyonInvokeDynamicHelper_1.handle = handle;
+                ProcyonInvokeDynamicHelper_1.fence = 0;
+            }
+            return handle;
+        }
+        
+        private static String invoke(String p0) {
+            try {
+                return ProcyonInvokeDynamicHelper_1.handle().invokeExact(p0);
+            }
+            catch (Throwable t) {
+                throw new UndeclaredThrowableException(t);
+            }
+        }
+    }
 }

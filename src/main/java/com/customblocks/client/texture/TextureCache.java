@@ -1,67 +1,91 @@
+// 
+// Decompiled by Procyon v0.6.0
+// 
+
 package com.customblocks.client.texture;
 
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.Iterator;
+import net.minecraft.class_1060;
 import com.customblocks.CustomBlocksMod;
+import net.minecraft.class_1044;
+import net.minecraft.class_310;
+import net.minecraft.class_2960;
+import net.minecraft.class_1043;
+import java.io.InputStream;
+import net.minecraft.class_1011;
+import java.io.ByteArrayInputStream;
+import java.util.Map;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.texture.NativeImage;
-import net.minecraft.client.texture.NativeImageBackedTexture;
-import net.minecraft.util.Identifier;
-
-import java.io.ByteArrayInputStream;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.Map;
 
 @Environment(EnvType.CLIENT)
-public class TextureCache {
-
-    public record TexInfo(Identifier id, int width, int height) {}
-
-    private static final Map<String, TexInfo> CACHE = new ConcurrentHashMap<>();
-
-    /** Load (or return cached) GPU texture for a block. Must be called on render thread. */
-    public static TexInfo getOrLoad(String customId, byte[] textureBytes) {
-        if (CACHE.containsKey(customId)) return CACHE.get(customId);
-        if (textureBytes == null || textureBytes.length == 0) return getMissing();
+public class TextureCache
+{
+    private static final Map<String, TexInfo> CACHE;
+    
+    public static TexInfo getOrLoad(final String customId, final byte[] textureBytes) {
+        if (TextureCache.CACHE.containsKey(customId)) {
+            return TextureCache.CACHE.get(customId);
+        }
+        if (textureBytes == null || textureBytes.length == 0) {
+            return getMissing();
+        }
         try {
-            NativeImage image = NativeImage.read(new ByteArrayInputStream(textureBytes));
-            int w = image.getWidth();
-            int h = image.getHeight();
-            NativeImageBackedTexture tex = new NativeImageBackedTexture(image);
-            Identifier texId = Identifier.of(CustomBlocksMod.MOD_ID, "dynamic/" + customId);
-            var tm = MinecraftClient.getInstance().getTextureManager();
-            try { tm.destroyTexture(texId); } catch (Exception ignored) {}
-            tm.registerTexture(texId, tex);
-            // Force immediate GPU upload while on the render thread
-            tex.bindTexture();
-            TexInfo info = new TexInfo(texId, w, h);
-            CACHE.put(customId, info);
+            final class_1011 image = class_1011.method_4309((InputStream)new ByteArrayInputStream(textureBytes));
+            final int w = image.method_4307();
+            final int h = image.method_4323();
+            final class_1043 tex = new class_1043(image);
+            final class_2960 texId = class_2960.method_60655("customblocks", "dynamic/" + customId);
+            final class_1060 tm = class_310.method_1551().method_1531();
+            try {
+                tm.method_4615(texId);
+            }
+            catch (final Exception ex) {}
+            tm.method_4616(texId, (class_1044)tex);
+            tex.method_23207();
+            final TexInfo info = new TexInfo(texId, w, h);
+            TextureCache.CACHE.put(customId, info);
             return info;
-        } catch (Exception e) {
-            CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to load GUI texture for '{}': {}", customId, e.getMessage());
+        }
+        catch (final Exception e) {
+            CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to load GUI texture for '{}': {}", (Object)customId, (Object)e.getMessage());
             return getMissing();
         }
     }
-
-    public static void invalidate(String customId) {
-        TexInfo old = CACHE.remove(customId);
+    
+    public static void invalidate(final String customId) {
+        final TexInfo old = TextureCache.CACHE.remove(customId);
         if (old != null) {
-            try { MinecraftClient.getInstance().getTextureManager().destroyTexture(old.id()); }
-            catch (Exception ignored) {}
+            try {
+                class_310.method_1551().method_1531().method_4615(old.id());
+            }
+            catch (final Exception ex) {}
         }
     }
-
+    
     public static void invalidateAll() {
-        var tm = MinecraftClient.getInstance().getTextureManager();
-        for (TexInfo info : CACHE.values()) {
-            try { tm.destroyTexture(info.id()); } catch (Exception ignored) {}
+        final class_1060 tm = class_310.method_1551().method_1531();
+        for (final TexInfo info : TextureCache.CACHE.values()) {
+            try {
+                tm.method_4615(info.id());
+            }
+            catch (final Exception ex) {}
         }
-        CACHE.clear();
+        TextureCache.CACHE.clear();
     }
-
-    public static int cacheSize() { return CACHE.size(); }
-
+    
+    public static int cacheSize() {
+        return TextureCache.CACHE.size();
+    }
+    
     private static TexInfo getMissing() {
-        return new TexInfo(Identifier.of("minecraft", "textures/misc/unknown_pack.png"), 64, 64);
+        return new TexInfo(class_2960.method_60655("minecraft", "textures/misc/unknown_pack.png"), 64, 64);
     }
+    
+    static {
+        CACHE = new ConcurrentHashMap<String, TexInfo>();
+    }
+    
+    record TexInfo(class_2960 id, int width, int height) {}
 }
