@@ -1,59 +1,63 @@
-// 
-// Decompiled by Procyon v0.6.0
-// 
-
 package com.customblocks.network;
 
-import net.minecraft.class_2960;
-import java.util.Iterator;
-import java.util.ArrayList;
-import net.minecraft.class_2540;
-import net.minecraft.class_9139;
-import java.util.List;
-import net.minecraft.class_8710;
+import net.minecraft.network.PacketByteBuf;
+import net.minecraft.network.codec.PacketCodec;
+import net.minecraft.network.packet.CustomPayload;
+import net.minecraft.util.Identifier;
 
-record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture) implements class_8710 {
-    public static final class_8710.class_9154<FullSyncPayload> ID;
-    public static final class_9139<class_2540, FullSyncPayload> CODEC;
-    
-    public class_8710.class_9154<? extends class_8710> method_56479() {
-        return (class_8710.class_9154<? extends class_8710>)FullSyncPayload.ID;
-    }
-    
-    static {
-        ID = new class_8710.class_9154(class_2960.method_60655("customblocks", "full_sync"));
-        CODEC = class_9139.method_56438((value, buf) -> {
-            buf.method_10804(value.entries().size());
-            for (final SlotEntry e : value.entries()) {
-                buf.method_10804(e.index());
-                buf.method_10814(e.customId());
-                buf.method_10814(e.displayName());
-                buf.method_10813((e.texture() != null) ? e.texture() : new byte[0]);
-                buf.method_10804(e.lightLevel());
-                buf.method_52941(e.hardness());
-                buf.method_10814((e.soundType() != null) ? e.soundType() : "stone");
+import java.util.ArrayList;
+import java.util.List;
+
+/** Server → Client on join. Metadata only (textures come via SlotUpdatePayload). */
+public record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture) implements CustomPayload {
+
+    public static final Id<FullSyncPayload> ID =
+            new Id<>(Identifier.of("customblocks", "full_sync"));
+
+    public record SlotEntry(
+            int    index,
+            String customId,
+            String displayName,
+            byte[] texture,
+            int    lightLevel,
+            float  hardness,
+            String soundType
+    ) {}
+
+    public static final PacketCodec<PacketByteBuf, FullSyncPayload> CODEC = PacketCodec.of(
+            (value, buf) -> {
+                buf.writeVarInt(value.entries().size());
+                for (SlotEntry e : value.entries()) {
+                    buf.writeVarInt(e.index());
+                    buf.writeString(e.customId());
+                    buf.writeString(e.displayName());
+                    buf.writeByteArray(e.texture() != null ? e.texture() : new byte[0]);
+                    buf.writeVarInt(e.lightLevel());
+                    buf.writeFloat(e.hardness());
+                    buf.writeString(e.soundType() != null ? e.soundType() : "stone");
+                }
+                buf.writeByteArray(value.tabIconTexture() != null ? value.tabIconTexture() : new byte[0]);
+            },
+            buf -> {
+                int size = buf.readVarInt();
+                List<SlotEntry> entries = new ArrayList<>();
+                for (int i = 0; i < size; i++) {
+                    int    index       = buf.readVarInt();
+                    String id          = buf.readString();
+                    String name        = buf.readString();
+                    byte[] tex         = buf.readByteArray(10_485_760);
+                    int    lightLevel  = buf.readVarInt();
+                    float  hardness    = buf.readFloat();
+                    String soundType   = buf.readString();
+                    entries.add(new SlotEntry(index, id, name,
+                            tex.length > 0 ? tex : null, lightLevel, hardness, soundType));
+                }
+                byte[] tabIcon = buf.readByteArray(10_485_760);
+                if (buf.readableBytes() > 0) buf.skipBytes(buf.readableBytes());
+                return new FullSyncPayload(entries, tabIcon.length > 0 ? tabIcon : null);
             }
-            buf.method_10813((value.tabIconTexture() != null) ? value.tabIconTexture() : new byte[0]);
-        }, buf -> {
-            final int size = buf.method_10816();
-            final List<SlotEntry> entries = new ArrayList<SlotEntry>();
-            for (int i = 0; i < size; ++i) {
-                final int index = buf.method_10816();
-                final String id = buf.method_19772();
-                final String name = buf.method_19772();
-                final byte[] tex = buf.method_10803(10485760);
-                final int lightLevel = buf.method_10816();
-                final float hardness = buf.readFloat();
-                final String soundType = buf.method_19772();
-                entries.add(new SlotEntry(index, id, name, (byte[])((tex.length > 0) ? tex : null), lightLevel, hardness, soundType));
-            }
-            final byte[] tabIcon = buf.method_10803(10485760);
-            if (buf.readableBytes() > 0) {
-                buf.method_52994(buf.readableBytes());
-            }
-            return new FullSyncPayload(entries, (byte[])((tabIcon.length > 0) ? tabIcon : null));
-        });
-    }
-    
-    record SlotEntry(int index, String customId, String displayName, byte[] texture, int lightLevel, float hardness, String soundType) {}
+    );
+
+    @Override
+    public Id<? extends CustomPayload> getId() { return ID; }
 }

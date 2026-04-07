@@ -1,391 +1,292 @@
-// 
-// Decompiled by Procyon v0.6.0
-// 
-
 package com.customblocks.client;
 
-import com.google.gson.GsonBuilder;
-import java.util.zip.CRC32;
-import java.io.ByteArrayOutputStream;
-import java.util.Arrays;
-import java.util.zip.Deflater;
-import java.io.IOException;
-import java.io.FileWriter;
-import java.nio.charset.StandardCharsets;
-import java.io.InputStream;
-import net.minecraft.class_1011;
-import java.io.ByteArrayInputStream;
-import java.util.Iterator;
 import com.customblocks.CustomBlocksMod;
-import com.google.gson.JsonArray;
-import java.nio.file.Files;
-import java.nio.file.OpenOption;
 import com.customblocks.SlotManager;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import java.io.File;
-import net.minecraft.class_310;
-import java.util.Map;
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonObject;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.texture.NativeImage;
+
+import java.io.*;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
+import java.util.Map;
 
 @Environment(EnvType.CLIENT)
-public class ResourcePackGenerator
-{
-    private static final Gson GSON;
-    private static final int PACK_FORMAT = 34;
-    private static final String MOD_ID = "customblocks";
-    private static final Map<String, String> FACE_TO_MC;
-    private static final byte[] PLACEHOLDER_PNG;
-    
-    public static void generate(final class_310 client) {
+public class ResourcePackGenerator {
+
+    private static final Gson   GSON        = new GsonBuilder().setPrettyPrinting().create();
+    private static final int    PACK_FORMAT = 34;
+    private static final String MOD_ID      = CustomBlocksMod.MOD_ID;
+
+    // Mapping from our face key names → Minecraft model face key names
+    // Note: Minecraft uses "up" / "down"; we expose "top" / "bottom" to users.
+    private static final Map<String, String> FACE_TO_MC = Map.of(
+            "top",    "up",
+            "bottom", "down",
+            "north",  "north",
+            "south",  "south",
+            "east",   "east",
+            "west",   "west"
+    );
+
+    public static void generate(MinecraftClient client) {
         try {
-            final File mcDir = client.field_1697;
-            final File packRoot = new File(mcDir, "resourcepacks/customblocks_generated");
-            final File assets = new File(packRoot, "assets/customblocks");
+            File mcDir    = client.runDirectory;
+            File packRoot = new File(mcDir, "resourcepacks/customblocks_generated");
+            File assets   = new File(packRoot, "assets/" + MOD_ID);
+
             new File(assets, "blockstates").mkdirs();
             new File(assets, "models/block").mkdirs();
             new File(assets, "models/item").mkdirs();
             new File(assets, "textures/block").mkdirs();
             new File(assets, "textures/item").mkdirs();
-            final JsonObject pack = new JsonObject();
-            pack.addProperty("pack_format", (Number)34);
+
+            // pack.mcmeta
+            JsonObject pack = new JsonObject();
+            pack.addProperty("pack_format", PACK_FORMAT);
             pack.addProperty("description", "CustomBlocks Generated");
-            final JsonObject meta = new JsonObject();
-            meta.add("pack", (JsonElement)pack);
+            JsonObject meta = new JsonObject();
+            meta.add("pack", pack);
             writeJson(meta, new File(packRoot, "pack.mcmeta"));
-            for (int i = 0; i < 512; ++i) {
-                final String slotKey = "slot_" + i;
-                final String modelRef = "customblocks:block/" + slotKey;
-                final SlotManager.SlotData data = SlotManager.getBySlot(slotKey);
-                final File texDest = new File(assets, "textures/block/" + slotKey + ".png");
+
+            for (int i = 0; i < SlotManager.MAX_SLOTS; i++) {
+                String slotKey  = "slot_" + i;
+                String modelRef = MOD_ID + ":block/" + slotKey;
+                SlotManager.SlotData data = SlotManager.getBySlot(slotKey);
+
+                // ── Default (all-faces) texture — skip write if file already same size ──
+                File texDest = new File(assets, "textures/block/" + slotKey + ".png");
                 if (data != null && data.texture != null && data.texture.length > 0) {
-                    if (!texDest.exists() || texDest.length() != data.texture.length) {
+                    if (!texDest.exists() || texDest.length() != data.texture.length)
                         writePng(data.texture, texDest);
-                    }
+                } else {
+                    if (!texDest.exists())
+                        Files.write(texDest.toPath(), PLACEHOLDER_PNG);
                 }
-                else if (!texDest.exists()) {
-                    Files.write(texDest.toPath(), ResourcePackGenerator.PLACEHOLDER_PNG, new OpenOption[0]);
-                }
+
+                // ── Per-face textures ─────────────────────────────────────────
                 if (data != null && data.hasFaces()) {
                     for (Map.Entry<String, byte[]> face : data.faceTextures.entrySet()) {
-                        final File faceDest = new File(assets, "textures/block/" + slotKey + "_" + (String)face.getKey() + ".png");
-                        if (!faceDest.exists() || faceDest.length() != face.getValue().length) {
+                        File faceDest = new File(assets,
+                                "textures/block/" + slotKey + "_" + face.getKey() + ".png");
+                        if (!faceDest.exists() || faceDest.length() != face.getValue().length)
                             writePng(face.getValue(), faceDest);
-                        }
                     }
                 }
-                final JsonObject variant = new JsonObject();
-                variant.addProperty("model", modelRef);
-                final JsonObject variants = new JsonObject();
-                variants.add("", (JsonElement)variant);
-                final JsonObject bs = new JsonObject();
-                bs.add("variants", (JsonElement)variants);
+
+                // ── Blockstate ────────────────────────────────────────────────
+                JsonObject variant  = new JsonObject(); variant.addProperty("model", modelRef);
+                JsonObject variants = new JsonObject(); variants.add("", variant);
+                JsonObject bs       = new JsonObject(); bs.add("variants", variants);
                 writeJson(bs, new File(assets, "blockstates/" + slotKey + ".json"));
-                final JsonObject bm = new JsonObject();
+
+                // ── Block model ───────────────────────────────────────────────
+                JsonObject bm = new JsonObject();
                 if (data != null && data.hasFaces()) {
+                    // cube — explicit texture ref per face; missing faces fall back to default
                     bm.addProperty("parent", "minecraft:block/cube");
-                    final JsonObject tex = new JsonObject();
-                    tex.addProperty("particle", "customblocks:block/" + slotKey);
-                    for (String face2 : SlotManager.FACE_KEYS) {
-                        final String mcFace = ResourcePackGenerator.FACE_TO_MC.get(face2);
-                        if (data.faceTextures.containsKey(face2)) {
-                            tex.addProperty(mcFace, "customblocks:block/" + slotKey + "_" + face2);
-                        }
-                        else {
-                            tex.addProperty(mcFace, "customblocks:block/" + slotKey);
+                    JsonObject tex = new JsonObject();
+                    // particle texture = default
+                    tex.addProperty("particle", MOD_ID + ":block/" + slotKey);
+                    for (String face : SlotManager.FACE_KEYS) {
+                        String mcFace = FACE_TO_MC.get(face);
+                        if (data.faceTextures.containsKey(face)) {
+                            // This face has an override
+                            tex.addProperty(mcFace, MOD_ID + ":block/" + slotKey + "_" + face);
+                        } else {
+                            // No override — use the default all-faces texture
+                            tex.addProperty(mcFace, MOD_ID + ":block/" + slotKey);
                         }
                     }
-                    bm.add("textures", (JsonElement)tex);
-                }
-                else {
+                    bm.add("textures", tex);
+                } else {
+                    // cube_all — simple single texture, same as before
                     bm.addProperty("parent", "minecraft:block/cube_all");
-                    final JsonObject tex = new JsonObject();
-                    tex.addProperty("all", "customblocks:block/" + slotKey);
-                    bm.add("textures", (JsonElement)tex);
+                    JsonObject tex = new JsonObject();
+                    tex.addProperty("all", MOD_ID + ":block/" + slotKey);
+                    bm.add("textures", tex);
                 }
                 writeJson(bm, new File(assets, "models/block/" + slotKey + ".json"));
-                final JsonObject im = new JsonObject();
+
+                // ── Item model (always shows the default face — top face if set, else all) ──
+                JsonObject im = new JsonObject();
                 im.addProperty("parent", modelRef);
                 writeJson(im, new File(assets, "models/item/" + slotKey + ".json"));
             }
-            final byte[] tabIcon = SlotManager.getTabIconTexture();
-            final File tabDest = new File(assets, "textures/item/tab_icon.png");
-            if (tabIcon != null && tabIcon.length > 0) {
-                writePng(tabIcon, tabDest);
-            }
-            else {
-                Files.write(tabDest.toPath(), ResourcePackGenerator.PLACEHOLDER_PNG, new OpenOption[0]);
-            }
-            final String[][] array;
-            final String[][] squares = array = new String[][] { { "black_square", "10,10,10" }, { "yellow_square", "240,200,20" }, { "green_square", "30,140,30" } };
-            for (int length = array.length, j = 0; j < length; ++j) {
-                final String[] sq = array[j];
-                final String itemId = sq[0];
-                final String[] rgb = sq[1].split(",");
-                final byte[] pngData = makeSolidPng(Integer.parseInt(rgb[0].trim()), Integer.parseInt(rgb[1].trim()), Integer.parseInt(rgb[2].trim()));
-                final File sqTex = new File(assets, "textures/item/" + itemId + ".png");
-                Files.write(sqTex.toPath(), pngData, new OpenOption[0]);
-                final JsonObject sqTex2 = new JsonObject();
-                sqTex2.addProperty("layer0", "customblocks:item/" + itemId);
-                final JsonObject sqModel = new JsonObject();
+
+            // Tab icon
+            byte[] tabIcon = SlotManager.getTabIconTexture();
+            File tabDest = new File(assets, "textures/item/tab_icon.png");
+            if (tabIcon != null && tabIcon.length > 0) writePng(tabIcon, tabDest);
+            else Files.write(tabDest.toPath(), PLACEHOLDER_PNG);
+
+            // ── Color Square items — flat 16x16 coloured squares ─────────────────────
+            String[][] squares = {{"black_square",  "10,10,10"},
+                                   {"yellow_square", "240,200,20"},
+                                   {"green_square",  "30,140,30"}};
+            for (String[] sq : squares) {
+                String itemId  = sq[0];
+                String[] rgb   = sq[1].split(",");
+                // 9x9 center square on 16x16 RGBA canvas
+                byte[] pngData = makeSquarePng(
+                        Integer.parseInt(rgb[0].trim()),
+                        Integer.parseInt(rgb[1].trim()),
+                        Integer.parseInt(rgb[2].trim()));
+                File sqTex = new File(assets, "textures/item/" + itemId + ".png");
+                Files.write(sqTex.toPath(), pngData);
+                JsonObject sqTex2 = new JsonObject();
+                sqTex2.addProperty("layer0", MOD_ID + ":item/" + itemId);
+                JsonObject sqModel = new JsonObject();
                 sqModel.addProperty("parent", "minecraft:item/generated");
-                sqModel.add("textures", (JsonElement)sqTex2);
-                final JsonObject display = new JsonObject();
-                for (final String view : new String[] { "thirdperson_righthand", "thirdperson_lefthand", "firstperson_righthand", "firstperson_lefthand", "fixed" }) {
-                    final JsonObject v = new JsonObject();
-                    final JsonArray sc = new JsonArray();
-                    sc.add((Number)0.35);
-                    sc.add((Number)0.35);
-                    sc.add((Number)0.35);
-                    final JsonArray tr = new JsonArray();
-                    tr.add((Number)0);
-                    tr.add((Number)0);
-                    tr.add((Number)0);
-                    final JsonArray ro = new JsonArray();
-                    ro.add((Number)0);
-                    ro.add((Number)0);
-                    ro.add((Number)0);
-                    v.add("scale", (JsonElement)sc);
-                    v.add("translation", (JsonElement)tr);
-                    v.add("rotation", (JsonElement)ro);
-                    display.add(view, (JsonElement)v);
-                }
-                final JsonObject gui = new JsonObject();
-                final JsonArray gs = new JsonArray();
-                gs.add((Number)0.4);
-                gs.add((Number)0.4);
-                gs.add((Number)0.4);
-                final JsonArray gt = new JsonArray();
-                gt.add((Number)0);
-                gt.add((Number)0);
-                gt.add((Number)0);
-                final JsonArray gr = new JsonArray();
-                gr.add((Number)0);
-                gr.add((Number)0);
-                gr.add((Number)0);
-                gui.add("scale", (JsonElement)gs);
-                gui.add("translation", (JsonElement)gt);
-                gui.add("rotation", (JsonElement)gr);
-                display.add("gui", (JsonElement)gui);
-                final JsonObject gnd = new JsonObject();
-                final JsonArray gns = new JsonArray();
-                gns.add((Number)0.3);
-                gns.add((Number)0.3);
-                gns.add((Number)0.3);
-                final JsonArray gnt = new JsonArray();
-                gnt.add((Number)0);
-                gnt.add((Number)(-2));
-                gnt.add((Number)0);
-                final JsonArray gnr = new JsonArray();
-                gnr.add((Number)0);
-                gnr.add((Number)0);
-                gnr.add((Number)0);
-                gnd.add("scale", (JsonElement)gns);
-                gnd.add("translation", (JsonElement)gnt);
-                gnd.add("rotation", (JsonElement)gnr);
-                display.add("ground", (JsonElement)gnd);
-                sqModel.add("display", (JsonElement)display);
+                sqModel.add("textures", sqTex2);
                 writeJson(sqModel, new File(assets, "models/item/" + itemId + ".json"));
             }
-            // Generate triangle items (smaller than squares)
-            final String[][] triangles = new String[][] { { "black_triangle", "10,10,10" }, { "yellow_triangle", "240,200,20" }, { "green_triangle", "30,140,30" } };
-            for (int k = 0; k < triangles.length; ++k) {
-                final String[] tri = triangles[k];
-                final String itemId = tri[0];
-                final String[] rgb = tri[1].split(",");
-                final byte[] pngData = makeTrianglePng(Integer.parseInt(rgb[0].trim()), Integer.parseInt(rgb[1].trim()), Integer.parseInt(rgb[2].trim()));
-                final File triTex = new File(assets, "textures/item/" + itemId + ".png");
-                Files.write(triTex.toPath(), pngData, new OpenOption[0]);
-                final JsonObject triTex2 = new JsonObject();
-                triTex2.addProperty("layer0", "customblocks:item/" + itemId);
-                final JsonObject triModel = new JsonObject();
-                triModel.addProperty("parent", "minecraft:item/generated");
-                triModel.add("textures", (JsonElement)triTex2);
-                final JsonObject display = new JsonObject();
-                for (final String view : new String[] { "thirdperson_righthand", "thirdperson_lefthand", "firstperson_righthand", "firstperson_lefthand", "fixed" }) {
-                    final JsonObject v = new JsonObject();
-                    final JsonArray sc = new JsonArray();
-                    sc.add((Number)0.35);
-                    sc.add((Number)0.35);
-                    sc.add((Number)0.35);
-                    final JsonArray tr = new JsonArray();
-                    tr.add((Number)0);
-                    tr.add((Number)0);
-                    tr.add((Number)0);
-                    final JsonArray ro = new JsonArray();
-                    ro.add((Number)0);
-                    ro.add((Number)0);
-                    ro.add((Number)0);
-                    v.add("scale", (JsonElement)sc);
-                    v.add("translation", (JsonElement)tr);
-                    v.add("rotation", (JsonElement)ro);
-                    display.add(view, (JsonElement)v);
-                }
-                final JsonObject gui = new JsonObject();
-                final JsonArray gs = new JsonArray();
-                gs.add((Number)0.4);
-                gs.add((Number)0.4);
-                gs.add((Number)0.4);
-                final JsonArray gt = new JsonArray();
-                gt.add((Number)0);
-                gt.add((Number)0);
-                gt.add((Number)0);
-                final JsonArray gr = new JsonArray();
-                gr.add((Number)0);
-                gr.add((Number)0);
-                gr.add((Number)0);
-                gui.add("scale", (JsonElement)gs);
-                gui.add("translation", (JsonElement)gt);
-                gui.add("rotation", (JsonElement)gr);
-                display.add("gui", (JsonElement)gui);
-                final JsonObject gnd = new JsonObject();
-                final JsonArray gns = new JsonArray();
-                gns.add((Number)0.3);
-                gns.add((Number)0.3);
-                gns.add((Number)0.3);
-                final JsonArray gnt = new JsonArray();
-                gnt.add((Number)0);
-                gnt.add((Number)(-2));
-                gnt.add((Number)0);
-                final JsonArray gnr = new JsonArray();
-                gnr.add((Number)0);
-                gnr.add((Number)0);
-                gnr.add((Number)0);
-                gnd.add("scale", (JsonElement)gns);
-                gnd.add("translation", (JsonElement)gnt);
-                gnd.add("rotation", (JsonElement)gnr);
-                display.add("ground", (JsonElement)gnd);
-                triModel.add("display", (JsonElement)display);
-                writeJson(triModel, new File(assets, "models/item/" + itemId + ".json"));
+
+            // Color Triangle items
+            String[][] triangles = {{"black_triangle",  "10,10,10"},
+                                     {"yellow_triangle", "240,200,20"},
+                                     {"green_triangle",  "30,140,30"}};
+            for (String[] tr : triangles) {
+                String itemId  = tr[0];
+                String[] rgb   = tr[1].split(",");
+                byte[] pngData = makeTrianglePng(
+                        Integer.parseInt(rgb[0].trim()),
+                        Integer.parseInt(rgb[1].trim()),
+                        Integer.parseInt(rgb[2].trim()));
+                File trTex = new File(assets, "textures/item/" + itemId + ".png");
+                Files.write(trTex.toPath(), pngData);
+                JsonObject trTex2 = new JsonObject();
+                trTex2.addProperty("layer0", MOD_ID + ":item/" + itemId);
+                JsonObject trModel = new JsonObject();
+                trModel.addProperty("parent", "minecraft:item/generated");
+                trModel.add("textures", trTex2);
+                writeJson(trModel, new File(assets, "models/item/" + itemId + ".json"));
             }
+
             CustomBlocksMod.LOGGER.info("[CustomBlocks] Resource pack generated.");
-        }
-        catch (final Exception e) {
-            CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to generate resource pack", (Throwable)e);
+        } catch (Exception e) {
+            CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to generate resource pack", e);
         }
     }
-    
-    private static void writePng(final byte[] imageBytes, final File dest) {
-        try (final class_1011 img = class_1011.method_4309((InputStream)new ByteArrayInputStream(imageBytes))) {
+
+    /** Decodes image bytes (PNG, JPEG, etc) and writes as valid PNG. */
+    private static void writePng(byte[] imageBytes, File dest) {
+        try (NativeImage img = NativeImage.read(new ByteArrayInputStream(imageBytes))) {
             dest.getParentFile().mkdirs();
-            img.method_4314(dest.toPath());
-        }
-        catch (final Exception e) {
-            try {
-                Files.write(dest.toPath(), imageBytes, new OpenOption[0]);
-            }
-            catch (final Exception ex) {}
-            CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not decode image for {}, wrote raw bytes", (Object)dest.getName());
+            img.writeTo(dest.toPath());
+        } catch (Exception e) {
+            try { Files.write(dest.toPath(), imageBytes); }
+            catch (Exception ignored) {}
+            CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not decode image for {}, wrote raw bytes", dest.getName());
         }
     }
-    
-    private static void writeJson(final JsonObject json, final File dest) throws IOException {
+
+    private static void writeJson(JsonObject json, File dest) throws IOException {
         dest.getParentFile().mkdirs();
-        try (final FileWriter fw = new FileWriter(dest, StandardCharsets.UTF_8)) {
-            ResourcePackGenerator.GSON.toJson((JsonElement)json, (Appendable)fw);
+        try (FileWriter fw = new FileWriter(dest, StandardCharsets.UTF_8)) {
+            GSON.toJson(json, fw);
         }
     }
-    
-    private static byte[] makeSolidPng(final int r, final int g, final int b) {
-        try {
-            final int w = 16;
-            final int h = 16;
-            final byte[] raw = new byte[h * (1 + w * 3)];
-            for (int row = 0; row < h; ++row) {
-                final int base = row * (1 + w * 3);
-                raw[base] = 0;
-                for (int col = 0; col < w; ++col) {
-                    raw[base + 1 + col * 3] = (byte)r;
-                    raw[base + 1 + col * 3 + 1] = (byte)g;
-                    raw[base + 1 + col * 3 + 2] = (byte)b;
-                }
-            }
-            final Deflater def = new Deflater(9);
-            def.setInput(raw);
-            def.finish();
-            final byte[] comp = new byte[raw.length + 64];
-            final int compLen = def.deflate(comp);
-            def.end();
-            final byte[] idat = Arrays.copyOf(comp, compLen);
-            final ByteArrayOutputStream out = new ByteArrayOutputStream();
-            out.write(new byte[] { -119, 80, 78, 71, 13, 10, 26, 10 });
-            writeChunk(out, "IHDR", new byte[] { 0, 0, 0, 16, 0, 0, 0, 16, 8, 2, 0, 0, 0 });
-            writeChunk(out, "IDAT", idat);
-            writeChunk(out, "IEND", new byte[0]);
-            return out.toByteArray();
-        }
-        catch (final Exception e) {
-            return ResourcePackGenerator.PLACEHOLDER_PNG;
-        }
+
+    /**
+     * Generates a 16×16 RGBA PNG with a 9×9 coloured square centred on a transparent background.
+     */
+    private static byte[] makeSquarePng(int r, int g, int b) {
+        return makeShapePng(r, g, b, (row, col) -> row >= 3 && row < 12 && col >= 3 && col < 12);
     }
-    
-    private static byte[] makeTrianglePng(final int r, final int g, final int b) {
+
+    /**
+     * Generates a 16×16 RGBA PNG with an upward-pointing triangle centred on a transparent background.
+     * Triangle vertices: top-centre (7,2), bottom-left (2,13), bottom-right (12,13).
+     */
+    private static byte[] makeTrianglePng(int r, int g, int b) {
+        return makeShapePng(r, g, b, (row, col) -> {
+            if (row < 2 || row > 13) return false;
+            // For each row, compute the x extent of the triangle
+            float progress = (float)(row - 2) / (13 - 2); // 0 at top, 1 at bottom
+            float halfW = progress * (12 - 2) / 2.0f;       // 0 at top, 5 at bottom
+            float cx = 7.0f;
+            return col >= (cx - halfW) && col <= (cx + halfW);
+        });
+    }
+
+    @FunctionalInterface interface PixelTest { boolean inside(int row, int col); }
+
+    private static byte[] makeShapePng(int r, int g, int b, PixelTest test) {
         try {
-            final int w = 16;
-            final int h = 16;
-            final byte[] raw = new byte[h * (1 + w * 3)];
-            for (int row = 0; row < h; ++row) {
-                final int base = row * (1 + w * 3);
-                raw[base] = 0;
-                // Create triangle shape (wider at bottom)
-                int widthAtRow = (row * 2) + 2; // Triangle gets wider towards bottom
-                int startCol = (w - widthAtRow) / 2;
-                int endCol = startCol + widthAtRow;
-                for (int col = 0; col < w; ++col) {
-                    if (col >= startCol && col < endCol) {
-                        raw[base + 1 + col * 3] = (byte)r;
-                        raw[base + 1 + col * 3 + 1] = (byte)g;
-                        raw[base + 1 + col * 3 + 2] = (byte)b;
+            int w = 16, h = 16;
+            // RGBA = 4 bytes per pixel
+            byte[] raw = new byte[h * (1 + w * 4)];
+            for (int row = 0; row < h; row++) {
+                int base = row * (1 + w * 4);
+                raw[base] = 0; // filter = None
+                for (int col = 0; col < w; col++) {
+                    if (test.inside(row, col)) {
+                        raw[base + 1 + col * 4]     = (byte) r;
+                        raw[base + 1 + col * 4 + 1] = (byte) g;
+                        raw[base + 1 + col * 4 + 2] = (byte) b;
+                        raw[base + 1 + col * 4 + 3] = (byte) 255; // opaque
                     } else {
-                        // Transparent (white with 0 alpha - but we use RGB so just make it black/dark)
-                        raw[base + 1 + col * 3] = 0;
-                        raw[base + 1 + col * 3 + 1] = 0;
-                        raw[base + 1 + col * 3 + 2] = 0;
+                        raw[base + 1 + col * 4]     = 0;
+                        raw[base + 1 + col * 4 + 1] = 0;
+                        raw[base + 1 + col * 4 + 2] = 0;
+                        raw[base + 1 + col * 4 + 3] = 0; // transparent
                     }
                 }
             }
-            final Deflater def = new Deflater(9);
+            java.util.zip.Deflater def = new java.util.zip.Deflater(java.util.zip.Deflater.BEST_COMPRESSION);
             def.setInput(raw);
             def.finish();
-            final byte[] comp = new byte[raw.length + 64];
-            final int compLen = def.deflate(comp);
+            byte[] comp = new byte[raw.length + 128];
+            int compLen = def.deflate(comp);
             def.end();
-            final byte[] idat = Arrays.copyOf(comp, compLen);
-            final ByteArrayOutputStream out = new ByteArrayOutputStream();
-            out.write(new byte[] { -119, 80, 78, 71, 13, 10, 26, 10 });
-            writeChunk(out, "IHDR", new byte[] { 0, 0, 0, 16, 0, 0, 0, 16, 8, 2, 0, 0, 0 });
+            byte[] idat = java.util.Arrays.copyOf(comp, compLen);
+
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            out.write(new byte[]{(byte)0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A});
+            // IHDR: 16x16, 8-bit RGBA (color type 6)
+            writeChunk(out, "IHDR", new byte[]{
+                0,0,0,16, 0,0,0,16, 8, 6, 0, 0, 0});
             writeChunk(out, "IDAT", idat);
             writeChunk(out, "IEND", new byte[0]);
             return out.toByteArray();
-        }
-        catch (final Exception e) {
-            return ResourcePackGenerator.PLACEHOLDER_PNG;
+        } catch (Exception e) {
+            return PLACEHOLDER_PNG;
         }
     }
-    
-    private static void writeChunk(final ByteArrayOutputStream out, final String type, final byte[] data) throws Exception {
-        final byte[] typeBytes = type.getBytes(StandardCharsets.US_ASCII);
-        out.write(data.length >>> 24 & 0xFF);
-        out.write(data.length >>> 16 & 0xFF);
-        out.write(data.length >>> 8 & 0xFF);
-        out.write(data.length & 0xFF);
+
+    private static void writeChunk(java.io.ByteArrayOutputStream out, String type, byte[] data) throws Exception {
+        byte[] typeBytes = type.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        // Length
+        out.write((data.length >>> 24) & 0xFF);
+        out.write((data.length >>> 16) & 0xFF);
+        out.write((data.length >>> 8)  & 0xFF);
+        out.write( data.length         & 0xFF);
+        // Type
         out.write(typeBytes);
+        // Data
         out.write(data);
-        final CRC32 crc = new CRC32();
+        // CRC over type + data
+        java.util.zip.CRC32 crc = new java.util.zip.CRC32();
         crc.update(typeBytes);
         crc.update(data);
-        final long c = crc.getValue();
+        long c = crc.getValue();
         out.write((int)(c >>> 24) & 0xFF);
         out.write((int)(c >>> 16) & 0xFF);
-        out.write((int)(c >>> 8) & 0xFF);
-        out.write((int)c & 0xFF);
+        out.write((int)(c >>> 8)  & 0xFF);
+        out.write((int) c         & 0xFF);
     }
-    
-    static {
-        GSON = new GsonBuilder().setPrettyPrinting().create();
-        FACE_TO_MC = Map.of("top", "up", "bottom", "down", "north", "north", "south", "south", "east", "east", "west", "west");
-        PLACEHOLDER_PNG = new byte[] { -119, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0, -112, 119, 83, -34, 0, 0, 0, 12, 73, 68, 65, 84, 8, -41, 99, -8, 15, -16, 0, 0, 0, 2, 0, 1, -30, 33, -68, 51, 0, 0, 0, 0, 73, 69, 78, 68, -82, 66, 96, -126 };
-    }
+
+    // 1×1 opaque pink placeholder PNG
+    private static final byte[] PLACEHOLDER_PNG = {
+        (byte)0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A,0x00,0x00,0x00,0x0D,0x49,0x48,0x44,0x52,
+        0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x01,0x08,0x02,0x00,0x00,0x00,(byte)0x90,0x77,0x53,(byte)0xDE,
+        0x00,0x00,0x00,0x0C,0x49,0x44,0x41,0x54,0x08,(byte)0xD7,0x63,(byte)0xF8,(byte)0x0F,(byte)0xF0,
+        0x00,0x00,0x00,0x02,0x00,0x01,(byte)0xE2,0x21,(byte)0xBC,0x33,0x00,0x00,0x00,0x00,
+        0x49,0x45,0x4E,0x44,(byte)0xAE,0x42,0x60,(byte)0x82
+    };
 }
