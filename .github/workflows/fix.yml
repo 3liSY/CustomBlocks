@@ -1,0 +1,22 @@
+name: Fix Wrapper
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add wrapper jar
+        run: |
+          curl -sL "https://github.com/gradle/gradle/raw/refs/tags/v8.8.0/gradle/wrapper/gradle-wrapper.jar" \
+            -o gradle/wrapper/gradle-wrapper.jar
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git add gradle/wrapper/gradle-wrapper.jar
+          git commit -m "Add gradle-wrapper.jar"
+          git push
+
+      - uses: actions/checkout@v4
