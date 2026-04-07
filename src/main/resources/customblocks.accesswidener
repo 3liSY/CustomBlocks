@@ -1,9 +1,0 @@
-# Access widener for Custom Blocks mod
-# This file allows access to private Minecraft fields and methods
-
-# Access to private constructors if needed
-# public-fabric <class> <method/field> <desc>
-
-# Example entries (uncomment and modify as needed):
-# public net.minecraft.class_1792 <init> (Lnet/minecraft/class_1792$class_1793;)V
-# public net.minecraft.class_2168 <field> <desc>
