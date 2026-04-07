@@ -19,20 +19,29 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.util.ArrayDeque;
+import java.util.Queue;
 
 /**
- * Right-click any CustomBlock to recolour its texture's background to this triangle's colour.
- * Background is detected as the colour of the top-left corner pixel, then every pixel within
- * a tolerance of 40 per channel is replaced with the triangle colour.
- * Works on any block — no naming convention required.
+ * Right-click any CustomBlock to create a new colour variant of it.
+ * - The original block is untouched.
+ * - A new block (e.g. "mars_green") is registered automatically with the
+ *   background replaced by this triangle's colour, then given to you.
+ * - If the variant already exists, you simply receive it without re-processing.
+ *
+ * Background detection uses flood-fill from all four corners, so only true
+ * background pixels are recoloured — design details are never touched.
  */
 public class ColorTriangleItem extends Item {
 
-    private final int targetR, targetG, targetB;
+    private final int    targetR, targetG, targetB;
     private final String colorName;
 
-    /** Colour tolerance: pixels within this distance per channel are treated as background. */
-    private static final int TOLERANCE = 40;
+    /** Known colours used in block IDs — kept in sync with ColorSquareItem. */
+    private static final String[] COLOR_NAMES = { "black", "yellow", "green" };
+
+    /** Per-channel tolerance for background detection. */
+    private static final int TOLERANCE = 35;
 
     public ColorTriangleItem(int r, int g, int b, String colorName, Settings settings) {
         super(settings);
@@ -42,8 +51,8 @@ public class ColorTriangleItem extends Item {
         this.colorName = colorName;
     }
 
-    @Override public Text getName()                 { return Text.literal(colorName + " Triangle"); }
-    @Override public Text getName(ItemStack stack)  { return getName(); }
+    @Override public Text getName()                { return Text.literal(colorName + " Triangle"); }
+    @Override public Text getName(ItemStack stack) { return getName(); }
 
     @Override
     public ActionResult useOnBlock(ItemUsageContext ctx) {
@@ -62,65 +71,93 @@ public class ColorTriangleItem extends Item {
             return ActionResult.FAIL;
         }
 
-        SlotManager.SlotData d = SlotManager.getBySlot(sb.getSlotKey());
-        if (d == null) return ActionResult.PASS;
+        SlotManager.SlotData source = SlotManager.getBySlot(sb.getSlotKey());
+        if (source == null) return ActionResult.PASS;
 
-        if (d.texture == null || d.texture.length == 0) {
+        if (source.texture == null || source.texture.length == 0) {
             if (player != null)
                 player.sendMessage(
-                    Text.literal("§c[CustomBlocks] This block has no texture to recolour."), true);
+                    Text.literal("§c[CustomBlocks] This block has no texture."), true);
             return ActionResult.FAIL;
         }
 
-        MinecraftServer        server  = world.getServer();
-        SlotManager.SlotData   finalD  = d;
-        PlayerEntity           fp      = player;
-        int                    fR = targetR, fG = targetG, fB = targetB;
+        // ── Build the new block ID ────────────────────────────────────────────
+        String baseId  = stripColorSuffix(source.customId);
+        String newId   = baseId + "_" + colorName.toLowerCase();
+        String newName = deriveDisplayName(source.displayName, colorName);
+
+        // Already this colour?
+        if (newId.equals(source.customId)) {
+            if (player != null)
+                player.sendMessage(
+                    Text.literal("§7[CustomBlocks] This block is already §f" + colorName + "§7."), true);
+            return ActionResult.SUCCESS;
+        }
+
+        // Variant already exists — just hand it over
+        SlotManager.SlotData existing = SlotManager.getById(newId);
+        if (existing != null) {
+            if (player != null) {
+                player.getInventory().insertStack(
+                    new ItemStack(CustomBlocksMod.SLOT_ITEMS[existing.index]));
+                player.sendMessage(
+                    Text.literal("§a[CustomBlocks] Given §f" + existing.displayName
+                        + "§a (variant already existed)."), true);
+            }
+            return ActionResult.SUCCESS;
+        }
+
+        // Need a free slot
+        if (SlotManager.freeSlots() == 0) {
+            if (player != null)
+                player.sendMessage(
+                    Text.literal("§c[CustomBlocks] No free block slots! Delete some blocks first."), true);
+            return ActionResult.FAIL;
+        }
+
+        // ── Process texture in background thread ──────────────────────────────
+        MinecraftServer     server = world.getServer();
+        SlotManager.SlotData finalSrc = source;
+        PlayerEntity         fp      = player;
+        int fR = targetR, fG = targetG, fB = targetB;
 
         Thread t = new Thread(() -> {
             try {
                 System.setProperty("java.awt.headless", "true");
-                BufferedImage img = ImageIO.read(new ByteArrayInputStream(finalD.texture));
-                if (img == null) throw new Exception("Could not decode image");
-
-                // Detect background from top-left pixel
-                int bgArgb = img.getRGB(0, 0);
-                int bgR    = (bgArgb >> 16) & 0xFF;
-                int bgG    = (bgArgb >> 8)  & 0xFF;
-                int bgB    =  bgArgb        & 0xFF;
-
-                int newArgb = (0xFF << 24) | (fR << 16) | (fG << 8) | fB;
-
-                for (int y = 0; y < img.getHeight(); y++) {
-                    for (int x = 0; x < img.getWidth(); x++) {
-                        int px = img.getRGB(x, y);
-                        int pr = (px >> 16) & 0xFF;
-                        int pg = (px >> 8)  & 0xFF;
-                        int pb =  px        & 0xFF;
-                        if (Math.abs(pr - bgR) <= TOLERANCE &&
-                            Math.abs(pg - bgG) <= TOLERANCE &&
-                            Math.abs(pb - bgB) <= TOLERANCE) {
-                            img.setRGB(x, y, newArgb);
-                        }
-                    }
-                }
-
-                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                ImageIO.write(img, "PNG", baos);
-                byte[] newBytes = baos.toByteArray();
+                byte[] newTexture = recolourBackground(finalSrc.texture, fR, fG, fB);
 
                 server.execute(() -> {
-                    SlotManager.updateTexture(finalD.customId, newBytes);
+                    if (SlotManager.freeSlots() == 0) {
+                        if (fp != null)
+                            fp.sendMessage(Text.literal("§c[CustomBlocks] No free slots!"), true);
+                        return;
+                    }
+                    SlotManager.SlotData newD = SlotManager.assign(newId, newName, newTexture);
+                    if (newD == null) {
+                        if (fp != null)
+                            fp.sendMessage(Text.literal("§c[CustomBlocks] Failed to allocate slot."), true);
+                        return;
+                    }
+                    // Copy properties from the source block
+                    SlotManager.setLightLevel(newId, finalSrc.lightLevel);
+                    SlotManager.setHardness(newId, finalSrc.hardness);
+                    SlotManager.setSoundType(newId, finalSrc.soundType);
                     SlotManager.saveAll();
-                    CustomBlocksMod.broadcastUpdate(server,
-                        new SlotUpdatePayload("retexture", finalD.index, finalD.customId, null,
-                            newBytes, finalD.lightLevel, finalD.hardness, finalD.soundType));
-                    if (fp != null)
-                        fp.sendMessage(
-                            Text.literal("§a[CustomBlocks] Background recoloured to §f"
-                                + colorName + "§a!"), true);
-                });
 
+                    // Broadcast the new block to all players
+                    CustomBlocksMod.broadcastUpdate(server,
+                        new SlotUpdatePayload("add", newD.index, newId, newName, newTexture,
+                            finalSrc.lightLevel, finalSrc.hardness, finalSrc.soundType));
+
+                    // Give the new block to the player
+                    if (fp != null) {
+                        fp.getInventory().insertStack(
+                            new ItemStack(CustomBlocksMod.SLOT_ITEMS[newD.index]));
+                        fp.sendMessage(
+                            Text.literal("§a[CustomBlocks] Created §f" + newName
+                                + " §aand added it to your inventory!"), true);
+                    }
+                });
             } catch (Exception e) {
                 server.execute(() -> {
                     if (fp != null)
@@ -133,5 +170,101 @@ public class ColorTriangleItem extends Item {
         t.start();
 
         return ActionResult.SUCCESS;
+    }
+
+    // ── Texture processing ────────────────────────────────────────────────────
+
+    /**
+     * Flood-fills the background of the image (seeded from all 4 corners) and
+     * replaces matching pixels with the new colour.  Only connected background
+     * regions reachable from the image border are changed — interior details
+     * with a similar colour are never touched.
+     */
+    private static byte[] recolourBackground(byte[] src, int newR, int newG, int newB)
+            throws Exception {
+        BufferedImage img = ImageIO.read(new ByteArrayInputStream(src));
+        if (img == null) throw new Exception("Could not decode image");
+
+        int w = img.getWidth(), h = img.getHeight();
+
+        // Sample background colour from the top-left pixel
+        int bgArgb = img.getRGB(0, 0);
+        int bgA    = (bgArgb >> 24) & 0xFF;
+        int bgR    = (bgArgb >> 16) & 0xFF;
+        int bgG    = (bgArgb >> 8)  & 0xFF;
+        int bgB    =  bgArgb        & 0xFF;
+
+        int newArgb = (0xFF << 24) | (newR << 16) | (newG << 8) | newB;
+
+        boolean[][] visited = new boolean[w][h];
+        Queue<int[]> queue  = new ArrayDeque<>();
+
+        // Seed from all 4 corners
+        int[][] corners = { {0,0}, {w-1,0}, {0,h-1}, {w-1,h-1} };
+        for (int[] c : corners) {
+            if (!visited[c[0]][c[1]] && isBackground(img, c[0], c[1], bgA, bgR, bgG, bgB)) {
+                visited[c[0]][c[1]] = true;
+                queue.add(c);
+            }
+        }
+
+        // BFS flood fill
+        int[][] dirs = { {1,0},{-1,0},{0,1},{0,-1} };
+        while (!queue.isEmpty()) {
+            int[] px = queue.poll();
+            int x = px[0], y = px[1];
+            img.setRGB(x, y, newArgb);
+            for (int[] d : dirs) {
+                int nx = x + d[0], ny = y + d[1];
+                if (nx >= 0 && nx < w && ny >= 0 && ny < h
+                        && !visited[nx][ny]
+                        && isBackground(img, nx, ny, bgA, bgR, bgG, bgB)) {
+                    visited[nx][ny] = true;
+                    queue.add(new int[]{nx, ny});
+                }
+            }
+        }
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ImageIO.write(img, "PNG", baos);
+        return baos.toByteArray();
+    }
+
+    private static boolean isBackground(BufferedImage img, int x, int y,
+                                        int bgA, int bgR, int bgG, int bgB) {
+        int px = img.getRGB(x, y);
+        int a  = (px >> 24) & 0xFF;
+        if (a < 50)  return true;                     // transparent = background
+        if (bgA < 50) return a < 50;                  // original was transparent bg
+        int r = (px >> 16) & 0xFF;
+        int g = (px >> 8)  & 0xFF;
+        int b =  px        & 0xFF;
+        return Math.abs(r - bgR) <= TOLERANCE
+            && Math.abs(g - bgG) <= TOLERANCE
+            && Math.abs(b - bgB) <= TOLERANCE;
+    }
+
+    // ── ID / name helpers ─────────────────────────────────────────────────────
+
+    /**
+     * Strips a known colour suffix or prefix from a block ID.
+     * "mars_black" → "mars",  "black_mars" → "mars",  "28_lam_black" → "28_lam"
+     */
+    private static String stripColorSuffix(String id) {
+        for (String c : COLOR_NAMES) {
+            if (id.endsWith("_" + c))   return id.substring(0, id.length() - c.length() - 1);
+            if (id.startsWith(c + "_")) return id.substring(c.length() + 1);
+        }
+        return id; // no colour found — append new one below
+    }
+
+    /** Replaces a known colour word in the display name, or appends the new colour. */
+    private static String deriveDisplayName(String original, String newColorName) {
+        for (String c : COLOR_NAMES) {
+            String cap = Character.toUpperCase(c.charAt(0)) + c.substring(1);
+            if (original.contains(cap)) return original.replace(cap, newColorName);
+            if (original.contains(c))   return original.replace(c,   newColorName.toLowerCase());
+        }
+        return original + " " + newColorName;
     }
 }

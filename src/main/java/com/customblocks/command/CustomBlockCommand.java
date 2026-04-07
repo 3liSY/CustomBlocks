@@ -66,6 +66,18 @@ public class CustomBlockCommand {
                         )
                     )
                 )
+                .then(CommandManager.literal("createurl")   // legacy alias for create
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .then(CommandManager.argument("name", StringArgumentType.word())
+                            .then(CommandManager.argument("url", StringArgumentType.greedyString())
+                                .executes(ctx -> cmdCreate(ctx.getSource(),
+                                    StringArgumentType.getString(ctx, "id"),
+                                    StringArgumentType.getString(ctx, "name").replace("_", " "),
+                                    StringArgumentType.getString(ctx, "url").trim()))
+                            )
+                        )
+                    )
+                )
 
                 // ── delete <id> ──────────────────────────────────────────────
                 .then(CommandManager.literal("delete")
@@ -607,7 +619,7 @@ public class CustomBlockCommand {
     private static int cmdHelp(ServerCommandSource src) {
         src.sendMessage(Text.literal("§e══ Custom Blocks Help ══"));
         src.sendMessage(Text.literal("§aPress §fB §ato open the visual GUI!"));
-        src.sendMessage(Text.literal("§f/customblock createurl <id> <n> <url>  §7create from image"));
+        src.sendMessage(Text.literal("§f/customblock create <id> <name> <url>  §7create block from image URL"));
         src.sendMessage(Text.literal("§f/customblock delete <id>  §7delete a block"));
         src.sendMessage(Text.literal("§f/customblock rename <id> <newname>  §7rename"));
         src.sendMessage(Text.literal("§f/customblock retexture <id> <url>  §7change texture"));
@@ -618,7 +630,7 @@ public class CustomBlockCommand {
         src.sendMessage(Text.literal("§f/customblock settabicon <url>  §7set tab icon"));
         src.sendMessage(Text.literal("§f/customblock set[top|bottom|north|south|east|west]face <id> <url>  §7set a face"));
         src.sendMessage(Text.literal("§f/customblock givesquare <black|yellow|green>  §7get a color-swap square item"));
-        src.sendMessage(Text.literal("§f/customblock givetriangle <black|yellow|green>  §7get a triangle to recolour block background"));
+        src.sendMessage(Text.literal("§f/customblock givetriangle <black|yellow|green>  §7create a colour variant of a block & receive it"));
         src.sendMessage(Text.literal("§f/customblock colorchanger [color]  §7give all 3 squares (or one color)"));
         src.sendMessage(Text.literal("§7Tip: use §f/cb§7 as a short alias for §f/customblock§7!"));
         src.sendMessage(Text.literal("§f/customblock clearface <id> <face>  §7revert one face to default"));

@@ -192,55 +192,145 @@ public class ResourcePackGenerator {
         }
     }
 
+    // ── Item texture generators ───────────────────────────────────────────────
+
     /**
-     * Generates a 16×16 RGBA PNG with a 9×9 coloured square centred on a transparent background.
+     * Glossy colour-swatch square (16×16 RGBA):
+     *  - 1-px transparent margin on all sides
+     *  - 1-px very-dark border ring
+     *  - main colour fill
+     *  - top highlight strip (colour blended ~55% toward white)
+     *  - bottom-right shadow strip (colour × 0.65)
+     *  - 2-px bright shine dot at top-left inner corner
      */
     private static byte[] makeSquarePng(int r, int g, int b) {
-        return makeShapePng(r, g, b, (row, col) -> row >= 3 && row < 12 && col >= 3 && col < 12);
+        int[][] px = new int[16][16]; // ARGB (0 = fully transparent)
+
+        int dark  = argb(255, r/4,                 g/4,                 b/4);
+        int main  = argb(255, r,                   g,                   b);
+        int light = argb(255, lerp(r, 255, 0.55f), lerp(g, 255, 0.55f), lerp(b, 255, 0.55f));
+        int shade = argb(255, (int)(r * 0.65f),    (int)(g * 0.65f),    (int)(b * 0.65f));
+        int shine = argb(255, 255,                  255,                 255);
+
+        // Main fill (rows 2-13, cols 2-13)
+        for (int row = 2; row <= 13; row++)
+            for (int col = 2; col <= 13; col++)
+                px[row][col] = main;
+
+        // Dark border ring (row/col 1 and 14)
+        for (int i = 1; i <= 14; i++) {
+            px[1][i] = dark;  px[14][i] = dark;
+            px[i][1] = dark;  px[i][14] = dark;
+        }
+
+        // Highlight strip — top 3 rows of fill
+        for (int row = 2; row <= 4; row++)
+            for (int col = 2; col <= 12; col++)
+                px[row][col] = light;
+
+        // Shadow — bottom 2 rows + right 2 cols of fill
+        for (int row = 12; row <= 13; row++)
+            for (int col = 4;  col <= 13; col++) px[row][col] = shade;
+        for (int row = 4;  row <= 13; row++)
+            for (int col = 12; col <= 13; col++) px[row][col] = shade;
+
+        // Shine dots at top-left inner corner
+        px[2][2] = shine; px[2][3] = shine; px[3][2] = shine;
+
+        return pixelsToPng(px);
     }
 
     /**
-     * Generates a 16×16 RGBA PNG with an upward-pointing triangle centred on a transparent background.
-     * Triangle vertices: top-centre (7,2), bottom-left (2,13), bottom-right (12,13).
+     * Bold outlined upward-pointing triangle (16×16 RGBA):
+     *  - Apex:  row 1, centred on cols 7-8
+     *  - Base:  row 14, cols 1-14
+     *  - 1-px very-dark outline on all edges
+     *  - main colour fill
+     *  - lighter highlight on top quarter
+     *  - shine dot just below the apex
      */
     private static byte[] makeTrianglePng(int r, int g, int b) {
-        return makeShapePng(r, g, b, (row, col) -> {
-            if (row < 2 || row > 13) return false;
-            // For each row, compute the x extent of the triangle
-            float progress = (float)(row - 2) / (13 - 2); // 0 at top, 1 at bottom
-            float halfW = progress * (12 - 2) / 2.0f;       // 0 at top, 5 at bottom
-            float cx = 7.0f;
-            return col >= (cx - halfW) && col <= (cx + halfW);
-        });
+        int[][] px = new int[16][16];
+
+        int dark  = argb(255, r/4,                 g/4,                 b/4);
+        int main  = argb(255, r,                   g,                   b);
+        int light = argb(255, lerp(r, 255, 0.55f), lerp(g, 255, 0.55f), lerp(b, 255, 0.55f));
+        int shine = argb(255, 255,                  255,                 255);
+
+        float apexCx  = 7.5f;
+        int   apexRow = 1, baseRow = 14;
+        float baseHW  = 6.5f;
+
+        // 1 — filled triangle
+        for (int row = apexRow; row <= baseRow; row++) {
+            float t    = (float)(row - apexRow) / (baseRow - apexRow);
+            float hw   = t * baseHW;
+            int   left = Math.round(apexCx - hw);
+            int   right= Math.round(apexCx + hw);
+            for (int col = left; col <= right; col++)
+                if (col >= 0 && col < 16) px[row][col] = main;
+        }
+
+        // 2 — dark outline (left edge, right edge, base row)
+        for (int row = apexRow; row <= baseRow; row++) {
+            float t    = (float)(row - apexRow) / (baseRow - apexRow);
+            float hw   = t * baseHW;
+            int   left = Math.round(apexCx - hw);
+            int   right= Math.round(apexCx + hw);
+            if (left  >= 0 && left  < 16) px[row][left]  = dark;
+            if (right >= 0 && right < 16) px[row][right] = dark;
+        }
+        // Top apex pixels
+        px[apexRow][7] = dark; px[apexRow][8] = dark;
+        // Base row
+        for (int col = 1; col <= 14; col++) if (px[baseRow][col] != 0) px[baseRow][col] = dark;
+
+        // 3 — highlight on top quarter (inside outline only)
+        for (int row = apexRow + 1; row <= apexRow + 4; row++) {
+            float t    = (float)(row - apexRow) / (baseRow - apexRow);
+            float hw   = t * baseHW;
+            int   left = Math.round(apexCx - hw) + 1;  // stay inside outline
+            int   right= Math.round(apexCx + hw) - 1;
+            for (int col = left; col <= right; col++)
+                if (col >= 0 && col < 16 && px[row][col] == main)
+                    px[row][col] = light;
+        }
+
+        // 4 — shine dot just below apex
+        if (px[3][7] == light) px[3][7] = shine;
+        if (px[3][8] == light) px[3][8] = shine;
+
+        return pixelsToPng(px);
     }
 
-    @FunctionalInterface interface PixelTest { boolean inside(int row, int col); }
+    // ── PNG encoding helpers ──────────────────────────────────────────────────
 
-    private static byte[] makeShapePng(int r, int g, int b, PixelTest test) {
+    private static int argb(int a, int r, int g, int b) {
+        return (a << 24) | (r << 16) | (g << 8) | b;
+    }
+
+    private static int lerp(int v, int target, float f) {
+        return Math.max(0, Math.min(255, v + (int)((target - v) * f)));
+    }
+
+    /** Encode a 16×16 ARGB int[][] to a valid RGBA PNG byte array. */
+    private static byte[] pixelsToPng(int[][] argbPixels) {
         try {
             int w = 16, h = 16;
-            // RGBA = 4 bytes per pixel
             byte[] raw = new byte[h * (1 + w * 4)];
             for (int row = 0; row < h; row++) {
                 int base = row * (1 + w * 4);
                 raw[base] = 0; // filter = None
                 for (int col = 0; col < w; col++) {
-                    if (test.inside(row, col)) {
-                        raw[base + 1 + col * 4]     = (byte) r;
-                        raw[base + 1 + col * 4 + 1] = (byte) g;
-                        raw[base + 1 + col * 4 + 2] = (byte) b;
-                        raw[base + 1 + col * 4 + 3] = (byte) 255; // opaque
-                    } else {
-                        raw[base + 1 + col * 4]     = 0;
-                        raw[base + 1 + col * 4 + 1] = 0;
-                        raw[base + 1 + col * 4 + 2] = 0;
-                        raw[base + 1 + col * 4 + 3] = 0; // transparent
-                    }
+                    int v = argbPixels[row][col];
+                    raw[base + 1 + col*4    ] = (byte)((v >> 16) & 0xFF); // R
+                    raw[base + 1 + col*4 + 1] = (byte)((v >>  8) & 0xFF); // G
+                    raw[base + 1 + col*4 + 2] = (byte)( v        & 0xFF); // B
+                    raw[base + 1 + col*4 + 3] = (byte)((v >> 24) & 0xFF); // A
                 }
             }
             java.util.zip.Deflater def = new java.util.zip.Deflater(java.util.zip.Deflater.BEST_COMPRESSION);
-            def.setInput(raw);
-            def.finish();
+            def.setInput(raw); def.finish();
             byte[] comp = new byte[raw.length + 128];
             int compLen = def.deflate(comp);
             def.end();
@@ -248,9 +338,7 @@ public class ResourcePackGenerator {
 
             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
             out.write(new byte[]{(byte)0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A});
-            // IHDR: 16x16, 8-bit RGBA (color type 6)
-            writeChunk(out, "IHDR", new byte[]{
-                0,0,0,16, 0,0,0,16, 8, 6, 0, 0, 0});
+            writeChunk(out, "IHDR", new byte[]{0,0,0,16, 0,0,0,16, 8, 6, 0, 0, 0});
             writeChunk(out, "IDAT", idat);
             writeChunk(out, "IEND", new byte[0]);
             return out.toByteArray();
