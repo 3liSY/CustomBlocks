@@ -13,8 +13,17 @@ public record SlotUpdatePayload(
         byte[] texture,
         int    lightLevel,
         float  hardness,
-        String soundType
+        String soundType,
+        String face
 ) implements CustomPayload {
+
+    /** Convenience constructor — no face (backwards-compat). */
+    public SlotUpdatePayload(String action, int slotIndex, String customId,
+                              String displayName, byte[] texture,
+                              int lightLevel, float hardness, String soundType) {
+        this(action, slotIndex, customId, displayName, texture,
+             lightLevel, hardness, soundType, null);
+    }
 
     public static final Id<SlotUpdatePayload> ID =
             new Id<>(Identifier.of("customblocks", "slot_update"));
@@ -29,6 +38,7 @@ public record SlotUpdatePayload(
                 buf.writeVarInt(value.lightLevel());
                 buf.writeFloat(value.hardness());
                 buf.writeString(value.soundType()   != null ? value.soundType()   : "stone");
+                buf.writeString(value.face()        != null ? value.face()        : "");
             },
             buf -> {
                 String action     = buf.readString();
@@ -39,8 +49,7 @@ public record SlotUpdatePayload(
                 int    lightLevel = buf.readVarInt();
                 float  hardness   = buf.readFloat();
                 String soundType  = buf.readString();
-                // Skip any leftover bytes — makes this decoder tolerant of
-                // ANY version of the server codec, old or new, forever.
+                String face       = buf.readableBytes() > 0 ? buf.readString() : "";
                 if (buf.readableBytes() > 0) buf.skipBytes(buf.readableBytes());
                 return new SlotUpdatePayload(
                         action, index,
@@ -48,7 +57,8 @@ public record SlotUpdatePayload(
                         name.isEmpty() ? null : name,
                         tex.length > 0 ? tex  : null,
                         lightLevel, hardness,
-                        soundType.isEmpty() ? "stone" : soundType
+                        soundType.isEmpty() ? "stone" : soundType,
+                        face.isEmpty() ? null : face
                 );
             }
     );

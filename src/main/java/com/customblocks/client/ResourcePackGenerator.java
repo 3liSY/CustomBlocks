@@ -10,9 +10,11 @@ import net.fabricmc.api.Environment;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.texture.NativeImage;
 
+import java.awt.Color;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.util.Map;
 import java.util.Map;
 
 @Environment(EnvType.CLIENT)
@@ -58,11 +60,18 @@ public class ResourcePackGenerator {
                 String modelRef = MOD_ID + ":block/" + slotKey;
                 SlotManager.SlotData data = SlotManager.getBySlot(slotKey);
 
-                // ── Default (all-faces) texture — skip write if file already same size ──
+                // ── Default (all-faces) texture ────────────────────────────────
                 File texDest = new File(assets, "textures/block/" + slotKey + ".png");
                 if (data != null && data.texture != null && data.texture.length > 0) {
                     if (!texDest.exists() || texDest.length() != data.texture.length)
                         writePng(data.texture, texDest);
+                    // Write animation mcmeta for animated (GIF) textures
+                    if (data.isAnimated()) {
+                        File mcmeta = new File(assets, "textures/block/" + slotKey + ".png.mcmeta");
+                        try (java.io.FileWriter fw = new java.io.FileWriter(mcmeta, java.nio.charset.StandardCharsets.UTF_8)) {
+                            fw.write(data.animMeta);
+                        }
+                    }
                 } else {
                     if (!texDest.exists())
                         Files.write(texDest.toPath(), PLACEHOLDER_PNG);
@@ -167,6 +176,16 @@ public class ResourcePackGenerator {
                 writeJson(trModel, new File(assets, "models/item/" + itemId + ".json"));
             }
 
+            // ── Rainbow Rectangle item texture ─────────────────────────────────
+            File rectTex = new File(assets, "textures/item/rainbow_rectangle.png");
+            Files.write(rectTex.toPath(), makeRainbowRectanglePng());
+            JsonObject rectTexObj = new JsonObject();
+            rectTexObj.addProperty("layer0", MOD_ID + ":item/rainbow_rectangle");
+            JsonObject rectModel = new JsonObject();
+            rectModel.addProperty("parent", "minecraft:item/generated");
+            rectModel.add("textures", rectTexObj);
+            writeJson(rectModel, new File(assets, "models/item/rainbow_rectangle.json"));
+
             CustomBlocksMod.LOGGER.info("[CustomBlocks] Resource pack generated.");
         } catch (Exception e) {
             CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to generate resource pack", e);
@@ -203,6 +222,55 @@ public class ResourcePackGenerator {
      *  - bottom-right shadow strip (colour × 0.65)
      *  - 2-px bright shine dot at top-left inner corner
      */
+    /**
+     * Rainbow Rectangle item texture — 16x8 glowing rainbow bar with rounded ends,
+     * animated-style gradient from left (red) to right (violet) with a white shine strip.
+     */
+    private static byte[] makeRainbowRectanglePng() {
+        int[][] px = new int[16][16];
+        // Draw a rounded rectangle from row 4 to row 11 (8px tall, 16px wide)
+        float[] hues = {0f, 0.083f, 0.167f, 0.25f, 0.333f, 0.417f, 0.5f, 0.583f, 0.667f,
+                        0.75f, 0.833f, 0.917f, 1f, 1f, 1f, 1f};
+        for (int row = 4; row <= 11; row++) {
+            for (int col = 0; col < 16; col++) {
+                // Rounded corners — skip outermost 2 cells on top/bottom rows at edges
+                if ((row == 4 || row == 11) && (col == 0 || col == 15)) continue;
+                float hue = hues[col];
+                float sat = 1f, bri = row == 5 ? 1f : 0.85f; // shine on second row
+                int rgb = hsbToArgb(hue, sat, bri);
+                // Add white shine on top inner row
+                if (row == 5) {
+                    int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
+                    r = lerp(r, 255, 0.5f); g = lerp(g, 255, 0.5f); b = lerp(b, 255, 0.5f);
+                    rgb = argb(255, r, g, b);
+                }
+                px[row][col] = rgb;
+            }
+        }
+        // Dark outline
+        for (int col = 1; col < 15; col++) {
+            if (px[4][col] != 0) px[4][col] = darken(px[4][col]);
+            if (px[11][col] != 0) px[11][col] = darken(px[11][col]);
+        }
+        for (int row = 5; row <= 10; row++) {
+            if (px[row][0] != 0) px[row][0] = darken(px[row][0]);
+            if (px[row][15] != 0) px[row][15] = darken(px[row][15]);
+        }
+        return pixelsToPng(px);
+    }
+
+    private static int hsbToArgb(float h, float s, float b) {
+        int rgb = Color.HSBtoRGB(h, s, b);
+        return argb(255, (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+    }
+
+    private static int darken(int argbColor) {
+        int r = ((argbColor >> 16) & 0xFF) / 4;
+        int g = ((argbColor >> 8)  & 0xFF) / 4;
+        int b = ( argbColor        & 0xFF) / 4;
+        return argb(255, r, g, b);
+    }
+
     private static byte[] makeSquarePng(int r, int g, int b) {
         int[][] px = new int[16][16]; // ARGB (0 = fully transparent)
 

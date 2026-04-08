@@ -20,8 +20,46 @@ public class SlotManager {
     private static final Map<String, String>   ID_TO_SLOT = new ConcurrentHashMap<>();
     private static byte[] tabIconTexture = null;
 
-    /** Valid face keys — exactly what the user types in commands. */
+    /** Valid face keys. */
     public static final List<String> FACE_KEYS = List.of("top","bottom","north","south","east","west");
+
+    // ── Undo stack ────────────────────────────────────────────────────────────
+    private static final Deque<UndoEntry> UNDO_STACK = new ArrayDeque<>();
+    private static final int MAX_UNDO = 20;
+
+    public record UndoEntry(
+            String customId,
+            SlotData previousState,
+            String description   // e.g. "retexture", "setface top", "setglow 5"
+    ) {}
+
+    /** Push current state before a destructive operation. */
+    public static void pushUndo(String customId, String description) {
+        SlotData current = getById(customId);
+        if (current == null) return;
+        // Deep-copy the face textures so later mutations don't corrupt the snapshot
+        Map<String, byte[]> facesCopy = new ConcurrentHashMap<>(current.faceTextures);
+        SlotData snapshot = new SlotData(
+                current.index, current.customId, current.displayName,
+                current.texture != null ? current.texture.clone() : null,
+                current.lightLevel, current.hardness, current.soundType,
+                facesCopy, current.animMeta);
+        synchronized (UNDO_STACK) {
+            UNDO_STACK.push(new UndoEntry(customId, snapshot, description));
+            while (UNDO_STACK.size() > MAX_UNDO) UNDO_STACK.pollLast();
+        }
+    }
+
+    /** Pop and return the most recent undo entry (null if stack empty). */
+    public static UndoEntry popUndo() {
+        synchronized (UNDO_STACK) {
+            return UNDO_STACK.isEmpty() ? null : UNDO_STACK.pop();
+        }
+    }
+
+    public static int undoStackSize() {
+        synchronized (UNDO_STACK) { return UNDO_STACK.size(); }
+    }
 
     // ── Data class ────────────────────────────────────────────────────────────
 
@@ -33,38 +71,44 @@ public class SlotManager {
         public       int    lightLevel;
         public       float  hardness;
         public       String soundType;
-        /** Per-face overrides. Keys: top bottom north south east west.
-         *  Missing faces fall back to the default texture. Never null. */
+        /** Per-face overrides. Keys: top bottom north south east west. Never null. */
         public final Map<String, byte[]> faceTextures;
+        /** JSON string for Minecraft animated texture .mcmeta. Null if not animated. */
+        public       String animMeta;
+
+        public SlotData(int index, String customId, String displayName, byte[] texture,
+                        int lightLevel, float hardness, String soundType,
+                        Map<String, byte[]> faceTextures, String animMeta) {
+            this.index       = index;
+            this.customId    = customId;
+            this.displayName = displayName;
+            this.texture     = texture;
+            this.lightLevel  = Math.max(0, Math.min(15, lightLevel));
+            this.hardness    = hardness;
+            this.soundType   = (soundType != null && !soundType.isEmpty()) ? soundType : "stone";
+            this.faceTextures = (faceTextures != null)
+                    ? new ConcurrentHashMap<>(faceTextures) : new ConcurrentHashMap<>();
+            this.animMeta    = animMeta;
+        }
 
         public SlotData(int index, String customId, String displayName, byte[] texture,
                         int lightLevel, float hardness, String soundType,
                         Map<String, byte[]> faceTextures) {
-            this.index        = index;
-            this.customId     = customId;
-            this.displayName  = displayName;
-            this.texture      = texture;
-            this.lightLevel   = Math.max(0, Math.min(15, lightLevel));
-            this.hardness     = hardness;
-            this.soundType    = (soundType != null && !soundType.isEmpty()) ? soundType : "stone";
-            this.faceTextures = (faceTextures != null)
-                    ? new ConcurrentHashMap<>(faceTextures)
-                    : new ConcurrentHashMap<>();
+            this(index, customId, displayName, texture, lightLevel, hardness, soundType, faceTextures, null);
         }
 
-        /** No face overrides */
         public SlotData(int index, String customId, String displayName, byte[] texture,
                         int lightLevel, float hardness, String soundType) {
-            this(index, customId, displayName, texture, lightLevel, hardness, soundType, null);
+            this(index, customId, displayName, texture, lightLevel, hardness, soundType, null, null);
         }
 
-        /** All defaults */
         public SlotData(int index, String customId, String displayName, byte[] texture) {
-            this(index, customId, displayName, texture, 0, 1.5f, "stone", null);
+            this(index, customId, displayName, texture, 0, 1.5f, "stone", null, null);
         }
 
-        public String  slotKey()  { return "slot_" + index; }
-        public boolean hasFaces() { return !faceTextures.isEmpty(); }
+        public String  slotKey()     { return "slot_" + index; }
+        public boolean hasFaces()    { return !faceTextures.isEmpty(); }
+        public boolean isAnimated()  { return animMeta != null && !animMeta.isEmpty(); }
     }
 
     // ── Queries ───────────────────────────────────────────────────────────────
@@ -76,7 +120,7 @@ public class SlotManager {
     }
     public static Collection<SlotData> allSlots()     { return Collections.unmodifiableCollection(SLOTS.values()); }
     public static Set<String>          allCustomIds() { return Collections.unmodifiableSet(ID_TO_SLOT.keySet()); }
-    public static boolean              hasId(String id)  { return ID_TO_SLOT.containsKey(id); }
+    public static boolean              hasId(String id)   { return ID_TO_SLOT.containsKey(id); }
     public static int                  usedSlots()    { return SLOTS.size(); }
     public static int                  freeSlots()    { return MAX_SLOTS - SLOTS.size(); }
     public static byte[]               getTabIconTexture() { return tabIconTexture; }
@@ -111,10 +155,10 @@ public class SlotManager {
     public static SlotData assignAtIndex(int index, String customId, String displayName, byte[] texture) {
         if (index < 0 || index >= MAX_SLOTS) return null;
         String key = "slot_" + index;
-        // Preserve face textures if slot already exists (e.g. re-join)
         SlotData existing = SLOTS.get(key);
         Map<String, byte[]> faces = (existing != null) ? existing.faceTextures : null;
-        SlotData data = new SlotData(index, customId, displayName, texture, 0, 1.5f, "stone", faces);
+        String animMeta = (existing != null) ? existing.animMeta : null;
+        SlotData data = new SlotData(index, customId, displayName, texture, 0, 1.5f, "stone", faces, animMeta);
         SLOTS.put(key, data);
         ID_TO_SLOT.put(customId, key);
         return data;
@@ -132,7 +176,7 @@ public class SlotManager {
         if (k == null) return false;
         SlotData o = SLOTS.get(k);
         SLOTS.put(k, new SlotData(o.index, o.customId, newName, o.texture,
-                o.lightLevel, o.hardness, o.soundType, o.faceTextures));
+                o.lightLevel, o.hardness, o.soundType, o.faceTextures, o.animMeta));
         return true;
     }
 
@@ -141,7 +185,7 @@ public class SlotManager {
         if (k == null) return false;
         SlotData o = SLOTS.get(k);
         SLOTS.put(k, new SlotData(o.index, o.customId, o.displayName, texture,
-                o.lightLevel, o.hardness, o.soundType, o.faceTextures));
+                o.lightLevel, o.hardness, o.soundType, o.faceTextures, o.animMeta));
         return true;
     }
 
@@ -150,7 +194,7 @@ public class SlotManager {
         if (k == null) return false;
         SlotData o = SLOTS.get(k);
         SLOTS.put(k, new SlotData(o.index, o.customId, o.displayName, o.texture,
-                lightLevel, hardness, soundType, o.faceTextures));
+                lightLevel, hardness, soundType, o.faceTextures, o.animMeta));
         return true;
     }
 
@@ -159,7 +203,7 @@ public class SlotManager {
         if (k == null) return false;
         SlotData o = SLOTS.get(k);
         SLOTS.put(k, new SlotData(o.index, o.customId, o.displayName, o.texture,
-                level, o.hardness, o.soundType, o.faceTextures));
+                level, o.hardness, o.soundType, o.faceTextures, o.animMeta));
         return true;
     }
 
@@ -168,7 +212,7 @@ public class SlotManager {
         if (k == null) return false;
         SlotData o = SLOTS.get(k);
         SLOTS.put(k, new SlotData(o.index, o.customId, o.displayName, o.texture,
-                o.lightLevel, hardness, o.soundType, o.faceTextures));
+                o.lightLevel, hardness, o.soundType, o.faceTextures, o.animMeta));
         return true;
     }
 
@@ -177,11 +221,19 @@ public class SlotManager {
         if (k == null) return false;
         SlotData o = SLOTS.get(k);
         SLOTS.put(k, new SlotData(o.index, o.customId, o.displayName, o.texture,
-                o.lightLevel, o.hardness, soundType, o.faceTextures));
+                o.lightLevel, o.hardness, soundType, o.faceTextures, o.animMeta));
         return true;
     }
 
-    /** Set or replace one face texture. face must be one of FACE_KEYS. */
+    public static boolean setAnimMeta(String customId, String animMeta) {
+        String k = ID_TO_SLOT.get(customId);
+        if (k == null) return false;
+        SlotData o = SLOTS.get(k);
+        SLOTS.put(k, new SlotData(o.index, o.customId, o.displayName, o.texture,
+                o.lightLevel, o.hardness, o.soundType, o.faceTextures, animMeta));
+        return true;
+    }
+
     public static boolean setFaceTexture(String customId, String face, byte[] texture) {
         if (!FACE_KEYS.contains(face)) return false;
         String k = ID_TO_SLOT.get(customId);
@@ -190,11 +242,10 @@ public class SlotManager {
         Map<String, byte[]> faces = new ConcurrentHashMap<>(o.faceTextures);
         faces.put(face, texture);
         SLOTS.put(k, new SlotData(o.index, o.customId, o.displayName, o.texture,
-                o.lightLevel, o.hardness, o.soundType, faces));
+                o.lightLevel, o.hardness, o.soundType, faces, o.animMeta));
         return true;
     }
 
-    /** Remove a face override, reverting that face back to the default texture. */
     public static boolean clearFaceTexture(String customId, String face) {
         String k = ID_TO_SLOT.get(customId);
         if (k == null) return false;
@@ -202,21 +253,31 @@ public class SlotManager {
         Map<String, byte[]> faces = new ConcurrentHashMap<>(o.faceTextures);
         faces.remove(face);
         SLOTS.put(k, new SlotData(o.index, o.customId, o.displayName, o.texture,
-                o.lightLevel, o.hardness, o.soundType, faces));
+                o.lightLevel, o.hardness, o.soundType, faces, o.animMeta));
         return true;
     }
 
-    /** Remove ALL face overrides from a block. */
     public static boolean clearAllFaces(String customId) {
         String k = ID_TO_SLOT.get(customId);
         if (k == null) return false;
         SlotData o = SLOTS.get(k);
         SLOTS.put(k, new SlotData(o.index, o.customId, o.displayName, o.texture,
-                o.lightLevel, o.hardness, o.soundType, null));
+                o.lightLevel, o.hardness, o.soundType, null, o.animMeta));
         return true;
     }
 
-    // ── Persistence (server-side) ─────────────────────────────────────────────
+    /**
+     * Restore a block to a previous snapshot (used by /cb undo).
+     * Returns false if the slot no longer exists.
+     */
+    public static boolean restoreSnapshot(SlotData snapshot) {
+        String k = ID_TO_SLOT.get(snapshot.customId);
+        if (k == null) return false;
+        SLOTS.put(k, snapshot);
+        return true;
+    }
+
+    // ── Persistence ───────────────────────────────────────────────────────────
 
     private static File getConfigDir() { return new File("config/customblocks"); }
 
@@ -233,7 +294,7 @@ public class SlotManager {
             e.addProperty("lightLevel",  d.lightLevel);
             e.addProperty("hardness",    d.hardness);
             e.addProperty("soundType",   d.soundType);
-            // Record which faces have overrides so loadAll knows which files to look for
+            if (d.animMeta != null) e.addProperty("animMeta", d.animMeta);
             if (!d.faceTextures.isEmpty()) {
                 JsonArray faces = new JsonArray();
                 d.faceTextures.keySet().forEach(faces::add);
@@ -246,30 +307,26 @@ public class SlotManager {
             GSON.toJson(root, fw);
         } catch (IOException ex) { LOGGER.error("Failed to save slots.json", ex); }
 
-        // Track which slot+face files are still valid
         java.util.Set<String> validFiles = new java.util.HashSet<>();
         for (SlotData d : SLOTS.values()) {
             if (d.texture != null && d.texture.length > 0) {
                 try {
                     Files.write(new File(dir, d.slotKey() + ".png").toPath(), d.texture);
-                    validFiles.add(d.slotKey() + ".png"); // only protect if actually written
+                    validFiles.add(d.slotKey() + ".png");
                 } catch (IOException ex) { LOGGER.error("Failed to save texture for {}", d.customId, ex); }
             }
-            // Save face textures and mark as valid
             for (Map.Entry<String, byte[]> face : d.faceTextures.entrySet()) {
                 String faceFile = d.slotKey() + "_" + face.getKey() + ".png";
                 try { Files.write(new File(dir, faceFile).toPath(), face.getValue()); }
-                catch (IOException ex) { LOGGER.error("Failed to save face texture {} for {}", face.getKey(), d.customId, ex); }
+                catch (IOException ex) { LOGGER.error("Failed to save face {} for {}", face.getKey(), d.customId, ex); }
                 validFiles.add(faceFile);
             }
         }
-        // Delete any orphaned face PNG files (from cleared faces or deleted blocks)
         File[] pngs = dir.listFiles((d2, n) -> n.matches("slot_\\d+(_[a-z]+)?\\.png"));
         if (pngs != null) {
             for (File f : pngs) {
                 if (!validFiles.contains(f.getName())) {
-                    try { Files.deleteIfExists(f.toPath()); }
-                    catch (IOException ignored) {}
+                    try { Files.deleteIfExists(f.toPath()); } catch (IOException ignored) {}
                 }
             }
         }
@@ -295,9 +352,9 @@ public class SlotManager {
                 int    lightLevel  = e.has("lightLevel") ? e.get("lightLevel").getAsInt()   : 0;
                 float  hardness    = e.has("hardness")   ? e.get("hardness").getAsFloat()   : 1.5f;
                 String soundType   = e.has("soundType")  ? e.get("soundType").getAsString() : "stone";
+                String animMeta    = e.has("animMeta")   ? e.get("animMeta").getAsString()  : null;
                 File   texFile     = new File(dir, "slot_" + index + ".png");
                 byte[] texture     = texFile.exists() ? Files.readAllBytes(texFile.toPath()) : null;
-                // Load face textures
                 Map<String, byte[]> faces = new ConcurrentHashMap<>();
                 if (e.has("faces")) {
                     for (JsonElement faceEl : e.getAsJsonArray("faces")) {
@@ -307,7 +364,7 @@ public class SlotManager {
                     }
                 }
                 SlotData data = new SlotData(index, customId, displayName, texture,
-                        lightLevel, hardness, soundType, faces);
+                        lightLevel, hardness, soundType, faces, animMeta);
                 SLOTS.put("slot_" + index, data);
                 ID_TO_SLOT.put(customId, "slot_" + index);
             }
@@ -341,6 +398,7 @@ public class SlotManager {
                 int    lightLevel  = e.has("lightLevel") ? e.get("lightLevel").getAsInt()   : 0;
                 float  hardness    = e.has("hardness")   ? e.get("hardness").getAsFloat()   : 1.5f;
                 String soundType   = e.has("soundType")  ? e.get("soundType").getAsString() : "stone";
+                String animMeta    = e.has("animMeta")   ? e.get("animMeta").getAsString()  : null;
                 File   texFile     = new File(dir, "slot_" + index + ".png");
                 byte[] texture     = texFile.exists() ? Files.readAllBytes(texFile.toPath()) : null;
                 Map<String, byte[]> faces = new ConcurrentHashMap<>();
@@ -352,7 +410,7 @@ public class SlotManager {
                     }
                 }
                 SLOTS.put("slot_" + index, new SlotData(index, customId, displayName, texture,
-                        lightLevel, hardness, soundType, faces));
+                        lightLevel, hardness, soundType, faces, animMeta));
                 ID_TO_SLOT.put(customId, "slot_" + index);
             }
             File tabFile = new File(dir, "tab_icon.png");
@@ -373,6 +431,7 @@ public class SlotManager {
             e.addProperty("lightLevel",  d.lightLevel);
             e.addProperty("hardness",    d.hardness);
             e.addProperty("soundType",   d.soundType);
+            if (d.animMeta != null) e.addProperty("animMeta", d.animMeta);
             if (!d.faceTextures.isEmpty()) {
                 JsonArray faces = new JsonArray();
                 d.faceTextures.keySet().forEach(faces::add);
@@ -398,7 +457,6 @@ public class SlotManager {
             try { Files.write(new File(dir, "tab_icon.png").toPath(), tabIconTexture); }
             catch (IOException ignored) {}
         }
-        // Clean up orphaned face PNGs on client side too
         java.util.Set<String> clientValid = new java.util.HashSet<>();
         for (SlotData d : SLOTS.values()) {
             if (d.texture != null && d.texture.length > 0) clientValid.add(d.slotKey() + ".png");

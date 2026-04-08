@@ -180,10 +180,10 @@ public class RectangleToolItem extends Item {
                     SlotManager.setFaceTexture(slotId, face, processed);
                     SlotManager.saveAll();
 
-                    // Broadcast so all connected clients regenerate their resource packs
+                    // Broadcast setface — ONLY this face updates on clients; other faces unchanged
                     CustomBlocksMod.broadcastUpdate(server,
-                        new SlotUpdatePayload("retexture", d.index, d.customId,
-                            null, processed, d.lightLevel, d.hardness, d.soundType));
+                        new SlotUpdatePayload("setface", d.index, d.customId,
+                            null, processed, d.lightLevel, d.hardness, d.soundType, face));
 
                     player.sendMessage(Text.literal(
                         "§a[CustomBlocks] §f" + face.toUpperCase()

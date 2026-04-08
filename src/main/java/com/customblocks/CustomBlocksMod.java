@@ -173,10 +173,19 @@ public class CustomBlocksMod implements ModInitializer {
 
             ConcurrentLinkedQueue<SlotUpdatePayload> queue = new ConcurrentLinkedQueue<>();
             SlotManager.allSlots().stream()
-                    .filter(d -> d.texture != null && d.texture.length > 0)
                     .sorted(Comparator.comparingInt(d -> d.index))
-                    .forEach(d -> queue.add(new SlotUpdatePayload("add", d.index, d.customId, d.displayName,
-                            d.texture, d.lightLevel, d.hardness, d.soundType)));
+                    .forEach(d -> {
+                        // Queue main texture
+                        if (d.texture != null && d.texture.length > 0)
+                            queue.add(new SlotUpdatePayload("add", d.index, d.customId, d.displayName,
+                                    d.texture, d.lightLevel, d.hardness, d.soundType));
+                        // Queue each face texture override so the joining player sees them
+                        for (var faceEntry : d.faceTextures.entrySet()) {
+                            queue.add(new SlotUpdatePayload("setface", d.index, d.customId, null,
+                                    faceEntry.getValue(), d.lightLevel, d.hardness, d.soundType,
+                                    faceEntry.getKey()));
+                        }
+                    });
             UUID uuid = handler.player.getUuid();
             PENDING_TEXTURES.put(uuid, queue);
             SEND_DELAY.put(uuid, DELAY_TICKS);

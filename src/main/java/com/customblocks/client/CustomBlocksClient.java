@@ -124,6 +124,21 @@ public class CustomBlocksClient implements ClientModInitializer {
                         SlotManager.updateTexture(payload.customId(), payload.texture());
                         TextureCache.invalidate(payload.customId());
                     }
+                    case "setface" -> {
+                        if (payload.face() != null && payload.texture() != null) {
+                            SlotManager.setFaceTexture(payload.customId(), payload.face(), payload.texture());
+                            TextureCache.invalidate(payload.customId());
+                        }
+                    }
+                    case "clearface" -> {
+                        if (payload.face() != null)
+                            SlotManager.clearFaceTexture(payload.customId(), payload.face());
+                        TextureCache.invalidate(payload.customId());
+                    }
+                    case "clearfaces" -> {
+                        SlotManager.clearAllFaces(payload.customId());
+                        TextureCache.invalidate(payload.customId());
+                    }
                     case "tabicon" -> {
                         SlotManager.setTabIconTexture(payload.texture());
                         scheduleGenerateAndReload(client);
@@ -132,7 +147,8 @@ public class CustomBlocksClient implements ClientModInitializer {
                 }
                 String action = payload.action();
                 boolean needsReload = action.equals("add") || action.equals("retexture")
-                        || action.equals("remove");
+                        || action.equals("remove") || action.equals("setface")
+                        || action.equals("clearface") || action.equals("clearfaces");
                 if (needsReload) scheduleGenerateAndReload(client);
             });
         });
