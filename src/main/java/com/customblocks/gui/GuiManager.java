@@ -11,6 +11,7 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.screen.SimpleNamedScreenHandlerFactory;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 
@@ -35,7 +36,7 @@ public class GuiManager {
     public record GuiState(GuiMode mode, int page, String editingId, boolean confirmDelete) {
         static GuiState main(int page)    { return new GuiState(GuiMode.MAIN,   page, null, false); }
         static GuiState editor(String id, int page) { return new GuiState(GuiMode.EDITOR, page, id, false); }
-        GuiState confirmDelete()          { return new GuiState(mode, page, editingId, true); }
+        public GuiState withConfirmDelete() { return new GuiState(mode, page, editingId, true); }
     }
 
     // Multi-step chat input
@@ -194,6 +195,7 @@ public class GuiManager {
             case 8 -> {                                                          // Delete
                 if (state.confirmDelete()) {
                     // Confirmed — delete
+                    SlotManager.pushUndoDelete(id);
                     SlotManager.remove(id);
                     SlotManager.saveAll();
                     CustomBlocksMod.broadcastUpdate(player.getServer(),
@@ -202,7 +204,7 @@ public class GuiManager {
                     openMain(player, returnPage);
                 } else {
                     // First click — arm confirm
-                    STATES.put(player.getUuid(), state.confirmDelete());
+                    STATES.put(player.getUuid(), state.withConfirmDelete());
                     player.getServer().execute(() -> {
                         SlotManager.SlotData dd = SlotManager.getById(id);
                         if (dd == null) return;
@@ -482,7 +484,7 @@ public class GuiManager {
                 : ui(Items.RED_CONCRETE, "§c§lDelete Block", "§7Click once to arm, click again to confirm."));
 
         // Row 1: Texture controls
-        inv.setStack(9,  GLASS);
+        inv.setStack(9,  glass());
         inv.setStack(10, uiGlint(Items.PAINTING,    "§b✦ Retexture ALL Faces",    "§7Replaces the texture on every face", "§8Click → enter URL in chat"));
         inv.setStack(11, ui(Items.WHITE_CONCRETE,    "§e▲ Set TOP Face",            "§8Click → enter URL in chat"));
         inv.setStack(12, ui(Items.LIGHT_GRAY_CONCRETE,"§e▼ Set BOTTOM Face",        "§8Click → enter URL in chat"));
