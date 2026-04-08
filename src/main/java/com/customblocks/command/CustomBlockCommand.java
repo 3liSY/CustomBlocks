@@ -1,6 +1,7 @@
 package com.customblocks.command;
 
 import com.customblocks.CustomBlocksMod;
+import com.customblocks.ImageProcessor;
 import com.customblocks.SlotManager;
 import com.customblocks.block.SlotBlock;
 import com.customblocks.network.SlotUpdatePayload;
@@ -67,6 +68,18 @@ public class CustomBlockCommand {
                     )
                 )
                 .then(CommandManager.literal("createurl")   // legacy alias for create
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .then(CommandManager.argument("name", StringArgumentType.word())
+                            .then(CommandManager.argument("url", StringArgumentType.greedyString())
+                                .executes(ctx -> cmdCreate(ctx.getSource(),
+                                    StringArgumentType.getString(ctx, "id"),
+                                    StringArgumentType.getString(ctx, "name").replace("_", " "),
+                                    StringArgumentType.getString(ctx, "url").trim()))
+                            )
+                        )
+                    )
+                )
+                .then(CommandManager.literal("createurl")   // legacy alias
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .then(CommandManager.argument("name", StringArgumentType.word())
                             .then(CommandManager.argument("url", StringArgumentType.greedyString())
@@ -263,6 +276,10 @@ public class CustomBlockCommand {
                         })
                         .executes(ctx -> cmdGiveTriangle(ctx.getSource(),
                             StringArgumentType.getString(ctx, "color")))))
+
+                // ── giverectangle ─────────────────────────────────────────────────────────
+                .then(CommandManager.literal("giverectangle")
+                    .executes(ctx -> cmdGiveRectangle(ctx.getSource())))
 
                 .then(CommandManager.literal("clearallfaces")
                     .executes(ctx -> usage(ctx.getSource(), "clearallfaces"))
@@ -631,6 +648,7 @@ public class CustomBlockCommand {
         src.sendMessage(Text.literal("§f/customblock set[top|bottom|north|south|east|west]face <id> <url>  §7set a face"));
         src.sendMessage(Text.literal("§f/customblock givesquare <black|yellow|green>  §7get a color-swap square item"));
         src.sendMessage(Text.literal("§f/customblock givetriangle <black|yellow|green>  §7create a colour variant of a block & receive it"));
+        src.sendMessage(Text.literal("§f/customblock giverectangle  §7get the Rainbow Rectangle face-paint tool"));
         src.sendMessage(Text.literal("§f/customblock colorchanger [color]  §7give all 3 squares (or one color)"));
         src.sendMessage(Text.literal("§7Tip: use §f/cb§7 as a short alias for §f/customblock§7!"));
         src.sendMessage(Text.literal("§f/customblock clearface <id> <face>  §7revert one face to default"));
@@ -758,6 +776,23 @@ public class CustomBlockCommand {
         return 1;
     }
 
+    private static int cmdGiveRectangle(ServerCommandSource src) {
+        net.minecraft.util.Identifier rectId =
+            net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, "rainbow_rectangle");
+        net.minecraft.item.Item rectItem = net.minecraft.registry.Registries.ITEM.get(rectId);
+        if (rectItem == null || rectItem == net.minecraft.item.Items.AIR) {
+            src.sendError(Text.literal("§cRainbow Rectangle not found — is the mod loaded?")); return 0;
+        }
+        try {
+            ServerPlayerEntity self = src.getPlayerOrThrow();
+            self.getInventory().insertStack(new ItemStack(rectItem, 1));
+            src.sendMessage(Text.literal("§6[CustomBlocks] §eGiven Rainbow Rectangle! §7Right-click any face of a Custom Block, then paste an image URL in chat."));
+        } catch (Exception ex) {
+            src.sendError(Text.literal("§cRun as a player.")); return 0;
+        }
+        return 1;
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static int usage(ServerCommandSource src, String cmd) {
@@ -787,23 +822,11 @@ public class CustomBlockCommand {
         return id.toLowerCase().replaceAll("[^a-z0-9_]", "_");
     }
 
-    private static final java.net.http.HttpClient HTTP_CLIENT =
-            java.net.http.HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(10))
-                    .build();
+    // ── Download helpers (delegated to ImageProcessor) ────────────────────────
 
-    private static byte[] download(String url) throws IOException, InterruptedException {
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("User-Agent", "CustomBlocksMod/1.0")
-                .timeout(Duration.ofSeconds(15)).build();
-        HttpResponse<byte[]> res = HTTP_CLIENT.send(req, HttpResponse.BodyHandlers.ofByteArray());
-        if (res.statusCode() != 200)
-            throw new IOException("HTTP " + res.statusCode());
-        byte[] body = res.body();
-        if (body.length > 10_485_760)
-            throw new IOException("Image too large (max 10MB, got " + (body.length / 1024) + "KB)");
-        return body;
+    /** Download + convert to PNG + auto white→black bg. Used by all URL commands. */
+    private static byte[] download(String url) throws Exception {
+        return ImageProcessor.downloadAndProcess(url);
     }
 
     private static void thread(Runnable r) {

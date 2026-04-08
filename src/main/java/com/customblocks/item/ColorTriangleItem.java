@@ -247,15 +247,32 @@ public class ColorTriangleItem extends Item {
     // ── ID / name helpers ─────────────────────────────────────────────────────
 
     /**
-     * Strips a known colour suffix or prefix from a block ID.
-     * "mars_black" → "mars",  "black_mars" → "mars",  "28_lam_black" → "28_lam"
+     * Strips a known colour segment from a block ID by scanning underscore-
+     * separated tokens and removing the FIRST one that exactly matches a
+     * known colour word.
+     *
+     * "mars_black"      → "mars"
+     * "28_lam_black"    → "28_lam"
+     * "black_mars"      → "mars"
+     * "letter_black_v2" → "letter_v2"
+     *
+     * If no colour token is found the original ID is returned unchanged
+     * (the new colour will be appended as a suffix by the caller).
      */
     private static String stripColorSuffix(String id) {
-        for (String c : COLOR_NAMES) {
-            if (id.endsWith("_" + c))   return id.substring(0, id.length() - c.length() - 1);
-            if (id.startsWith(c + "_")) return id.substring(c.length() + 1);
+        String[] segments = id.split("_", -1);
+        for (int i = 0; i < segments.length; i++) {
+            for (String c : COLOR_NAMES) {
+                if (segments[i].equalsIgnoreCase(c)) {
+                    // Remove this segment, rejoin the rest
+                    String[] without = new String[segments.length - 1];
+                    System.arraycopy(segments, 0, without, 0, i);
+                    System.arraycopy(segments, i + 1, without, i, segments.length - i - 1);
+                    return String.join("_", without);
+                }
+            }
         }
-        return id; // no colour found — append new one below
+        return id; // no colour found — caller will append new colour
     }
 
     /** Replaces a known colour word in the display name, or appends the new colour. */

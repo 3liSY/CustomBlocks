@@ -14,112 +14,108 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
 /**
- * Right-click on any CustomBlock to swap it to the same block ID but with
- * this item's color prefix.
+ * Right-click any CustomBlock to swap it to the same block ID but with this
+ * item's colour segment substituted in.
  *
- * Example: yellow square + black_alef  →  world block swaps to yellow_alef.
- * Strips any known color prefix from the target block's ID first, then
- * prepends this item's own prefix.
+ * HOW MATCHING WORKS — segment scan (robust, handles any naming convention):
+ *
+ *   The block ID is split on "_".  The scanner finds the FIRST segment that
+ *   exactly equals a known colour word and replaces ONLY that segment.
+ *
+ *   Examples (swapping to "yellow"):
+ *     black_alef          → [black, alef]             → [yellow, alef]         → yellow_alef
+ *     28_lam_black        → [28, lam, black]           → [28, lam, yellow]      → 28_lam_yellow
+ *     black_28_lam        → [black, 28, lam]           → [yellow, 28, lam]      → yellow_28_lam
+ *     alef_black_v2       → [alef, black, v2]          → [alef, yellow, v2]     → alef_yellow_v2
+ *     green_letter_black  → [green, letter, black]     first colour hit = green  → yellow_letter_black
+ *
+ *   Partial matches are NEVER triggered — "blackboard", "greenhouse",
+ *   "yellowish" are plain name segments and are left alone.
  */
 public class ColorSquareItem extends Item {
 
-    /** All color prefixes the system recognises — must stay in sync with what admins use. */
-    public static final String[] COLOR_PREFIXES = {"black_", "yellow_", "green_"};
+    /** Every colour word the system recognises. Keep in sync with triangles + CustomBlocksMod. */
+    public static final String[] KNOWN_COLORS = {"black", "yellow", "green"};
 
-    private final String colorPrefix; // e.g. "yellow_"
-    private final String colorName;   // e.g. "Yellow"
+    private final String colorWord;   // e.g. "yellow"
+    private final String colorName;   // e.g. "Yellow"  (display label)
 
-    public ColorSquareItem(String colorPrefix, String colorName, Settings settings) {
+    public ColorSquareItem(String colorWord, String colorName, Settings settings) {
         super(settings);
-        this.colorPrefix = colorPrefix;
-        this.colorName   = colorName;
+        this.colorWord = colorWord;
+        this.colorName = colorName;
     }
 
-    @Override
-    public Text getName() { return Text.literal(colorName + " Square"); }
-
-    @Override
-    public Text getName(ItemStack stack) { return getName(); }
+    @Override public Text getName()                { return Text.literal(colorName + " Square"); }
+    @Override public Text getName(ItemStack stack) { return getName(); }
 
     @Override
     public ActionResult useOnBlock(ItemUsageContext ctx) {
-        World world   = ctx.getWorld();
-        BlockPos pos  = ctx.getBlockPos();
+        World        world  = ctx.getWorld();
+        BlockPos     pos    = ctx.getBlockPos();
         PlayerEntity player = ctx.getPlayer();
 
-        // Logic only runs on server — PASS on client so server result is authoritative
         if (world.isClient) return ActionResult.PASS;
 
         BlockState state = world.getBlockState(pos);
-        if (!(state.getBlock() instanceof SlotBlock sb)) {
-            // PASS lets normal right-click behaviour through (doors, chests, etc.)
-            return ActionResult.PASS;
-        }
+        if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
 
-        // Require OP level 2 — same permission as all other CustomBlocks commands
         if (player != null && !player.hasPermissionLevel(2)) {
-            player.sendMessage(Text.literal("§c[CustomBlocks] You need OP (level 2) to use color squares."), true);
+            player.sendMessage(
+                Text.literal("§c[CustomBlocks] You need OP (level 2) to use colour squares."), true);
             return ActionResult.FAIL;
         }
 
         SlotManager.SlotData current = SlotManager.getBySlot(sb.getSlotKey());
-        if (current == null) {
-            // Slot block exists in world but has no data — PASS so other interactions still work
-            return ActionResult.PASS;
-        }
+        if (current == null) return ActionResult.PASS;
 
-        // Auto-detect whether color is a prefix (black_alef) or suffix (alef_black)
-        String baseName = null;
-        boolean useSuffix = false;
-        String colorSuffix = colorPrefix.substring(0, colorPrefix.length() - 1); // "black_" → "black"
-
-        // 1. Try prefix match
-        for (String p : COLOR_PREFIXES) {
-            if (current.customId.startsWith(p)) {
-                baseName = current.customId.substring(p.length());
-                useSuffix = false;
-                break;
-            }
-        }
-        // 2. Try suffix match (e.g. 28_lam_black)
-        if (baseName == null) {
-            for (String p : COLOR_PREFIXES) {
-                String sfx = "_" + p.substring(0, p.length() - 1); // "_black"
-                if (current.customId.endsWith(sfx)) {
-                    baseName = current.customId.substring(0, current.customId.length() - sfx.length());
-                    useSuffix = true;
+        // ── Segment scan ──────────────────────────────────────────────────────
+        // Split the ID into underscore-separated tokens, find the first token
+        // that is exactly a known colour word (case-insensitive), replace it.
+        String[] segments = current.customId.split("_", -1);
+        int colorIdx = -1;
+        for (int i = 0; i < segments.length; i++) {
+            for (String known : KNOWN_COLORS) {
+                if (segments[i].equalsIgnoreCase(known)) {
+                    colorIdx = i;
                     break;
                 }
             }
-        }
-        // 3. No color in name — treat whole ID as base, append color as suffix
-        if (baseName == null) {
-            baseName  = current.customId;
-            useSuffix = true;
+            if (colorIdx >= 0) break;
         }
 
-        String targetId = useSuffix
-            ? baseName + "_" + colorSuffix          // jupiter_yellow  /  28_lam_yellow
-            : colorPrefix + baseName;               // yellow_alef
-
-        // Already this color?
-        if (targetId.equals(current.customId)) {
+        if (colorIdx < 0) {
             if (player != null)
-                player.sendMessage(
-                    Text.literal("§7[CustomBlocks] Already " + colorName + "."), true);
-            return ActionResult.SUCCESS;
-        }
-
-        // Target must exist
-        SlotManager.SlotData target = SlotManager.getById(targetId);
-        if (target == null) {
-            if (player != null)
-                player.sendMessage(
-                    Text.literal("§c[CustomBlocks] '" + targetId + "' doesn't exist yet. Create it first."), true);
+                player.sendMessage(Text.literal(
+                    "§c[CustomBlocks] No colour segment found in \"§f" + current.customId
+                    + "§c\". The colour word (black/yellow/green) must be its own underscore-"
+                    + "separated token, e.g. §fblock_black§c or §fblack_block§c."), true);
             return ActionResult.FAIL;
         }
 
-        // Swap block in world — flag 3 = update neighbours + send to client
+        // Replace only the colour segment, keep everything else identical
+        segments[colorIdx] = colorWord;
+        String targetId = String.join("_", segments);
+
+        // Already this colour?
+        if (targetId.equals(current.customId)) {
+            if (player != null)
+                player.sendMessage(
+                    Text.literal("§7[CustomBlocks] Already §f" + colorName + "§7."), true);
+            return ActionResult.SUCCESS;
+        }
+
+        // Target block must already exist
+        SlotManager.SlotData target = SlotManager.getById(targetId);
+        if (target == null) {
+            if (player != null)
+                player.sendMessage(Text.literal(
+                    "§c[CustomBlocks] §f" + targetId
+                    + "§c doesn't exist yet. Create it first with §f/cb createurl§c."), true);
+            return ActionResult.FAIL;
+        }
+
+        // Swap block in world — flag 3 = update neighbours + notify clients
         world.setBlockState(pos, CustomBlocksMod.SLOT_BLOCKS[target.index].getDefaultState(), 3);
 
         if (player != null)

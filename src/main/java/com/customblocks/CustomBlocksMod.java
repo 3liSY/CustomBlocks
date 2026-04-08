@@ -3,6 +3,8 @@ package com.customblocks;
 import com.customblocks.block.SlotBlock;
 import com.customblocks.item.ColorSquareItem;
 import com.customblocks.item.ColorTriangleItem;
+import com.customblocks.item.RectangleToolItem;
+import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import com.customblocks.command.CustomBlockCommand;
 import com.customblocks.network.FullSyncPayload;
 import com.customblocks.network.SlotUpdatePayload;
@@ -76,10 +78,11 @@ public class CustomBlocksMod implements ModInitializer {
         }
 
         // ── Color Square items ────────────────────────────────────────────────
-        // 3 special items: right-click a CustomBlock to swap it to the same ID with a new color prefix
-        String[][] squares = {{"black_",  "Black"},  {"yellow_", "Yellow"}, {"green_",  "Green"}};
+        // colorWord is just "black"/"yellow"/"green" — no underscore.
+        // Item IDs stay "black_square" etc. for backwards compat.
+        String[][] squares = {{"black", "Black"}, {"yellow", "Yellow"}, {"green", "Green"}};
         for (String[] sq : squares) {
-            Identifier sqId = Identifier.of(MOD_ID, sq[0] + "square");
+            Identifier sqId = Identifier.of(MOD_ID, sq[0] + "_square");
             ColorSquareItem sqItem = new ColorSquareItem(sq[0], sq[1],
                     new Item.Settings().maxCount(1));
             Registry.register(Registries.ITEM, sqId, sqItem);
@@ -95,6 +98,18 @@ public class CustomBlocksMod implements ModInitializer {
                 triMeta[i][1], new Item.Settings().maxCount(1));
             Registry.register(Registries.ITEM, trId, trItem);
         }
+
+        // ── Rainbow Rectangle — unique face-paint tool ───────────────────────
+        Identifier rectId = Identifier.of(MOD_ID, "rainbow_rectangle");
+        RectangleToolItem rectItem = new RectangleToolItem(new Item.Settings().maxCount(1));
+        Registry.register(Registries.ITEM, rectId, rectItem);
+
+        // ── Chat intercept for Rectangle URL sessions ────────────────────────
+        ServerMessageEvents.ALLOW_CHAT_MESSAGE.register((message, sender, params) -> {
+            String content = message.getContent().getString();
+            // If this player has an active Rectangle session, consume the message
+            return !RectangleToolItem.handleChatInput(sender, content);
+        });
 
         // Network
         PayloadTypeRegistry.playS2C().register(FullSyncPayload.ID, FullSyncPayload.CODEC);
@@ -117,8 +132,8 @@ public class CustomBlocksMod implements ModInitializer {
                                 if (!d.customId.equals("tab_icon"))
                                     entries.add(SLOT_ITEMS[d.index]);
                             // Color square items
-                            for (String col : new String[]{"black_", "yellow_", "green_"}) {
-                                net.minecraft.item.Item sq = Registries.ITEM.get(Identifier.of(MOD_ID, col + "square"));
+                            for (String col : new String[]{"black", "yellow", "green"}) {
+                                net.minecraft.item.Item sq = Registries.ITEM.get(Identifier.of(MOD_ID, col + "_square"));
                                 if (sq != null && sq != net.minecraft.item.Items.AIR)
                                     entries.add(sq);
                             }
@@ -128,6 +143,10 @@ public class CustomBlocksMod implements ModInitializer {
                                 if (tr != null && tr != net.minecraft.item.Items.AIR)
                                     entries.add(tr);
                             }
+                            // Rainbow Rectangle
+                            net.minecraft.item.Item rect = Registries.ITEM.get(Identifier.of(MOD_ID, "rainbow_rectangle"));
+                            if (rect != null && rect != net.minecraft.item.Items.AIR)
+                                entries.add(rect);
                         })
                         .build()
         );
