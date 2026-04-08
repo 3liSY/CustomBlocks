@@ -177,6 +177,7 @@ public class RectangleToolItem extends Item {
                                 + "§c' no longer exists."), false);
                         return;
                     }
+                    SlotManager.pushUndo(slotId, "setface " + face);
                     SlotManager.setFaceTexture(slotId, face, processed);
                     SlotManager.saveAll();
 

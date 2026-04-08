@@ -1,6 +1,7 @@
 package com.customblocks.command;
 
 import com.customblocks.CustomBlocksMod;
+import com.customblocks.gui.GuiManager;
 import com.customblocks.ImageProcessor;
 import com.customblocks.SlotManager;
 import com.customblocks.block.SlotBlock;
@@ -216,6 +217,35 @@ public class CustomBlockCommand {
                         .suggests((ctx, builder) -> { builder.suggest("black"); builder.suggest("yellow"); builder.suggest("green"); return builder.buildFuture(); })
                         .executes(ctx -> cmdGiveSquare(ctx.getSource(), StringArgumentType.getString(ctx, "color")))))
 
+                // ── dupe / duplicate ────────────────────────────────────────
+                .then(CommandManager.literal("dupe")
+                    .executes(ctx -> usage(ctx.getSource(), "dupe"))
+                    .then(CommandManager.argument("sourceId", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("newId", StringArgumentType.word())
+                            .executes(ctx -> cmdDupe(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "sourceId"),
+                                StringArgumentType.getString(ctx, "newId"), null))
+                            .then(CommandManager.argument("newname", StringArgumentType.greedyString())
+                                .executes(ctx -> cmdDupe(ctx.getSource(),
+                                    StringArgumentType.getString(ctx, "sourceId"),
+                                    StringArgumentType.getString(ctx, "newId"),
+                                    StringArgumentType.getString(ctx, "newname").replace("_", " ")))))))
+
+                .then(CommandManager.literal("duplicate")
+                    .executes(ctx -> usage(ctx.getSource(), "dupe"))
+                    .then(CommandManager.argument("sourceId", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("newId", StringArgumentType.word())
+                            .executes(ctx -> cmdDupe(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "sourceId"),
+                                StringArgumentType.getString(ctx, "newId"), null))
+                            .then(CommandManager.argument("newname", StringArgumentType.greedyString())
+                                .executes(ctx -> cmdDupe(ctx.getSource(),
+                                    StringArgumentType.getString(ctx, "sourceId"),
+                                    StringArgumentType.getString(ctx, "newId"),
+                                    StringArgumentType.getString(ctx, "newname").replace("_", " ")))))))
+
                 // ── data commands ───────────────────────────────────────────
                 .then(CommandManager.literal("export")
                     .executes(ctx -> cmdExport(ctx.getSource())))
@@ -227,7 +257,11 @@ public class CustomBlockCommand {
                     .executes(ctx -> cmdList(ctx.getSource())))
 
                 .then(CommandManager.literal("help")
-                    .executes(ctx -> cmdHelp(ctx.getSource())));
+                    .executes(ctx -> cmdHelp(ctx.getSource())))
+
+                // ── gui ──────────────────────────────────────────────────────
+                .then(CommandManager.literal("gui")
+                    .executes(ctx -> cmdGui(ctx.getSource())));
 
             dispatcher.register(tree);
             dispatcher.register(CommandManager.literal("cb")
@@ -273,6 +307,7 @@ public class CustomBlockCommand {
                     SlotManager.SlotData d = SlotManager.assign(id, name, finalBytes);
                     if (d == null) { src.sendError(Text.literal("§cNo free slots!")); return; }
                     if (finalAnim != null) SlotManager.setAnimMeta(id, finalAnim);
+                    SlotManager.pushUndoCreate(id);
                     SlotManager.saveAll();
                     CustomBlocksMod.broadcastUpdate(server,
                         new SlotUpdatePayload("add", d.index, id, name, finalBytes,
@@ -286,9 +321,43 @@ public class CustomBlockCommand {
         return 1;
     }
 
+    private static int cmdDupe(ServerCommandSource src, String rawSourceId, String rawNewId, String newName) {
+        String sourceId = sanitize(rawSourceId);
+        String newId    = sanitize(rawNewId);
+        if (!SlotManager.hasId(sourceId)) { src.sendError(notFound(sourceId)); return 0; }
+        if (newId.isEmpty())              { src.sendError(Text.literal("§cInvalid new ID.")); return 0; }
+        if (SlotManager.hasId(newId))     { src.sendError(Text.literal("§c'" + newId + "' already exists.")); return 0; }
+        if (SlotManager.freeSlots() == 0) { src.sendError(Text.literal("§cAll " + SlotManager.MAX_SLOTS + " slots are full!")); return 0; }
+
+        SlotManager.SlotData s = SlotManager.getById(sourceId);
+        String finalName = (newName != null && !newName.isBlank()) ? newName : s.displayName + " (Copy)";
+
+        byte[] texCopy = s.texture != null ? s.texture.clone() : null;
+        SlotManager.SlotData d = SlotManager.assign(newId, finalName, texCopy);
+        if (d == null) { src.sendError(Text.literal("§cNo free slots!")); return 0; }
+
+        // Copy all properties and per-face textures
+        SlotManager.setLightLevel(newId, s.lightLevel);
+        SlotManager.setHardness(newId, s.hardness);
+        SlotManager.setSoundType(newId, s.soundType);
+        if (s.animMeta != null) SlotManager.setAnimMeta(newId, s.animMeta);
+        for (var e : s.faceTextures.entrySet())
+            SlotManager.setFaceTexture(newId, e.getKey(), e.getValue().clone());
+
+        SlotManager.pushUndoCreate(newId);
+        SlotManager.saveAll();
+        d = SlotManager.getById(newId);
+        CustomBlocksMod.broadcastUpdate(src.getServer(),
+            new SlotUpdatePayload("add", d.index, newId, finalName, texCopy,
+                    d.lightLevel, d.hardness, d.soundType));
+        src.sendMessage(Text.literal("§a[CustomBlocks] Duplicated '§f" + sourceId + "§a' → '§f" + newId + "§a' §7(slot " + d.index + ")"));
+        return 1;
+    }
+
     private static int cmdDelete(ServerCommandSource src, String id) {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
         SlotManager.SlotData d = SlotManager.getById(id);
+        SlotManager.pushUndoDelete(id);
         SlotManager.remove(id);
         SlotManager.saveAll();
         CustomBlocksMod.broadcastUpdate(src.getServer(),
@@ -498,7 +567,7 @@ public class CustomBlockCommand {
         return 1;
     }
 
-    /** Undo the last block modification. */
+    /** Undo the last block modification (retexture, setface, setglow, delete, create, …). */
     private static int cmdUndo(ServerCommandSource src) {
         if (SlotManager.undoStackSize() == 0) {
             src.sendMessage(Text.literal("§7[CustomBlocks] Nothing to undo."));
@@ -507,33 +576,69 @@ public class CustomBlockCommand {
         SlotManager.UndoEntry entry = SlotManager.popUndo();
         if (entry == null) { src.sendMessage(Text.literal("§7[CustomBlocks] Nothing to undo.")); return 1; }
 
+        MinecraftServer server = src.getServer();
+
+        // ── Undo a creation → delete the block ──────────────────────────────
+        if (entry.previousState() == null) {
+            SlotManager.SlotData d = SlotManager.getById(entry.customId());
+            if (d == null) {
+                src.sendError(Text.literal("§c[CustomBlocks] Cannot undo create — '" + entry.customId() + "' already gone."));
+                return 0;
+            }
+            int idx = d.index;
+            SlotManager.remove(entry.customId());
+            SlotManager.saveAll();
+            CustomBlocksMod.broadcastUpdate(server,
+                new SlotUpdatePayload("remove", idx, entry.customId(), null, null, 0, 0, "stone"));
+            src.sendMessage(Text.literal("§a[CustomBlocks] Undid create of §f" + entry.customId()
+                + "§a. §7(" + SlotManager.undoStackSize() + " left)"));
+            return 1;
+        }
+
+        // ── Undo a mutation or a deletion ────────────────────────────────────
         SlotManager.SlotData prev = entry.previousState();
-        boolean restored = SlotManager.restoreSnapshot(prev);
+        boolean restored = SlotManager.restoreSnapshot(prev, entry.wasDeleted());
         if (!restored) {
-            src.sendError(Text.literal("§c[CustomBlocks] Cannot undo — block '" + entry.customId() + "' no longer exists."));
+            src.sendError(Text.literal("§c[CustomBlocks] Cannot undo — slot for '" + entry.customId() + "' is now occupied by another block."));
             return 0;
         }
         SlotManager.saveAll();
 
-        // Broadcast full retexture + setprop to sync clients
-        MinecraftServer server = src.getServer();
         SlotManager.SlotData d = SlotManager.getById(prev.customId);
         if (d != null) {
-            if (d.texture != null)
+            if (entry.wasDeleted()) {
+                // Block was re-added: send "add" then restore every face
                 CustomBlocksMod.broadcastUpdate(server,
-                    new SlotUpdatePayload("retexture", d.index, d.customId, null, d.texture,
+                    new SlotUpdatePayload("add", d.index, d.customId, d.displayName, d.texture,
                             d.lightLevel, d.hardness, d.soundType));
-            // Re-send each face
-            for (var faceEntry : d.faceTextures.entrySet()) {
+                for (var fe : d.faceTextures.entrySet())
+                    CustomBlocksMod.broadcastUpdate(server,
+                        new SlotUpdatePayload("setface", d.index, d.customId, null, fe.getValue(),
+                                d.lightLevel, d.hardness, d.soundType, fe.getKey()));
+            } else {
+                // Normal restore: texture + wipe stale faces + re-send snapshot faces + props + name
+                if (d.texture != null)
+                    CustomBlocksMod.broadcastUpdate(server,
+                        new SlotUpdatePayload("retexture", d.index, d.customId, null, d.texture,
+                                d.lightLevel, d.hardness, d.soundType));
+                // Clear all faces on clients first, then re-apply only what the snapshot had
                 CustomBlocksMod.broadcastUpdate(server,
-                    new SlotUpdatePayload("setface", d.index, d.customId, null, faceEntry.getValue(),
-                            d.lightLevel, d.hardness, d.soundType, faceEntry.getKey()));
+                    new SlotUpdatePayload("clearfaces", d.index, d.customId, null, null,
+                            d.lightLevel, d.hardness, d.soundType));
+                for (var fe : d.faceTextures.entrySet())
+                    CustomBlocksMod.broadcastUpdate(server,
+                        new SlotUpdatePayload("setface", d.index, d.customId, null, fe.getValue(),
+                                d.lightLevel, d.hardness, d.soundType, fe.getKey()));
+                CustomBlocksMod.broadcastUpdate(server,
+                    new SlotUpdatePayload("setprop", d.index, d.customId, null, null,
+                            d.lightLevel, d.hardness, d.soundType));
+                // Always re-sync display name in case a rename was undone
+                CustomBlocksMod.broadcastUpdate(server,
+                    new SlotUpdatePayload("rename", d.index, d.customId, d.displayName, null, 0, 0, "stone"));
             }
-            CustomBlocksMod.broadcastUpdate(server,
-                new SlotUpdatePayload("setprop", d.index, d.customId, null, null,
-                        d.lightLevel, d.hardness, d.soundType));
         }
-        src.sendMessage(Text.literal("§a[CustomBlocks] Undid \"" + entry.description() + "\" on §f" + entry.customId() + "§a. §7(" + SlotManager.undoStackSize() + " left)"));
+        src.sendMessage(Text.literal("§a[CustomBlocks] Undid \"" + entry.description() + "\" on §f"
+            + entry.customId() + "§a. §7(" + SlotManager.undoStackSize() + " left)"));
         return 1;
     }
 
@@ -607,6 +712,7 @@ public class CustomBlockCommand {
                     SlotManager.SlotData d = SlotManager.assign(id, name, b);
                     if (d == null) { failed.add(id + "(slot full)"); continue; }
                     if (anim != null) SlotManager.setAnimMeta(id, anim);
+                    SlotManager.pushUndoCreate(id);
                     CustomBlocksMod.broadcastUpdate(server,
                         new SlotUpdatePayload("add", d.index, id, name, b, d.lightLevel, d.hardness, d.soundType));
                     created++;
@@ -672,52 +778,52 @@ public class CustomBlockCommand {
         return 1;
     }
 
-    /** Fully revamped /cb help — clean, categorised, no clutter. */
+    /** Clean /cb help — grouped, easy to scan. */
     private static int cmdHelp(ServerCommandSource src) {
-        String L = "§8─────────────────────────────────────────";
-        src.sendMessage(Text.literal("§r"));
-        src.sendMessage(Text.literal("§6§l  ✦ Custom Blocks  §8v2.0  §7(use §f/cb§7 as short alias)"));
-        src.sendMessage(Text.literal(L));
+        final String D = "§8──────────────────────────────────────────";
+        src.sendMessage(Text.literal(" "));
+        src.sendMessage(Text.literal("  §6§l✦ §r§6CustomBlocks  §8│ §7/cb §8or §7/customblock  §8│ §7v2.0"));
+        src.sendMessage(Text.literal(D));
 
-        src.sendMessage(Text.literal("§e  ◆ Creating & Managing"));
-        src.sendMessage(Text.literal("§f  /cb create §b<id> <name> <url>      §7— create from image or GIF URL"));
-        src.sendMessage(Text.literal("§f  /cb retexture §b<id> <url>          §7— replace main texture"));
-        src.sendMessage(Text.literal("§f  /cb rename §b<id> <new_name>        §7— rename a block"));
-        src.sendMessage(Text.literal("§f  /cb delete §b<id>                   §7— permanently delete"));
-        src.sendMessage(Text.literal("§f  /cb give §b<id> [amount] [player]   §7— add to inventory"));
-        src.sendMessage(Text.literal("§f  /cb list                           §7— list all blocks"));
-        src.sendMessage(Text.literal(L));
+        src.sendMessage(Text.literal("§e  Blocks"));
+        src.sendMessage(Text.literal("§7  /cb §fcreate §b<id> <n> <url>          §8— new block from image or GIF URL"));
+        src.sendMessage(Text.literal("§7  /cb §fdupe §b<id> <newId> [name]       §8— copy a block and all its settings"));
+        src.sendMessage(Text.literal("§7  /cb §fretexture §b<id> <url>           §8— swap the main texture"));
+        src.sendMessage(Text.literal("§7  /cb §frename §b<id> <n>               §8— rename a block"));
+        src.sendMessage(Text.literal("§7  /cb §fdelete §b<id>                   §8— permanently remove"));
+        src.sendMessage(Text.literal("§7  /cb §fgive §b<id> [amount] [player]    §8— add to inventory"));
+        src.sendMessage(Text.literal("§7  /cb §flist                            §8— show all blocks and slots used"));
+        src.sendMessage(Text.literal(D));
 
-        src.sendMessage(Text.literal("§e  ◆ Per-Face Textures"));
-        src.sendMessage(Text.literal("§f  /cb set§3[top§f|§3bottom§f|§3north§f|§3south§f|§3east§f|§3west§f]§bface §b<id> <url>"));
-        src.sendMessage(Text.literal("§7     Set one face's texture — other faces unchanged."));
-        src.sendMessage(Text.literal("§f  /cb clearface §b<id> §3<face>          §7— revert one face"));
-        src.sendMessage(Text.literal("§f  /cb clearallfaces §b<id>             §7— revert all faces"));
-        src.sendMessage(Text.literal(L));
+        src.sendMessage(Text.literal("§e  Per-Face Textures"));
+        src.sendMessage(Text.literal("§7  /cb §fset§3(top§7|§3bottom§7|§3north§7|§3south§7|§3east§7|§3west§7)§fface §b<id> <url>"));
+        src.sendMessage(Text.literal("§7  /cb §fclearface §b<id> §3<face>         §8— revert one face to default"));
+        src.sendMessage(Text.literal("§7  /cb §fclearallfaces §b<id>             §8— revert every face"));
+        src.sendMessage(Text.literal(D));
 
-        src.sendMessage(Text.literal("§e  ◆ Block Properties"));
-        src.sendMessage(Text.literal("§f  /cb setglow §b<id> §3<0-15>           §7— light emission level"));
-        src.sendMessage(Text.literal("§f  /cb sethardness §b<id> §3<-1 to 50>   §7— mining speed  (−1 = unbreakable)"));
-        src.sendMessage(Text.literal("§f  /cb setsound §b<id> §3<type>          §7— stone|wood|metal|glass|grass|sand|wool"));
-        src.sendMessage(Text.literal(L));
+        src.sendMessage(Text.literal("§e  Properties"));
+        src.sendMessage(Text.literal("§7  /cb §fsetglow §b<id> §3<0-15>          §8— light emission  §7(0 = off, 15 = max)"));
+        src.sendMessage(Text.literal("§7  /cb §fsethardness §b<id> §3<-1 to 50>  §8— break speed  §7(-1 unbreakable, 0 instant)"));
+        src.sendMessage(Text.literal("§7  /cb §fsetsound §b<id> §3<type>         §8— §7stone|wood|metal|glass|grass|sand|wool"));
+        src.sendMessage(Text.literal(D));
 
-        src.sendMessage(Text.literal("§e  ◆ Tools"));
-        src.sendMessage(Text.literal("§f  /cb giverectangle                  §7— §6Rainbow Rectangle §7face-paint wand"));
-        src.sendMessage(Text.literal("§f  /cb givesquare §b<black|yellow|green> §7— color swap square"));
-        src.sendMessage(Text.literal("§f  /cb givetriangle §b<color>          §7— color variant triangle"));
-        src.sendMessage(Text.literal("§f  /cb colorchanger                   §7— give all 3 color squares"));
-        src.sendMessage(Text.literal(L));
+        src.sendMessage(Text.literal("§e  Tools"));
+        src.sendMessage(Text.literal("§7  /cb §fgiverectangle                   §8— §6Rainbow Rectangle §8face-paint wand"));
+        src.sendMessage(Text.literal("§7  /cb §fgivesquare §b<black|yellow|green> §8— color-swap square"));
+        src.sendMessage(Text.literal("§7  /cb §fgivetriangle §b<color>           §8— color-variant triangle"));
+        src.sendMessage(Text.literal("§7  /cb §fcolorchanger                    §8— give all 3 color squares at once"));
+        src.sendMessage(Text.literal(D));
 
-        src.sendMessage(Text.literal("§e  ◆ Utilities"));
-        src.sendMessage(Text.literal("§f  /cb undo                           §7— undo last block change"));
-        src.sendMessage(Text.literal("§f  /cb settabicon §b<url>               §7— set creative tab icon"));
-        src.sendMessage(Text.literal("§f  /cb importfolder                   §7— bulk import from config/customblocks/import/"));
-        src.sendMessage(Text.literal("§7     Supports PNG, JPG, GIF §b(animated!)§7, BMP, WEBP"));
-        src.sendMessage(Text.literal("§f  /cb export                         §7— export block list to JSON"));
-        src.sendMessage(Text.literal(L));
+        src.sendMessage(Text.literal("§e  Utilities"));
+        src.sendMessage(Text.literal("§7  /cb §fundo                            §8— undo last change"));
+        src.sendMessage(Text.literal("§7  /cb §fsettabicon §b<url>               §8— set the creative tab icon"));
+        src.sendMessage(Text.literal("§7  /cb §fimportfolder                    §8— bulk-import from config/customblocks/import/"));
+        src.sendMessage(Text.literal("§7  /cb §fexport                          §8— export block list to JSON"));
+        src.sendMessage(Text.literal("§7  /cb §fgui                             §8— §6open the chest GUI"));
+        src.sendMessage(Text.literal(D));
 
-        src.sendMessage(Text.literal("§7  Press §fB §7to open the visual GUI  ·  No server restart needed!"));
-        src.sendMessage(Text.literal("§r"));
+        src.sendMessage(Text.literal("  §8Press §7B §8for the HUD overlay  ·  No restart needed!"));
+        src.sendMessage(Text.literal(" "));
         return 1;
     }
 
@@ -782,6 +888,16 @@ public class CustomBlockCommand {
         return 1;
     }
 
+    private static int cmdGui(ServerCommandSource src) {
+        try {
+            ServerPlayerEntity player = src.getPlayerOrThrow();
+            GuiManager.openMain(player, 0);
+        } catch (Exception ex) {
+            src.sendError(Text.literal("§cRun as a player."));
+        }
+        return 1;
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static int usage(ServerCommandSource src, String cmd) {
@@ -798,6 +914,7 @@ public class CustomBlockCommand {
             case "givesquare"   -> "§cUsage: /cb givesquare <black|yellow|green>";
             case "givetriangle" -> "§cUsage: /cb givetriangle <black|yellow|green>";
             case "clearallfaces"-> "§cUsage: /cb clearallfaces <id>";
+            case "dupe"         -> "§cUsage: /cb dupe <sourceId> <newId> [newname]";
             default -> "§cUsage: /cb help";
         }));
         return 0;

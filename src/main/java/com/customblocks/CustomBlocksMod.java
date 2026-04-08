@@ -1,6 +1,7 @@
 package com.customblocks;
 
 import com.customblocks.block.SlotBlock;
+import com.customblocks.gui.GuiManager;
 import com.customblocks.item.ColorSquareItem;
 import com.customblocks.item.ColorTriangleItem;
 import com.customblocks.item.RectangleToolItem;
@@ -107,7 +108,9 @@ public class CustomBlocksMod implements ModInitializer {
         // ── Chat intercept for Rectangle URL sessions ────────────────────────
         ServerMessageEvents.ALLOW_CHAT_MESSAGE.register((message, sender, params) -> {
             String content = message.getContent().getString();
-            // If this player has an active Rectangle session, consume the message
+            // GUI chat input takes priority
+            if (GuiManager.handleChatInput(sender, content)) return false;
+            // Rectangle face-paint sessions
             return !RectangleToolItem.handleChatInput(sender, content);
         });
 

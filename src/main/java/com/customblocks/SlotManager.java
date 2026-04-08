@@ -27,27 +27,51 @@ public class SlotManager {
     private static final Deque<UndoEntry> UNDO_STACK = new ArrayDeque<>();
     private static final int MAX_UNDO = 20;
 
+    /**
+     * wasDeleted = true  → block was deleted; undo must re-insert it.
+     * previousState = null → block was just created; undo must delete it.
+     */
     public record UndoEntry(
             String customId,
             SlotData previousState,
-            String description   // e.g. "retexture", "setface top", "setglow 5"
+            String description,
+            boolean wasDeleted
     ) {}
 
-    /** Push current state before a destructive operation. */
-    public static void pushUndo(String customId, String description) {
-        SlotData current = getById(customId);
-        if (current == null) return;
-        // Deep-copy the face textures so later mutations don't corrupt the snapshot
-        Map<String, byte[]> facesCopy = new ConcurrentHashMap<>(current.faceTextures);
-        SlotData snapshot = new SlotData(
-                current.index, current.customId, current.displayName,
-                current.texture != null ? current.texture.clone() : null,
-                current.lightLevel, current.hardness, current.soundType,
-                facesCopy, current.animMeta);
+    private static SlotData snapshot(String customId) {
+        SlotData c = getById(customId);
+        if (c == null) return null;
+        Map<String, byte[]> facesCopy = new ConcurrentHashMap<>();
+        c.faceTextures.forEach((k, v) -> facesCopy.put(k, v.clone()));
+        return new SlotData(c.index, c.customId, c.displayName,
+                c.texture != null ? c.texture.clone() : null,
+                c.lightLevel, c.hardness, c.soundType, facesCopy, c.animMeta);
+    }
+
+    private static void pushRaw(UndoEntry entry) {
         synchronized (UNDO_STACK) {
-            UNDO_STACK.push(new UndoEntry(customId, snapshot, description));
+            UNDO_STACK.push(entry);
             while (UNDO_STACK.size() > MAX_UNDO) UNDO_STACK.pollLast();
         }
+    }
+
+    /** Push current state before a mutating operation (retexture, setface, setglow…). */
+    public static void pushUndo(String customId, String description) {
+        SlotData snap = snapshot(customId);
+        if (snap == null) return;
+        pushRaw(new UndoEntry(customId, snap, description, false));
+    }
+
+    /** Push state before deleting a block so it can be fully restored. */
+    public static void pushUndoDelete(String customId) {
+        SlotData snap = snapshot(customId);
+        if (snap == null) return;
+        pushRaw(new UndoEntry(customId, snap, "delete", true));
+    }
+
+    /** Push a marker after creating a block so undo can remove it. */
+    public static void pushUndoCreate(String customId) {
+        pushRaw(new UndoEntry(customId, null, "create", false));
     }
 
     /** Pop and return the most recent undo entry (null if stack empty). */
@@ -268,9 +292,18 @@ public class SlotManager {
 
     /**
      * Restore a block to a previous snapshot (used by /cb undo).
-     * Returns false if the slot no longer exists.
+     * wasDeleted=true: the block was deleted; re-insert it at its original index.
+     * wasDeleted=false: the block still exists; overwrite its data in place.
      */
-    public static boolean restoreSnapshot(SlotData snapshot) {
+    public static boolean restoreSnapshot(SlotData snapshot, boolean wasDeleted) {
+        if (wasDeleted) {
+            String k = "slot_" + snapshot.index;
+            SlotData occupant = SLOTS.get(k);
+            if (occupant != null && !occupant.customId.equals(snapshot.customId)) return false;
+            SLOTS.put(k, snapshot);
+            ID_TO_SLOT.put(snapshot.customId, k);
+            return true;
+        }
         String k = ID_TO_SLOT.get(snapshot.customId);
         if (k == null) return false;
         SLOTS.put(k, snapshot);
