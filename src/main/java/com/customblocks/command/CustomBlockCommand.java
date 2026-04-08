@@ -250,12 +250,11 @@ public class CustomBlockCommand {
                 byte[] raw = ImageProcessor.download(url);
 
                 // Detect animated GIF
-                ImageProcessor.GifResult gifResult = null;
-                if (ImageProcessor.isAnimatedGif(raw)) {
-                    gifResult = ImageProcessor.processGif(raw);
-                    if (gifResult != null)
-                        server.execute(() -> src.sendMessage(Text.literal("§b[CustomBlocks] Animated GIF detected — " + gifResult.frameCount() + " frames!")));
-                }
+                final ImageProcessor.GifResult gifResult =
+                        ImageProcessor.isAnimatedGif(raw) ? ImageProcessor.processGif(raw) : null;
+                if (gifResult != null)
+                    server.execute(() -> src.sendMessage(Text.literal(
+                        "§b[CustomBlocks] Animated GIF detected — " + gifResult.frameCount() + " frames!")));
 
                 byte[] bytes;
                 String animMeta = null;
