@@ -171,8 +171,15 @@ public class CustomBlocksMod implements ModInitializer {
                         d.index, d.customId, d.displayName, null,
                         d.lightLevel, d.hardness, d.soundType));
             }
+            // Count the exact number of texture packets we will send so the client
+            // can fire exactly ONE reload after receiving the last one.
+            int texPacketCount = 0;
+            for (SlotManager.SlotData d : SlotManager.allSlots()) {
+                if (d.texture != null && d.texture.length > 0) texPacketCount++;
+                texPacketCount += d.faceTextures.size();
+            }
             ServerPlayNetworking.send(handler.player,
-                    new FullSyncPayload(meta, SlotManager.getTabIconTexture()));
+                    new FullSyncPayload(meta, SlotManager.getTabIconTexture(), texPacketCount));
 
             ConcurrentLinkedQueue<SlotUpdatePayload> queue = new ConcurrentLinkedQueue<>();
             SlotManager.allSlots().stream()

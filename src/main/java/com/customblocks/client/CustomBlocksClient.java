@@ -34,6 +34,10 @@ public class CustomBlocksClient implements ClientModInitializer {
     private static final AtomicBoolean generateRunning   = new AtomicBoolean(false);
     // Timestamp of last incoming packet — debounce fires 2s after THE LAST packet, not the first
     private static final AtomicLong    lastPacketTime    = new AtomicLong(0);
+    // How many "add"/"setface" texture packets are still expected from the current join sync.
+    // While > 0 we suppress reloads; the reload fires when this hits 0.
+    private static final java.util.concurrent.atomic.AtomicInteger pendingTextureCount =
+            new java.util.concurrent.atomic.AtomicInteger(0);
 
     // Set to true after reload — creative tab will refresh on next tick if open
     public static volatile boolean pendingCreativeRefresh = false;
@@ -92,10 +96,17 @@ public class CustomBlocksClient implements ClientModInitializer {
                 }
                 if (payload.tabIconTexture() != null)
                     SlotManager.setTabIconTexture(payload.tabIconTexture());
-                // Trigger a regeneration so the resource pack reflects current slot assignments.
-                // This is especially important when all blocks have no textures (new server).
-                // Texture packets arriving shortly after will debounce into the same reload cycle.
-                scheduleGenerateAndReload(client);
+
+                // FIX: set how many texture packets we expect.
+                // The reload will fire exactly once — when the last texture packet arrives.
+                // If there are no textures at all, reload immediately (covers empty servers).
+                int expected = payload.pendingTexturePackets();
+                pendingTextureCount.set(expected);
+                if (expected == 0) {
+                    scheduleGenerateAndReload(client);
+                }
+                // else: reload is deferred to when pendingTextureCount hits 0 in the
+                // SlotUpdatePayload handler below.
             });
         });
 
@@ -167,7 +178,21 @@ public class CustomBlocksClient implements ClientModInitializer {
                         || action.equals("remove") || action.equals("setface")
                         || action.equals("clearface") || action.equals("clearfaces")
                         || action.equals("setshape") || action.equals("setcollision");
-                if (needsReload) scheduleGenerateAndReload(client);
+                if (needsReload) {
+                    // FIX: during the initial join sync, "add" and "setface" packets are
+                    // part of a batch whose count was announced in FullSyncPayload.
+                    // Suppress individual reloads; fire exactly ONE when the last packet arrives.
+                    if (pendingTextureCount.get() > 0
+                            && (action.equals("add") || action.equals("setface"))) {
+                        if (pendingTextureCount.decrementAndGet() == 0) {
+                            scheduleGenerateAndReload(client); // all textures received — reload once
+                        }
+                        // else: more packets still coming, wait
+                    } else {
+                        // Normal runtime update (retexture, remove, clearface, setshape, etc.)
+                        scheduleGenerateAndReload(client);
+                    }
+                }
             });
         });
 
