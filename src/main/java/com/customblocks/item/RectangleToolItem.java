@@ -167,7 +167,7 @@ public class RectangleToolItem extends Item {
         Thread t = new Thread(() -> {
             try {
                 // Download → convert to PNG → auto-remove white background
-                byte[] processed = ImageProcessor.downloadAndProcess(url);
+                byte[] processed = ImageProcessor.downloadAndProcess(url, ImageProcessor.DEFAULT_SIZE);
 
                 server.execute(() -> {
                     SlotManager.SlotData d = SlotManager.getById(slotId);

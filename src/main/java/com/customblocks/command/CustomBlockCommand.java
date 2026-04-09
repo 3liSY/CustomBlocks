@@ -42,20 +42,38 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("create")
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .then(CommandManager.argument("name", StringArgumentType.word())
+                            // /cb create <id> <name> <size> <url>  — size first so greedy URL still works
+                            .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
+                                .then(CommandManager.argument("url", StringArgumentType.greedyString())
+                                    .executes(ctx -> cmdCreate(ctx.getSource(),
+                                        StringArgumentType.getString(ctx, "id"),
+                                        StringArgumentType.getString(ctx, "name").replace("_", " "),
+                                        StringArgumentType.getString(ctx, "url").trim(),
+                                        IntegerArgumentType.getInteger(ctx, "size")))))
+                            // /cb create <id> <name> <url>  — default 128
                             .then(CommandManager.argument("url", StringArgumentType.greedyString())
                                 .executes(ctx -> cmdCreate(ctx.getSource(),
                                     StringArgumentType.getString(ctx, "id"),
                                     StringArgumentType.getString(ctx, "name").replace("_", " "),
-                                    StringArgumentType.getString(ctx, "url").trim()))))))
+                                    StringArgumentType.getString(ctx, "url").trim(),
+                                    ImageProcessor.DEFAULT_SIZE))))))
 
                 .then(CommandManager.literal("createurl")
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .then(CommandManager.argument("name", StringArgumentType.word())
+                            .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
+                                .then(CommandManager.argument("url", StringArgumentType.greedyString())
+                                    .executes(ctx -> cmdCreate(ctx.getSource(),
+                                        StringArgumentType.getString(ctx, "id"),
+                                        StringArgumentType.getString(ctx, "name").replace("_", " "),
+                                        StringArgumentType.getString(ctx, "url").trim(),
+                                        IntegerArgumentType.getInteger(ctx, "size")))))
                             .then(CommandManager.argument("url", StringArgumentType.greedyString())
                                 .executes(ctx -> cmdCreate(ctx.getSource(),
                                     StringArgumentType.getString(ctx, "id"),
                                     StringArgumentType.getString(ctx, "name").replace("_", " "),
-                                    StringArgumentType.getString(ctx, "url").trim()))))))
+                                    StringArgumentType.getString(ctx, "url").trim(),
+                                    ImageProcessor.DEFAULT_SIZE))))))
 
                 // ── delete ──────────────────────────────────────────────────
                 .then(CommandManager.literal("delete")
@@ -79,10 +97,17 @@ public class CustomBlockCommand {
                     .executes(ctx -> usage(ctx.getSource(), "retexture"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
+                            .then(CommandManager.argument("url", StringArgumentType.greedyString())
+                                .executes(ctx -> cmdRetexture(ctx.getSource(),
+                                    StringArgumentType.getString(ctx, "id"),
+                                    StringArgumentType.getString(ctx, "url").trim(),
+                                    IntegerArgumentType.getInteger(ctx, "size")))))
                         .then(CommandManager.argument("url", StringArgumentType.greedyString())
                             .executes(ctx -> cmdRetexture(ctx.getSource(),
                                 StringArgumentType.getString(ctx, "id"),
-                                StringArgumentType.getString(ctx, "url").trim())))))
+                                StringArgumentType.getString(ctx, "url").trim(),
+                                ImageProcessor.DEFAULT_SIZE)))))
 
                 // ── give ────────────────────────────────────────────────────
                 .then(CommandManager.literal("give")
@@ -138,45 +163,60 @@ public class CustomBlockCommand {
                 // ── per-face commands ───────────────────────────────────────
                 .then(CommandManager.literal("settopface")
                     .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
+                            .then(CommandManager.argument("url", StringArgumentType.greedyString())
+                                .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "top", StringArgumentType.getString(ctx, "url").trim(), IntegerArgumentType.getInteger(ctx, "size")))))
                         .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                            .executes(ctx -> cmdSetFace(ctx.getSource(),
-                                StringArgumentType.getString(ctx, "id"), "top",
-                                StringArgumentType.getString(ctx, "url").trim())))))
+                            .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "top", StringArgumentType.getString(ctx, "url").trim(), ImageProcessor.DEFAULT_SIZE)))))
 
                 .then(CommandManager.literal("setbottomface")
                     .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
+                            .then(CommandManager.argument("url", StringArgumentType.greedyString())
+                                .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "bottom", StringArgumentType.getString(ctx, "url").trim(), IntegerArgumentType.getInteger(ctx, "size")))))
                         .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                            .executes(ctx -> cmdSetFace(ctx.getSource(),
-                                StringArgumentType.getString(ctx, "id"), "bottom",
-                                StringArgumentType.getString(ctx, "url").trim())))))
+                            .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "bottom", StringArgumentType.getString(ctx, "url").trim(), ImageProcessor.DEFAULT_SIZE)))))
 
                 .then(CommandManager.literal("setnorthface")
                     .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
+                            .then(CommandManager.argument("url", StringArgumentType.greedyString())
+                                .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "north", StringArgumentType.getString(ctx, "url").trim(), IntegerArgumentType.getInteger(ctx, "size")))))
                         .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                            .executes(ctx -> cmdSetFace(ctx.getSource(),
-                                StringArgumentType.getString(ctx, "id"), "north",
-                                StringArgumentType.getString(ctx, "url").trim())))))
+                            .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "north", StringArgumentType.getString(ctx, "url").trim(), ImageProcessor.DEFAULT_SIZE)))))
 
                 .then(CommandManager.literal("setsouthface")
                     .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
+                            .then(CommandManager.argument("url", StringArgumentType.greedyString())
+                                .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "south", StringArgumentType.getString(ctx, "url").trim(), IntegerArgumentType.getInteger(ctx, "size")))))
                         .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                            .executes(ctx -> cmdSetFace(ctx.getSource(),
-                                StringArgumentType.getString(ctx, "id"), "south",
-                                StringArgumentType.getString(ctx, "url").trim())))))
+                            .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "south", StringArgumentType.getString(ctx, "url").trim(), ImageProcessor.DEFAULT_SIZE)))))
 
                 .then(CommandManager.literal("seteastface")
                     .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
+                            .then(CommandManager.argument("url", StringArgumentType.greedyString())
+                                .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "east", StringArgumentType.getString(ctx, "url").trim(), IntegerArgumentType.getInteger(ctx, "size")))))
                         .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                            .executes(ctx -> cmdSetFace(ctx.getSource(),
-                                StringArgumentType.getString(ctx, "id"), "east",
-                                StringArgumentType.getString(ctx, "url").trim())))))
+                            .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "east", StringArgumentType.getString(ctx, "url").trim(), ImageProcessor.DEFAULT_SIZE)))))
 
                 .then(CommandManager.literal("setwestface")
                     .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
+                            .then(CommandManager.argument("url", StringArgumentType.greedyString())
+                                .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "west", StringArgumentType.getString(ctx, "url").trim(), IntegerArgumentType.getInteger(ctx, "size")))))
                         .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                            .executes(ctx -> cmdSetFace(ctx.getSource(),
-                                StringArgumentType.getString(ctx, "id"), "west",
-                                StringArgumentType.getString(ctx, "url").trim())))))
+                            .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "west", StringArgumentType.getString(ctx, "url").trim(), ImageProcessor.DEFAULT_SIZE)))))
+
+                // ── resize ──────────────────────────────────────────────────
+                .then(CommandManager.literal("resize")
+                    .executes(ctx -> usage(ctx.getSource(), "resize"))
+                    .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
+                            .executes(ctx -> cmdResize(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "id"),
+                                IntegerArgumentType.getInteger(ctx, "size"))))))
 
                 .then(CommandManager.literal("clearface")
                     .executes(ctx -> usage(ctx.getSource(), "clearface"))
@@ -272,12 +312,12 @@ public class CustomBlockCommand {
 
     // ── Implementations ───────────────────────────────────────────────────────
 
-    private static int cmdCreate(ServerCommandSource src, String rawId, String name, String url) {
+    private static int cmdCreate(ServerCommandSource src, String rawId, String name, String url, int size) {
         String id = sanitize(rawId);
         if (id.isEmpty()) { src.sendError(Text.literal("§cInvalid ID.")); return 0; }
         if (SlotManager.hasId(id)) { src.sendError(Text.literal("§c'" + id + "' already exists.")); return 0; }
         if (SlotManager.freeSlots() == 0) { src.sendError(Text.literal("§cAll " + SlotManager.MAX_SLOTS + " slots are full!")); return 0; }
-        src.sendMessage(Text.literal("§e[CustomBlocks] Downloading..."));
+        src.sendMessage(Text.literal("§e[CustomBlocks] Downloading... §7(" + size + "px)"));
         MinecraftServer server = src.getServer();
         thread(() -> {
             try {
@@ -285,7 +325,7 @@ public class CustomBlockCommand {
 
                 // Detect animated GIF
                 final ImageProcessor.GifResult gifResult =
-                        ImageProcessor.isAnimatedGif(raw) ? ImageProcessor.processGif(raw) : null;
+                        ImageProcessor.isAnimatedGif(raw) ? ImageProcessor.processGif(raw, size) : null;
                 if (gifResult != null)
                     server.execute(() -> src.sendMessage(Text.literal(
                         "§b[CustomBlocks] Animated GIF detected — " + gifResult.frameCount() + " frames!")));
@@ -299,6 +339,7 @@ public class CustomBlockCommand {
                     bytes = ImageProcessor.toPng(raw);
                     bytes = ImageProcessor.padToSquare(bytes);
                     bytes = ImageProcessor.replaceBackground(bytes);
+                    bytes = ImageProcessor.resizeTo(bytes, size);
                 }
 
                 final byte[] finalBytes = bytes;
@@ -378,14 +419,14 @@ public class CustomBlockCommand {
         return 1;
     }
 
-    private static int cmdRetexture(ServerCommandSource src, String id, String url) {
+    private static int cmdRetexture(ServerCommandSource src, String id, String url, int size) {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
-        src.sendMessage(Text.literal("§e[CustomBlocks] Downloading texture..."));
+        src.sendMessage(Text.literal("§e[CustomBlocks] Downloading texture... §7(" + size + "px)"));
         MinecraftServer server = src.getServer();
         thread(() -> {
             try {
                 byte[] raw = ImageProcessor.download(url);
-                ImageProcessor.GifResult gifResult = ImageProcessor.isAnimatedGif(raw) ? ImageProcessor.processGif(raw) : null;
+                ImageProcessor.GifResult gifResult = ImageProcessor.isAnimatedGif(raw) ? ImageProcessor.processGif(raw, size) : null;
                 byte[] bytes;
                 String animMeta = null;
                 if (gifResult != null) { bytes = gifResult.stripPng(); animMeta = gifResult.mcmeta(); }
@@ -393,6 +434,7 @@ public class CustomBlockCommand {
                     bytes = ImageProcessor.toPng(raw);
                     bytes = ImageProcessor.padToSquare(bytes);
                     bytes = ImageProcessor.replaceBackground(bytes);
+                    bytes = ImageProcessor.resizeTo(bytes, size);
                 }
                 final byte[] fb = bytes;
                 final String fa = animMeta;
@@ -507,9 +549,9 @@ public class CustomBlockCommand {
      * Set a single face texture.
      * ONLY that face changes — all other faces are untouched.
      */
-    private static int cmdSetFace(ServerCommandSource src, String id, String face, String url) {
+    private static int cmdSetFace(ServerCommandSource src, String id, String face, String url, int size) {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
-        src.sendMessage(Text.literal("§e[CustomBlocks] Downloading " + face + " face..."));
+        src.sendMessage(Text.literal("§e[CustomBlocks] Downloading " + face + " face... §7(" + size + "px)"));
         MinecraftServer server = src.getServer();
         thread(() -> {
             try {
@@ -517,6 +559,7 @@ public class CustomBlockCommand {
                 byte[] bytes = ImageProcessor.toPng(raw);
                 bytes = ImageProcessor.padToSquare(bytes);
                 bytes = ImageProcessor.replaceBackground(bytes);
+                bytes = ImageProcessor.resizeTo(bytes, size);
                 final byte[] fb = bytes;
                 server.execute(() -> {
                     SlotManager.pushUndo(id, "setface " + face);
@@ -642,7 +685,51 @@ public class CustomBlockCommand {
         return 1;
     }
 
-    /** Bulk import all supported image types from config/customblocks/import/. */
+    /** Resize the existing stored texture (and all face overrides) of a block. */
+    private static int cmdResize(ServerCommandSource src, String id, int size) {
+        if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
+        SlotManager.SlotData d = SlotManager.getById(id);
+        if (d == null) { src.sendError(notFound(id)); return 0; }
+        if (d.texture == null && d.faceTextures.isEmpty()) {
+            src.sendError(Text.literal("§c'" + id + "' has no texture to resize.")); return 0;
+        }
+        SlotManager.pushUndo(id, "resize " + size);
+        src.sendMessage(Text.literal("§e[CustomBlocks] Resizing '" + id + "' to " + size + "px..."));
+        MinecraftServer server = src.getServer();
+        thread(() -> {
+            try {
+                byte[] newTex = d.texture != null ? ImageProcessor.resizeTo(d.texture, size) : null;
+                java.util.Map<String, byte[]> newFaces = new java.util.concurrent.ConcurrentHashMap<>();
+                for (var e : d.faceTextures.entrySet())
+                    newFaces.put(e.getKey(), ImageProcessor.resizeTo(e.getValue(), size));
+
+                server.execute(() -> {
+                    SlotManager.SlotData cur = SlotManager.getById(id);
+                    if (cur == null) { src.sendError(notFound(id)); return; }
+                    if (newTex != null) SlotManager.updateTexture(id, newTex);
+                    for (var e : newFaces.entrySet()) SlotManager.setFaceTexture(id, e.getKey(), e.getValue());
+                    SlotManager.saveAll();
+                    SlotManager.SlotData updated = SlotManager.getById(id);
+                    if (updated != null) {
+                        if (newTex != null)
+                            CustomBlocksMod.broadcastUpdate(server,
+                                new SlotUpdatePayload("retexture", updated.index, id, null, newTex,
+                                        updated.lightLevel, updated.hardness, updated.soundType));
+                        for (var e : newFaces.entrySet())
+                            CustomBlocksMod.broadcastUpdate(server,
+                                new SlotUpdatePayload("setface", updated.index, id, null, e.getValue(),
+                                        updated.lightLevel, updated.hardness, updated.soundType, e.getKey()));
+                    }
+                    src.sendMessage(Text.literal("§a[CustomBlocks] '" + id + "' resized to " + size + "px."));
+                });
+            } catch (Exception e) {
+                server.execute(() -> src.sendError(Text.literal("§c[CustomBlocks] Resize failed: " + e.getMessage())));
+            }
+        });
+        return 1;
+    }
+
+
     private static int cmdImportFolder(ServerCommandSource src) {
         File importDir = new File("config/customblocks/import");
         if (!importDir.exists()) {
@@ -786,9 +873,10 @@ public class CustomBlockCommand {
         src.sendMessage(Text.literal(D));
 
         src.sendMessage(Text.literal("§e  Blocks"));
-        src.sendMessage(Text.literal("§7  /cb §fcreate §b<id> <n> <url>          §8— new block from image or GIF URL"));
-        src.sendMessage(Text.literal("§7  /cb §fdupe §b<id> <newId> [name]       §8— copy a block and all its settings"));
-        src.sendMessage(Text.literal("§7  /cb §fretexture §b<id> <url>           §8— swap the main texture"));
+        src.sendMessage(Text.literal("§7  /cb §fcreate §b<id> <n> [size] <url>     §8— new block  §7size=16-256, default 128"));
+        src.sendMessage(Text.literal("§7  /cb §fdupe §b<id> <newId> [name]          §8— copy a block and all its settings"));
+        src.sendMessage(Text.literal("§7  /cb §fretexture §b<id> [size] <url>       §8— swap the main texture"));
+        src.sendMessage(Text.literal("§7  /cb §fresize §b<id> §3<16-256>            §8— rescale stored texture in-place"));
         src.sendMessage(Text.literal("§7  /cb §frename §b<id> <n>               §8— rename a block"));
         src.sendMessage(Text.literal("§7  /cb §fdelete §b<id>                   §8— permanently remove"));
         src.sendMessage(Text.literal("§7  /cb §fgive §b<id> [amount] [player]    §8— add to inventory"));
@@ -914,7 +1002,7 @@ public class CustomBlockCommand {
             case "givesquare"   -> "§cUsage: /cb givesquare <black|yellow|green>";
             case "givetriangle" -> "§cUsage: /cb givetriangle <black|yellow|green>";
             case "clearallfaces"-> "§cUsage: /cb clearallfaces <id>";
-            case "dupe"         -> "§cUsage: /cb dupe <sourceId> <newId> [newname]";
+            case "resize"       -> "§cUsage: /cb resize <id> <16-256>  — rescale stored texture";
             default -> "§cUsage: /cb help";
         }));
         return 0;

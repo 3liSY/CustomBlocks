@@ -51,25 +51,42 @@ public final class ImageProcessor {
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
 
+    /** Default texture size in pixels. Keeps packets safe. Override with commands. */
+    public static final int DEFAULT_SIZE = 128;
+    /** Hard cap — prevents packet kicks. */
+    public static final int MAX_SIZE     = 256;
+
     // ── Public API ────────────────────────────────────────────────────────────
 
-    /** Full pipeline: download → detect GIF → convert → pad to square → remove bg. */
-    public static byte[] downloadAndProcess(String url) throws IOException, InterruptedException {
+    /** Full pipeline with custom target size: download → convert → pad → remove bg → resize. */
+    public static byte[] downloadAndProcess(String url, int targetSize) throws IOException, InterruptedException {
         byte[] raw = download(url);
         if (isAnimatedGif(raw)) {
-            GifResult gif = processGif(raw);
-            if (gif != null) return gif.stripPng; // caller sets animMeta separately
+            GifResult gif = processGif(raw, targetSize);
+            if (gif != null) return gif.stripPng;
         }
         byte[] png = toPng(raw);
         png = padToSquare(png);
-        return replaceBackground(png);
+        png = replaceBackground(png);
+        return resizeTo(png, targetSize);
+    }
+
+    /** Full pipeline: download → detect GIF → convert → pad to square → remove bg → resize to DEFAULT_SIZE. */
+    public static byte[] downloadAndProcess(String url) throws IOException, InterruptedException {
+        return downloadAndProcess(url, DEFAULT_SIZE);
+    }
+
+    /** Same but skips background removal — used when caller handles it. */
+    public static byte[] downloadAndConvert(String url, int targetSize) throws IOException, InterruptedException {
+        byte[] raw = download(url);
+        byte[] png = toPng(raw);
+        png = padToSquare(png);
+        return resizeTo(png, targetSize);
     }
 
     /** Same but skips background removal — used when caller handles it. */
     public static byte[] downloadAndConvert(String url) throws IOException, InterruptedException {
-        byte[] raw = download(url);
-        byte[] png = toPng(raw);
-        return padToSquare(png);
+        return downloadAndConvert(url, DEFAULT_SIZE);
     }
 
     /**
@@ -280,6 +297,35 @@ public final class ImageProcessor {
      * Returns null if the GIF has <= 1 frame (use regular processing instead).
      */
     public static GifResult processGif(byte[] gifBytes) {
+        return processGif(gifBytes, DEFAULT_SIZE);
+    }
+
+
+    /**
+     * Scale image to exactly targetSize × targetSize pixels using bicubic interpolation.
+     * targetSize is clamped to [16, MAX_SIZE].
+     * If the image is already the right size, returns the input unchanged.
+     */
+    public static byte[] resizeTo(byte[] pngBytes, int targetSize) throws IOException {
+        targetSize = Math.max(16, Math.min(MAX_SIZE, targetSize));
+        BufferedImage img = ImageIO.read(new ByteArrayInputStream(pngBytes));
+        if (img == null) return pngBytes;
+        if (img.getWidth() == targetSize && img.getHeight() == targetSize) return pngBytes;
+        BufferedImage out = new BufferedImage(targetSize, targetSize, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = out.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        g.setRenderingHint(RenderingHints.KEY_RENDERING,     RenderingHints.VALUE_RENDER_QUALITY);
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,  RenderingHints.VALUE_ANTIALIAS_ON);
+        g.drawImage(img, 0, 0, targetSize, targetSize, null);
+        g.dispose();
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ImageIO.write(out, "PNG", baos);
+        return baos.toByteArray();
+    }
+
+    /** processGif with explicit frame size. */
+    public static GifResult processGif(byte[] gifBytes, int frameSize) {
+        frameSize = Math.max(16, Math.min(MAX_SIZE, frameSize));
         try {
             System.setProperty("java.awt.headless", "true");
             ImageInputStream iis = ImageIO.createImageInputStream(new ByteArrayInputStream(gifBytes));
@@ -293,7 +339,6 @@ public final class ImageProcessor {
 
             BufferedImage frame0 = reader.read(0);
             int fw = frame0.getWidth(), fh = frame0.getHeight();
-            int size = Math.max(fw, fh);
 
             java.util.List<BufferedImage> frames = new java.util.ArrayList<>();
             java.util.List<Integer> delays = new java.util.ArrayList<>();
@@ -301,7 +346,6 @@ public final class ImageProcessor {
 
             for (int i = 0; i < numFrames; i++) {
                 BufferedImage frame = reader.read(i);
-
                 int delayCsecs = 10;
                 try {
                     IIOMetadata meta = reader.getImageMetadata(i);
@@ -317,10 +361,8 @@ public final class ImageProcessor {
                         }
                     }
                 } catch (Exception ignored) {}
-
                 int ticks = Math.max(1, delayCsecs / 5);
                 delays.add(ticks);
-
                 Graphics2D cg = composite.createGraphics();
                 cg.drawImage(frame, 0, 0, null);
                 cg.dispose();
@@ -328,14 +370,14 @@ public final class ImageProcessor {
             }
             reader.dispose();
 
-            BufferedImage strip = new BufferedImage(size, size * numFrames, BufferedImage.TYPE_INT_ARGB);
+            // Build strip at target frameSize
+            BufferedImage strip = new BufferedImage(frameSize, frameSize * numFrames, BufferedImage.TYPE_INT_ARGB);
             Graphics2D sg = strip.createGraphics();
+            sg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
             sg.setColor(Color.BLACK);
-            sg.fillRect(0, 0, size, size * numFrames);
+            sg.fillRect(0, 0, frameSize, frameSize * numFrames);
             for (int i = 0; i < frames.size(); i++) {
-                int dx = (size - fw) / 2;
-                int dy = i * size + (size - fh) / 2;
-                sg.drawImage(frames.get(i), dx, dy, null);
+                sg.drawImage(frames.get(i), 0, i * frameSize, frameSize, frameSize, null);
             }
             sg.dispose();
 
