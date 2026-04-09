@@ -182,7 +182,7 @@ public class CustomBlockCommand {
                         .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
                             .executes(ctx -> cmdResize(ctx.getSource(),
                                 StringArgumentType.getString(ctx, "id"),
-                                IntegerArgumentType.getInteger(ctx, "size"))))))))
+                                IntegerArgumentType.getInteger(ctx, "size"))))))
 
                 // ── undo ────────────────────────────────────────────────────
                 .then(CommandManager.literal("undo")

@@ -95,7 +95,7 @@ public class ResourcePackGenerator {
                                 int frames = fh / fw;
                                 File mcmeta = new File(assets,
                                     "textures/block/" + slotKey + "_" + faceKey + ".png.mcmeta");
-                                StringBuilder sb = new StringBuilder("{"animation":{"interpolate":true,"frames":[");
+                                StringBuilder sb = new StringBuilder("{\"animation\":{\"interpolate\":true,\"frames\":[");
                                 for (int fi = 0; fi < frames; fi++) {
                                     if (fi > 0) sb.append(",");
                                     sb.append(fi);
