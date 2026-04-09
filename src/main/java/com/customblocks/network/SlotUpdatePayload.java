@@ -14,15 +14,24 @@ public record SlotUpdatePayload(
         int    lightLevel,
         float  hardness,
         String soundType,
-        String face
+        String face,
+        String shapeData
 ) implements CustomPayload {
 
-    /** Convenience constructor — no face (backwards-compat). */
+    /** Convenience constructor — no face, no shapeData. */
     public SlotUpdatePayload(String action, int slotIndex, String customId,
                               String displayName, byte[] texture,
                               int lightLevel, float hardness, String soundType) {
         this(action, slotIndex, customId, displayName, texture,
-             lightLevel, hardness, soundType, null);
+             lightLevel, hardness, soundType, null, null);
+    }
+
+    /** Convenience constructor — face but no shapeData. */
+    public SlotUpdatePayload(String action, int slotIndex, String customId,
+                              String displayName, byte[] texture,
+                              int lightLevel, float hardness, String soundType, String face) {
+        this(action, slotIndex, customId, displayName, texture,
+             lightLevel, hardness, soundType, face, null);
     }
 
     public static final Id<SlotUpdatePayload> ID =
@@ -39,6 +48,7 @@ public record SlotUpdatePayload(
                 buf.writeFloat(value.hardness());
                 buf.writeString(value.soundType()   != null ? value.soundType()   : "stone");
                 buf.writeString(value.face()        != null ? value.face()        : "");
+                buf.writeString(value.shapeData()   != null ? value.shapeData()   : "");
             },
             buf -> {
                 String action     = buf.readString();
@@ -50,15 +60,17 @@ public record SlotUpdatePayload(
                 float  hardness   = buf.readFloat();
                 String soundType  = buf.readString();
                 String face       = buf.readableBytes() > 0 ? buf.readString() : "";
+                String shapeData  = buf.readableBytes() > 0 ? buf.readString() : "";
                 if (buf.readableBytes() > 0) buf.skipBytes(buf.readableBytes());
                 return new SlotUpdatePayload(
                         action, index,
-                        id.isEmpty()   ? null : id,
-                        name.isEmpty() ? null : name,
-                        tex.length > 0 ? tex  : null,
+                        id.isEmpty()        ? null : id,
+                        name.isEmpty()      ? null : name,
+                        tex.length > 0      ? tex  : null,
                         lightLevel, hardness,
                         soundType.isEmpty() ? "stone" : soundType,
-                        face.isEmpty() ? null : face
+                        face.isEmpty()      ? null : face,
+                        shapeData.isEmpty() ? null : shapeData
                 );
             }
     );

@@ -12,6 +12,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.ItemUsageContext;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.math.BlockPos;
@@ -23,56 +24,36 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * The Rainbow Rectangle — one unique item, no colour variants.
+ * Rainbow Rectangle — face-paint wand.
  *
- * Right-click any Custom Block with this item to enter "face-paint" mode:
- *   1. The item detects which face of the block was clicked (top/bottom/north/south/east/west).
- *   2. A chat prompt asks the player to type (or paste) any image URL.
- *   3. The URL is downloaded, converted to PNG, white background auto-removed, and
- *      applied as an override for that specific face.
- *   4. Typing "cancel" (case-insensitive) aborts without changes.
+ * Right-click any Custom Block with this item to enter "face-paint" mode.
+ * After providing a URL, it CREATES A NEW VARIANT BLOCK (dupe + face override)
+ * so the original block definition stays unchanged. The clicked block in the
+ * world is swapped to the new variant and one item is given to you.
  *
- * Accepts ALL image formats supported by ImageIO + TwelveMonkeys (PNG, JPG, WebP, GIF, BMP…).
- *
- * Visual identity:
- *   - Has enchantment glint so it shimmers with a purple rainbow sheen in-hand.
- *   - Name rendered in cycling rainbow colours via the client-side colour provider
- *     registered in CustomBlocksClient.
- *   - Texture: rainbow_rectangle.png  (place in assets/customblocks/textures/item/)
+ * Typing "cancel" in chat aborts.
  */
 public class RectangleToolItem extends Item {
 
     // ── Pending face-edit sessions ────────────────────────────────────────────
 
-    /** Keyed by player UUID. Populated on right-click, consumed on next chat message. */
     public static final Map<UUID, PendingSession> PENDING = new ConcurrentHashMap<>();
 
     public record PendingSession(
-            BlockPos pos,    // block that was right-clicked (for context only)
-            String   face,   // "top" / "bottom" / "north" / "south" / "east" / "west"
-            String   slotId  // customId of the block
+            BlockPos pos,
+            String   face,
+            String   slotId,
+            int      size       // pixel size for the face texture (from shift-click = 256, normal = DEFAULT)
     ) {}
 
-    // ── Constructor ───────────────────────────────────────────────────────────
-
-    public RectangleToolItem(Settings settings) {
-        super(settings);
-    }
-
-    // ── Item meta ─────────────────────────────────────────────────────────────
+    public RectangleToolItem(Settings settings) { super(settings); }
 
     @Override
-    public Text getName() {
-        // §6§l gives gold bold; the actual rainbow cycling is done client-side
-        return Text.literal("§6§lRainbow §r§fRectangle");
-    }
-
+    public Text getName()                   { return Text.literal("§6§lRainbow §r§fRectangle"); }
     @Override
-    public Text getName(ItemStack stack) { return getName(); }
-
-    /** Always shimmer — reinforces the "rainbow" identity without needing animated textures. */
+    public Text getName(ItemStack stack)    { return getName(); }
     @Override
-    public boolean hasGlint(ItemStack stack) { return true; }
+    public boolean hasGlint(ItemStack stack){ return true; }
 
     // ── Right-click logic ─────────────────────────────────────────────────────
 
@@ -82,25 +63,20 @@ public class RectangleToolItem extends Item {
         BlockPos     pos    = ctx.getBlockPos();
         PlayerEntity player = ctx.getPlayer();
 
-        // All logic is server-side; client just returns PASS
         if (world.isClient) return ActionResult.PASS;
 
         BlockState state = world.getBlockState(pos);
         if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
 
-        // OP check — same level as all other CB tools
         if (player != null && !player.hasPermissionLevel(2)) {
-            player.sendMessage(
-                Text.literal("§c[CustomBlocks] You need OP (level 2) to use the Rainbow Rectangle."), true);
+            player.sendMessage(Text.literal("§c[CustomBlocks] You need OP (level 2) to use the Rainbow Rectangle."), true);
             return ActionResult.FAIL;
         }
 
         SlotManager.SlotData data = SlotManager.getBySlot(sb.getSlotKey());
         if (data == null) return ActionResult.PASS;
 
-        // Detect which face was clicked
-        Direction side = ctx.getSide();
-        String face = switch (side) {
+        String face = switch (ctx.getSide()) {
             case UP    -> "top";
             case DOWN  -> "bottom";
             case NORTH -> "north";
@@ -109,97 +85,176 @@ public class RectangleToolItem extends Item {
             case WEST  -> "west";
         };
 
-        // Register pending session for this player
-        UUID uuid = player.getUuid();
-        PENDING.put(uuid, new PendingSession(pos, face, data.customId));
+        // Shift-click = high quality (256px), normal click = default (128px)
+        int size = (player != null && player.isSneaking())
+                ? ImageProcessor.MAX_SIZE
+                : ImageProcessor.DEFAULT_SIZE;
 
-        // Prompt player in chat
+        UUID uuid = player.getUuid();
+        PENDING.put(uuid, new PendingSession(pos, face, data.customId, size));
+
         player.sendMessage(Text.literal(
-            "§6[CustomBlocks] §eYou clicked the §f" + face.toUpperCase()
-            + " §eface of §f" + data.displayName + "§e."), false);
+            "§6[CustomBlocks] §eClicked §f" + face.toUpperCase() + " §eof §f" + data.displayName + "§e."), false);
         player.sendMessage(Text.literal(
-            "§ePaste the image URL in chat §7(PNG, JPG, WebP, GIF… any format):"), false);
+            "§ePaste image URL (PNG/JPG/GIF/WebP…) — will create a new variant:"), false);
         player.sendMessage(Text.literal(
-            "§7Type §ccancel §7to abort."), false);
+            "§7  §aShift+click §7= high quality (256px)   §8current: §f" + size + "px"), false);
+        player.sendMessage(Text.literal("§7Type §ccancel §7to abort."), false);
 
         return ActionResult.SUCCESS;
     }
 
     // ── Chat input handler ────────────────────────────────────────────────────
 
-    /**
-     * Called by the chat event registered in {@link com.customblocks.CustomBlocksMod}.
-     *
-     * @param player  the player who sent the message
-     * @param message raw chat text
-     * @return {@code true} if the message was consumed (don't show in chat),
-     *         {@code false} if no pending session (pass through normally)
-     */
     public static boolean handleChatInput(ServerPlayerEntity player, String message) {
         UUID uuid = player.getUuid();
-        PendingSession session = PENDING.remove(uuid); // consume immediately
-        if (session == null) return false;             // no active session — pass through
+        PendingSession session = PENDING.remove(uuid);
+        if (session == null) return false;
 
         String trimmed = message.trim();
 
-        // Cancellation
         if (trimmed.equalsIgnoreCase("cancel")) {
             player.sendMessage(Text.literal("§7[CustomBlocks] Face-paint cancelled."), false);
             return true;
         }
 
-        // Validate looks like a URL
         if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
             player.sendMessage(Text.literal(
-                "§c[CustomBlocks] That doesn't look like a URL. Must start with http:// or https://"), false);
+                "§c[CustomBlocks] Needs a URL starting with http:// or https://"), false);
             return true;
         }
 
         String url    = trimmed;
         String face   = session.face();
-        String slotId = session.slotId();
+        String baseId = session.slotId();
+        int    size   = session.size();
         MinecraftServer server = player.getServer();
         if (server == null) return true;
 
         player.sendMessage(Text.literal(
-            "§e[CustomBlocks] Downloading image for §f" + face + " §eface…"), false);
+            "§e[CustomBlocks] Downloading " + face.toUpperCase() + " face at §f" + size + "px§e…"), false);
 
         Thread t = new Thread(() -> {
             try {
-                // Download → convert to PNG → auto-remove white background
-                byte[] processed = ImageProcessor.downloadAndProcess(url, ImageProcessor.DEFAULT_SIZE);
+                byte[] raw = ImageProcessor.download(url);
+
+                // Detect animated GIF
+                ImageProcessor.GifResult gifResult =
+                    ImageProcessor.isAnimatedGif(raw) ? ImageProcessor.processGif(raw, size) : null;
+
+                byte[] faceBytes;
+                String faceAnim = null;
+                if (gifResult != null) {
+                    faceBytes = gifResult.stripPng();
+                    faceAnim  = gifResult.mcmeta();
+                    server.execute(() -> player.sendMessage(Text.literal(
+                        "§b[CustomBlocks] Animated GIF — " + gifResult.frameCount() + " frames!"), false));
+                } else {
+                    faceBytes = ImageProcessor.toPng(raw);
+                    faceBytes = ImageProcessor.padToSquare(faceBytes);
+                    faceBytes = ImageProcessor.replaceBackground(faceBytes);
+                    faceBytes = ImageProcessor.resizeTo(faceBytes, size);
+                }
+
+                final byte[] finalBytes = faceBytes;
+                final String finalAnim  = faceAnim;
 
                 server.execute(() -> {
-                    SlotManager.SlotData d = SlotManager.getById(slotId);
-                    if (d == null) {
-                        player.sendMessage(
-                            Text.literal("§c[CustomBlocks] Block '§f" + slotId
-                                + "§c' no longer exists."), false);
+                    SlotManager.SlotData original = SlotManager.getById(baseId);
+                    if (original == null) {
+                        player.sendMessage(Text.literal(
+                            "§c[CustomBlocks] Block '" + baseId + "' was deleted."), false);
                         return;
                     }
-                    SlotManager.pushUndo(slotId, "setface " + face);
-                    SlotManager.setFaceTexture(slotId, face, processed);
+                    if (SlotManager.freeSlots() == 0) {
+                        player.sendMessage(Text.literal(
+                            "§c[CustomBlocks] No free slots! Delete a block first."), false);
+                        return;
+                    }
+
+                    // Generate new variant ID
+                    String variantId = generateVariantId(baseId, face);
+                    String variantName = original.displayName + " (" + cap(face) + ")";
+
+                    // Dupe original → new slot
+                    byte[] texCopy = original.texture != null ? original.texture.clone() : null;
+                    SlotManager.SlotData newBlock = SlotManager.assign(variantId, variantName, texCopy);
+                    if (newBlock == null) {
+                        player.sendMessage(Text.literal("§c[CustomBlocks] Could not create variant — no free slots."), false);
+                        return;
+                    }
+
+                    // Copy all properties from original
+                    SlotManager.setLightLevel(variantId, original.lightLevel);
+                    SlotManager.setHardness(variantId, original.hardness);
+                    SlotManager.setSoundType(variantId, original.soundType);
+                    if (original.animMeta != null) SlotManager.setAnimMeta(variantId, original.animMeta);
+                    for (var e : original.faceTextures.entrySet())
+                        SlotManager.setFaceTexture(variantId, e.getKey(), e.getValue().clone());
+
+                    // Apply the new face override
+                    SlotManager.setFaceTexture(variantId, face, finalBytes);
+                    if (finalAnim != null) SlotManager.setAnimMeta(variantId, finalAnim);
+
+                    SlotManager.pushUndoCreate(variantId);
                     SlotManager.saveAll();
 
-                    // Broadcast setface — ONLY this face updates on clients; other faces unchanged
-                    CustomBlocksMod.broadcastUpdate(server,
-                        new SlotUpdatePayload("setface", d.index, d.customId,
-                            null, processed, d.lightLevel, d.hardness, d.soundType, face));
+                    // Swap the clicked block in the world to the new variant
+                    ServerWorld world = player.getServerWorld();
+                    BlockState current = world.getBlockState(session.pos());
+                    if (current.getBlock() instanceof SlotBlock) {
+                        world.setBlockState(session.pos(),
+                            CustomBlocksMod.SLOT_BLOCKS[newBlock.index].getDefaultState());
+                    }
+
+                    // Give player 1 of the new block
+                    player.getInventory().insertStack(
+                        new ItemStack(CustomBlocksMod.SLOT_ITEMS[newBlock.index], 1));
+
+                    // Broadcast add + face to all clients
+                    SlotManager.SlotData fresh = SlotManager.getById(variantId);
+                    if (fresh != null) {
+                        CustomBlocksMod.broadcastUpdate(server,
+                            new SlotUpdatePayload("add", fresh.index, variantId, variantName,
+                                texCopy, fresh.lightLevel, fresh.hardness, fresh.soundType));
+                        // Re-send all faces including the new one
+                        for (var fe : fresh.faceTextures.entrySet())
+                            CustomBlocksMod.broadcastUpdate(server,
+                                new SlotUpdatePayload("setface", fresh.index, variantId, null,
+                                    fe.getValue(), fresh.lightLevel, fresh.hardness, fresh.soundType,
+                                    fe.getKey()));
+                    }
 
                     player.sendMessage(Text.literal(
-                        "§a[CustomBlocks] §f" + face.toUpperCase()
-                        + " §aface updated on §f" + d.displayName + "§a!"), false);
+                        "§a[CustomBlocks] Created variant §f'" + variantId + "'§a! " +
+                        "§7(slot #" + newBlock.index + ") — original untouched."), false);
                 });
 
             } catch (Exception e) {
-                server.execute(() ->
-                    player.sendMessage(Text.literal(
-                        "§c[CustomBlocks] Failed: " + e.getMessage()), false));
+                server.execute(() -> player.sendMessage(
+                    Text.literal("§c[CustomBlocks] Failed: " + e.getMessage()), false));
             }
-        }, "CB-RectDownload");
+        }, "PB-RectDownload");
         t.setDaemon(true);
         t.start();
 
-        return true; // consumed — don't echo to chat
+        return true;
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /** Auto-generate a free variant ID like baseId_face, baseId_face_2, … */
+    private static String generateVariantId(String baseId, String face) {
+        String candidate = baseId + "_" + face;
+        if (!SlotManager.hasId(candidate)) return candidate;
+        for (int i = 2; i <= 99; i++) {
+            String c = candidate + "_" + i;
+            if (!SlotManager.hasId(c)) return c;
+        }
+        return candidate + "_" + (System.currentTimeMillis() % 10000);
+    }
+
+    private static String cap(String s) {
+        return s == null || s.isEmpty() ? "" : Character.toUpperCase(s.charAt(0)) + s.substring(1);
     }
 }

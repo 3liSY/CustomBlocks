@@ -20,15 +20,21 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 
 public class CustomBlockCommand {
 
     private static final SuggestionProvider<ServerCommandSource> BLOCK_SUGGESTIONS =
             (ctx, builder) -> { for (String id : SlotManager.allCustomIds()) builder.suggest(id); return builder.buildFuture(); };
 
+    private static final String[] VALID_SOUNDS = {
+        "stone","wood","grass","metal","glass","sand","wool",
+        "gravel","snow","dirt","coral","bamboo","nether_brick","ice","honey","bone","slime"
+    };
     private static final SuggestionProvider<ServerCommandSource> SOUND_SUGGESTIONS =
-            (ctx, builder) -> { for (String s : new String[]{"stone","wood","grass","metal","glass","sand","wool"}) builder.suggest(s); return builder.buildFuture(); };
+            (ctx, builder) -> { for (String s : VALID_SOUNDS) builder.suggest(s); return builder.buildFuture(); };
 
     private static final SuggestionProvider<ServerCommandSource> FACE_SUGGESTIONS =
             (ctx, builder) -> { for (String f : SlotManager.FACE_KEYS) builder.suggest(f); return builder.buildFuture(); };
@@ -91,6 +97,16 @@ public class CustomBlockCommand {
                             .executes(ctx -> cmdRename(ctx.getSource(),
                                 StringArgumentType.getString(ctx, "id"),
                                 StringArgumentType.getString(ctx, "newname").replace("_", " "))))))
+
+                // ── reid ────────────────────────────────────────────────────
+                .then(CommandManager.literal("reid")
+                    .executes(ctx -> usage(ctx.getSource(), "reid"))
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("newid", StringArgumentType.word())
+                            .executes(ctx -> cmdReId(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "id"),
+                                StringArgumentType.getString(ctx, "newid"))))))
 
                 // ── retexture ───────────────────────────────────────────────
                 .then(CommandManager.literal("retexture")
@@ -159,56 +175,6 @@ public class CustomBlockCommand {
                     .then(CommandManager.argument("url", StringArgumentType.greedyString())
                         .executes(ctx -> cmdSetTabIcon(ctx.getSource(),
                             StringArgumentType.getString(ctx, "url").trim()))))
-
-                // ── per-face commands ───────────────────────────────────────
-                .then(CommandManager.literal("settopface")
-                    .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
-                        .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
-                            .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                                .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "top", StringArgumentType.getString(ctx, "url").trim(), IntegerArgumentType.getInteger(ctx, "size")))))
-                        .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                            .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "top", StringArgumentType.getString(ctx, "url").trim(), ImageProcessor.DEFAULT_SIZE)))))
-
-                .then(CommandManager.literal("setbottomface")
-                    .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
-                        .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
-                            .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                                .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "bottom", StringArgumentType.getString(ctx, "url").trim(), IntegerArgumentType.getInteger(ctx, "size")))))
-                        .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                            .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "bottom", StringArgumentType.getString(ctx, "url").trim(), ImageProcessor.DEFAULT_SIZE)))))
-
-                .then(CommandManager.literal("setnorthface")
-                    .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
-                        .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
-                            .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                                .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "north", StringArgumentType.getString(ctx, "url").trim(), IntegerArgumentType.getInteger(ctx, "size")))))
-                        .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                            .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "north", StringArgumentType.getString(ctx, "url").trim(), ImageProcessor.DEFAULT_SIZE)))))
-
-                .then(CommandManager.literal("setsouthface")
-                    .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
-                        .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
-                            .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                                .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "south", StringArgumentType.getString(ctx, "url").trim(), IntegerArgumentType.getInteger(ctx, "size")))))
-                        .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                            .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "south", StringArgumentType.getString(ctx, "url").trim(), ImageProcessor.DEFAULT_SIZE)))))
-
-                .then(CommandManager.literal("seteastface")
-                    .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
-                        .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
-                            .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                                .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "east", StringArgumentType.getString(ctx, "url").trim(), IntegerArgumentType.getInteger(ctx, "size")))))
-                        .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                            .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "east", StringArgumentType.getString(ctx, "url").trim(), ImageProcessor.DEFAULT_SIZE)))))
-
-                .then(CommandManager.literal("setwestface")
-                    .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
-                        .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
-                            .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                                .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "west", StringArgumentType.getString(ctx, "url").trim(), IntegerArgumentType.getInteger(ctx, "size")))))
-                        .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                            .executes(ctx -> cmdSetFace(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "west", StringArgumentType.getString(ctx, "url").trim(), ImageProcessor.DEFAULT_SIZE)))))
-
                 // ── resize ──────────────────────────────────────────────────
                 .then(CommandManager.literal("resize")
                     .executes(ctx -> usage(ctx.getSource(), "resize"))
@@ -216,20 +182,7 @@ public class CustomBlockCommand {
                         .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
                             .executes(ctx -> cmdResize(ctx.getSource(),
                                 StringArgumentType.getString(ctx, "id"),
-                                IntegerArgumentType.getInteger(ctx, "size"))))))
-
-                .then(CommandManager.literal("clearface")
-                    .executes(ctx -> usage(ctx.getSource(), "clearface"))
-                    .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
-                        .then(CommandManager.argument("face", StringArgumentType.word()).suggests(FACE_SUGGESTIONS)
-                            .executes(ctx -> cmdClearFace(ctx.getSource(),
-                                StringArgumentType.getString(ctx, "id"),
-                                StringArgumentType.getString(ctx, "face"))))))
-
-                .then(CommandManager.literal("clearallfaces")
-                    .executes(ctx -> usage(ctx.getSource(), "clearallfaces"))
-                    .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
-                        .executes(ctx -> cmdClearAllFaces(ctx.getSource(), StringArgumentType.getString(ctx, "id")))))
+                                IntegerArgumentType.getInteger(ctx, "size"))))))))
 
                 // ── undo ────────────────────────────────────────────────────
                 .then(CommandManager.literal("undo")
@@ -250,12 +203,6 @@ public class CustomBlockCommand {
 
                 .then(CommandManager.literal("giverectangle")
                     .executes(ctx -> cmdGiveRectangle(ctx.getSource())))
-
-                .then(CommandManager.literal("colorchanger")
-                    .executes(ctx -> cmdColorChangerAll(ctx.getSource()))
-                    .then(CommandManager.argument("color", StringArgumentType.word())
-                        .suggests((ctx, builder) -> { builder.suggest("black"); builder.suggest("yellow"); builder.suggest("green"); return builder.buildFuture(); })
-                        .executes(ctx -> cmdGiveSquare(ctx.getSource(), StringArgumentType.getString(ctx, "color")))))
 
                 // ── dupe / duplicate ────────────────────────────────────────
                 .then(CommandManager.literal("dupe")
@@ -300,8 +247,103 @@ public class CustomBlockCommand {
                     .executes(ctx -> cmdHelp(ctx.getSource())))
 
                 // ── gui ──────────────────────────────────────────────────────
+                // ── editor ─────────────────────────────────────────────
+                .then(CommandManager.literal("editor")
+                    .executes(ctx -> usage(ctx.getSource(), "editor"))
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .executes(ctx -> cmdEditor(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "id")))))
+
+                // ── gui ──────────────────────────────────────────────────────
                 .then(CommandManager.literal("gui")
-                    .executes(ctx -> cmdGui(ctx.getSource())));
+                    .executes(ctx -> cmdGui(ctx.getSource())))
+
+                // ── setshape ─────────────────────────────────────────────────
+                .then(CommandManager.literal("setshape")
+                    .executes(ctx -> usage(ctx.getSource(), "setshape"))
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("shape", StringArgumentType.greedyString())
+                            .executes(ctx -> cmdSetShape(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "id"),
+                                StringArgumentType.getString(ctx, "shape"))))))
+
+                .then(CommandManager.literal("addshape")
+                    .executes(ctx -> usage(ctx.getSource(), "addshape"))
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("coords", StringArgumentType.greedyString())
+                            .executes(ctx -> cmdAddShape(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "id"),
+                                StringArgumentType.getString(ctx, "coords"))))))
+
+                .then(CommandManager.literal("removeshape")
+                    .executes(ctx -> usage(ctx.getSource(), "removeshape"))
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("boxindex", IntegerArgumentType.integer(0, 15))
+                            .executes(ctx -> cmdRemoveShape(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "id"),
+                                IntegerArgumentType.getInteger(ctx, "boxindex"))))))
+
+                .then(CommandManager.literal("clearshape")
+                    .executes(ctx -> usage(ctx.getSource(), "clearshape"))
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .executes(ctx -> cmdClearShape(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "id")))))
+
+                .then(CommandManager.literal("setcollision")
+                    .executes(ctx -> usage(ctx.getSource(), "setcollision"))
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.literal("on")
+                            .executes(ctx -> cmdSetCollision(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "id"), true)))
+                        .then(CommandManager.literal("off")
+                            .executes(ctx -> cmdSetCollision(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "id"), false)))))
+
+                .then(CommandManager.literal("saveshape")
+                    .executes(ctx -> usage(ctx.getSource(), "saveshape"))
+                    .then(CommandManager.argument("name", StringArgumentType.word())
+                        .then(CommandManager.argument("id", StringArgumentType.word())
+                            .suggests(BLOCK_SUGGESTIONS)
+                            .executes(ctx -> cmdSaveShape(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "name"),
+                                StringArgumentType.getString(ctx, "id"))))))
+
+                .then(CommandManager.literal("loadshape")
+                    .executes(ctx -> usage(ctx.getSource(), "loadshape"))
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("name", StringArgumentType.word())
+                            .executes(ctx -> cmdLoadShape(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "id"),
+                                StringArgumentType.getString(ctx, "name"))))))
+
+                .then(CommandManager.literal("shapeeditor")
+                    .executes(ctx -> usage(ctx.getSource(), "shapeeditor"))
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .executes(ctx -> cmdShapeEditor(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "id")))))
+
+                .then(CommandManager.literal("square")
+                    .executes(ctx -> usage(ctx.getSource(), "square"))
+                    .then(CommandManager.argument("color", StringArgumentType.word())
+                        .executes(ctx -> cmdGiveSquare(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "color")))))
+
+                .then(CommandManager.literal("triangle")
+                    .executes(ctx -> usage(ctx.getSource(), "triangle"))
+                    .then(CommandManager.argument("color", StringArgumentType.word())
+                        .executes(ctx -> cmdGiveTriangle(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "color")))))
+
+                .then(CommandManager.literal("rectangle")
+                    .executes(ctx -> cmdGiveRectangle(ctx.getSource())));
 
             dispatcher.register(tree);
             dispatcher.register(CommandManager.literal("cb")
@@ -419,6 +461,173 @@ public class CustomBlockCommand {
         return 1;
     }
 
+    private static int cmdReId(ServerCommandSource src, String oldId, String newId) {
+        if (!SlotManager.hasId(oldId)) { src.sendError(notFound(oldId)); return 0; }
+        if (SlotManager.hasId(newId)) {
+            src.sendError(Text.literal("§c[CustomBlocks] ID '" + newId + "' is already taken."));
+            return 0;
+        }
+        if (!newId.matches("[a-z0-9_\\-]+")) {
+            src.sendError(Text.literal("§c[CustomBlocks] ID must be lowercase letters, numbers, _ or - only."));
+            return 0;
+        }
+        SlotManager.pushUndo(oldId, "reid");
+        SlotManager.SlotData d = SlotManager.getById(oldId);
+        SlotManager.reId(oldId, newId);
+        SlotManager.saveAll();
+        // Broadcast a full re-add with the new ID so clients update their mapping
+        SlotManager.SlotData updated = SlotManager.getById(newId);
+        CustomBlocksMod.broadcastUpdate(src.getServer(),
+            new SlotUpdatePayload("remove", d.index, oldId, null, null, 0, 0, "stone"));
+        CustomBlocksMod.broadcastUpdate(src.getServer(),
+            new SlotUpdatePayload("add", updated.index, newId, updated.displayName, updated.texture,
+                updated.lightLevel, updated.hardness, updated.soundType));
+        src.sendMessage(Text.literal("§a[CustomBlocks] Re-ID'd §f'" + oldId + "' §a→ §f'" + newId + "'."));
+        return 1;
+    }
+
+    // ── Shape commands ────────────────────────────────────────────────────────
+
+    private static String serializeShape(List<SlotManager.ShapeBox> boxes) {
+        if (boxes == null || boxes.isEmpty()) return "full";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < boxes.size(); i++) {
+            if (i > 0) sb.append(";");
+            sb.append(boxes.get(i).toCoordString());
+        }
+        return sb.toString();
+    }
+
+    private static void broadcastShape(MinecraftServer server, SlotManager.SlotData d) {
+        List<SlotManager.ShapeBox> boxes = d.shapeBoxes;
+        CustomBlocksMod.broadcastUpdate(server, new SlotUpdatePayload(
+                "setshape", d.index, d.customId, null, null, 0, 0, "stone",
+                null, serializeShape(boxes)));
+    }
+
+    private static int cmdSetShape(ServerCommandSource src, String id, String shapeArg) {
+        if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
+        List<SlotManager.ShapeBox> boxes;
+        String shapeArgTrimmed = shapeArg.trim();
+        if (SlotManager.SHAPE_PRESETS.containsKey(shapeArgTrimmed)) {
+            boxes = new ArrayList<>(SlotManager.SHAPE_PRESETS.get(shapeArgTrimmed));
+        } else {
+            try {
+                SlotManager.ShapeBox box = SlotManager.ShapeBox.parse(shapeArgTrimmed);
+                if (!box.valid()) { src.sendError(Text.literal("§cInvalid coords (each must be 0–16, x2>x1 etc).")); return 0; }
+                boxes = List.of(box);
+            } catch (Exception e) {
+                src.sendError(Text.literal("§cUnknown preset or bad coords. Presets: " + String.join(", ", SlotManager.SHAPE_PRESETS.keySet())));
+                return 0;
+            }
+        }
+        SlotManager.pushUndo(id, "setshape");
+        SlotManager.setShape(id, boxes);
+        SlotManager.saveAll();
+        SlotManager.SlotData d = SlotManager.getById(id);
+        broadcastShape(src.getServer(), d);
+        src.sendMessage(Text.literal("§a[CustomBlocks] Shape set to '§f" + shapeArgTrimmed + "§a' on '§f" + id + "§a'."));
+        return 1;
+    }
+
+    private static int cmdAddShape(ServerCommandSource src, String id, String coords) {
+        if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
+        SlotManager.SlotData d = SlotManager.getById(id);
+        int current = d.shapeBoxes != null ? d.shapeBoxes.size() : 0;
+        if (current >= 16) { src.sendError(Text.literal("§cMax 16 boxes per block.")); return 0; }
+        SlotManager.ShapeBox box;
+        try {
+            box = SlotManager.ShapeBox.parse(coords.trim());
+            if (!box.valid()) { src.sendError(Text.literal("§cInvalid coords.")); return 0; }
+        } catch (Exception e) {
+            src.sendError(Text.literal("§cBad coords. Format: x1,y1,z1,x2,y2,z2 (0–16)")); return 0;
+        }
+        SlotManager.pushUndo(id, "addshape");
+        SlotManager.addBox(id, box);
+        SlotManager.saveAll();
+        d = SlotManager.getById(id);
+        broadcastShape(src.getServer(), d);
+        src.sendMessage(Text.literal("§a[CustomBlocks] Added box #§f" + (current + 1) + "§a to '§f" + id + "§a'. Total: §f" + d.shapeBoxes.size()));
+        return 1;
+    }
+
+    private static int cmdRemoveShape(ServerCommandSource src, String id, int index) {
+        if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
+        SlotManager.pushUndo(id, "removeshape");
+        if (!SlotManager.removeBox(id, index)) {
+            src.sendError(Text.literal("§cBox #" + index + " not found.")); return 0;
+        }
+        SlotManager.saveAll();
+        SlotManager.SlotData d = SlotManager.getById(id);
+        broadcastShape(src.getServer(), d);
+        src.sendMessage(Text.literal("§a[CustomBlocks] Removed box #§f" + index + "§a from '§f" + id + "§a'."));
+        return 1;
+    }
+
+    private static int cmdClearShape(ServerCommandSource src, String id) {
+        if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
+        SlotManager.pushUndo(id, "clearshape");
+        SlotManager.clearShape(id);
+        SlotManager.saveAll();
+        SlotManager.SlotData d = SlotManager.getById(id);
+        broadcastShape(src.getServer(), d);
+        src.sendMessage(Text.literal("§a[CustomBlocks] Shape reset to full cube on '§f" + id + "§a'."));
+        return 1;
+    }
+
+    private static int cmdSetCollision(ServerCommandSource src, String id, boolean on) {
+        if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
+        SlotManager.pushUndo(id, "setcollision");
+        SlotManager.setCollision(id, on);
+        SlotManager.saveAll();
+        SlotManager.SlotData d = SlotManager.getById(id);
+        CustomBlocksMod.broadcastUpdate(src.getServer(), new SlotUpdatePayload(
+                "setcollision", d.index, id, null, null, 0, 0, "stone", null, on ? "true" : "false"));
+        src.sendMessage(Text.literal("§a[CustomBlocks] Collision §f" + (on ? "ON" : "OFF") + "§a for '§f" + id + "§a'."));
+        return 1;
+    }
+
+    private static int cmdSaveShape(ServerCommandSource src, String name, String id) {
+        if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
+        SlotManager.saveTemplate(name, id);
+        src.sendMessage(Text.literal("§a[CustomBlocks] Shape saved as template '§f" + name + "§a'."));
+        return 1;
+    }
+
+    private static int cmdLoadShape(ServerCommandSource src, String id, String name) {
+        if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
+        SlotManager.pushUndo(id, "loadshape");
+        if (!SlotManager.loadTemplate(id, name)) {
+            src.sendError(Text.literal("§cTemplate '§f" + name + "§c' not found. Available: " + String.join(", ", SlotManager.allTemplateNames())));
+            return 0;
+        }
+        SlotManager.saveAll();
+        SlotManager.SlotData d = SlotManager.getById(id);
+        broadcastShape(src.getServer(), d);
+        src.sendMessage(Text.literal("§a[CustomBlocks] Applied shape template '§f" + name + "§a' to '§f" + id + "§a'."));
+        return 1;
+    }
+
+    private static int cmdShapeEditor(ServerCommandSource src, String id) {
+        if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
+        net.minecraft.server.network.ServerPlayerEntity player = src.getPlayer();
+        if (player == null) { src.sendError(Text.literal("§cPlayer only.")); return 0; }
+        com.customblocks.gui.GuiManager.openShapeEditor(player, id, 0);
+        return 1;
+    }
+
+    private static int cmdGiveSquare(ServerCommandSource src, String color) {
+        return cmdGiveSquareInternal(src, color);
+    }
+
+    private static int cmdGiveTriangle(ServerCommandSource src, String color) {
+        return cmdGiveTriangleInternal(src, color);
+    }
+
+    private static int cmdGiveRectangle(ServerCommandSource src) {
+        return cmdGiveRectangleInternal(src);
+    }
+
     private static int cmdRetexture(ServerCommandSource src, String id, String url, int size) {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
         src.sendMessage(Text.literal("§e[CustomBlocks] Downloading texture... §7(" + size + "px)"));
@@ -486,7 +695,8 @@ public class CustomBlockCommand {
         SlotManager.saveAll();
         CustomBlocksMod.broadcastUpdate(src.getServer(),
             new SlotUpdatePayload("setprop", d.index, id, null, null, level, d.hardness, d.soundType));
-        src.sendMessage(Text.literal("§a[CustomBlocks] '" + id + "' glow set to " + level + "."));
+        triggerGlowUpdate(src.getServer(), d.index);
+        src.sendMessage(Text.literal("§a[CustomBlocks] '" + id + "' light level set to " + level + ". §7(0=off, 7=torch, 14=sea lantern, 15=glowstone)"));
         return 1;
     }
 
@@ -505,10 +715,9 @@ public class CustomBlockCommand {
 
     private static int cmdSetSound(ServerCommandSource src, String id, String type) {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
-        String[] valid = {"stone","wood","grass","metal","glass","sand","wool"};
         boolean ok = false;
-        for (String v : valid) if (v.equals(type)) { ok = true; break; }
-        if (!ok) { src.sendError(Text.literal("§cValid sounds: stone, wood, grass, metal, glass, sand, wool")); return 0; }
+        for (String v : VALID_SOUNDS) if (v.equals(type)) { ok = true; break; }
+        if (!ok) { src.sendError(Text.literal("§cValid: stone wood grass metal glass sand wool gravel snow dirt coral bamboo nether_brick ice honey bone slime")); return 0; }
         SlotManager.pushUndo(id, "setsound");
         SlotManager.SlotData d = SlotManager.getById(id);
         SlotManager.setSoundType(id, type);
@@ -534,9 +743,10 @@ public class CustomBlockCommand {
                     if (d != null)
                         CustomBlocksMod.broadcastUpdate(server,
                             new SlotUpdatePayload("add", d.index, "tab_icon", "Tab Icon", bytes, 0, 1.5f, "stone"));
+                    // Send tabicon payload — clients receive texture and schedule reload
                     CustomBlocksMod.broadcastUpdate(server,
                         new SlotUpdatePayload("tabicon", -1, null, null, bytes, 0, 0, "stone"));
-                    src.sendMessage(Text.literal("§a[CustomBlocks] Tab icon updated!"));
+                    src.sendMessage(Text.literal("§a[CustomBlocks] Tab icon updated! §7(Takes a few seconds to appear — resource pack is reloading)"));
                 });
             } catch (Exception e) {
                 server.execute(() -> src.sendError(Text.literal("§c[CustomBlocks] Failed: " + e.getMessage())));
@@ -851,89 +1061,108 @@ public class CustomBlockCommand {
     }
 
     private static int cmdList(ServerCommandSource src) {
-        if (SlotManager.usedSlots() == 0) {
-            src.sendMessage(Text.literal("§7[CustomBlocks] No blocks yet. " + SlotManager.freeSlots() + " slots free.")); return 1;
+        final String D = "§8§m                                              §r";
+        int used = SlotManager.usedSlots(), free = SlotManager.freeSlots();
+        src.sendMessage(Text.literal(" "));
+        src.sendMessage(Text.literal("  §6§l✦ CustomBlocks §r§8│ §7" + used + " blocks  §8│  §7" + free + " free  §8│  §7" + SlotManager.MAX_SLOTS + " total"));
+        src.sendMessage(Text.literal(D));
+        if (used == 0) {
+            src.sendMessage(Text.literal("  §7No blocks yet. Use §b/cb create§7 to add one."));
+            src.sendMessage(Text.literal(D));
+            src.sendMessage(Text.literal(" "));
+            return 1;
         }
-        src.sendMessage(Text.literal("§e[CustomBlocks] §f" + SlotManager.usedSlots() + " block(s) §7| " + SlotManager.freeSlots() + " free:"));
-        for (SlotManager.SlotData d : SlotManager.allSlots()) {
-            String glow  = d.lightLevel > 0 ? " §6✦" + d.lightLevel : "";
-            String hard  = d.hardness < 0 ? " §c∞" : "";
-            String anim  = d.isAnimated() ? " §b⟳" : "";
-            String faces = d.hasFaces() ? " §d[faces]" : "";
-            src.sendMessage(Text.literal("  §f" + d.customId + " §7→ '" + d.displayName + "'" + glow + hard + anim + faces + " §8(#" + d.index + ")"));
+        java.util.List<SlotManager.SlotData> sorted = new java.util.ArrayList<>(SlotManager.allSlots());
+        sorted.removeIf(d -> "tab_icon".equals(d.customId));
+        sorted.sort(java.util.Comparator.comparingInt(d -> d.index));
+        for (SlotManager.SlotData d : sorted) {
+            StringBuilder line = new StringBuilder();
+            line.append("  §f").append(String.format("%-20s", d.customId))
+                .append(" §7→ §e").append(d.displayName)
+                .append(" §8(#").append(d.index).append(")");
+            if (d.lightLevel > 0) line.append("  §6✦").append(d.lightLevel);
+            if (d.hardness < 0)   line.append("  §c∞");
+            if (d.isAnimated())   line.append("  §b⟳GIF");
+            if (d.hasFaces())     line.append("  §d⬡faces");
+            if (!d.soundType.equals("stone")) line.append("  §7[").append(d.soundType).append("]");
+            src.sendMessage(Text.literal(line.toString()));
         }
+        src.sendMessage(Text.literal(D));
+        src.sendMessage(Text.literal(" "));
         return 1;
     }
 
-    /** Clean /cb help — grouped, easy to scan. */
     private static int cmdHelp(ServerCommandSource src) {
-        final String D = "§8──────────────────────────────────────────";
+        final String D = "§8§m                                              §r";
+        final String H = "§e§l";   // heading colour
+        final String C = "§b";     // command colour
+        final String G = "§7";     // grey description
+        final String A = "§f";     // arg colour
+
         src.sendMessage(Text.literal(" "));
-        src.sendMessage(Text.literal("  §6§l✦ §r§6CustomBlocks  §8│ §7/cb §8or §7/customblock  §8│ §7v2.0"));
+        src.sendMessage(Text.literal("  §6§l✦ CustomBlocks  §r§8│ §7/cb or /customblock  §8│ §71.0"));
         src.sendMessage(Text.literal(D));
 
-        src.sendMessage(Text.literal("§e  Blocks"));
-        src.sendMessage(Text.literal("§7  /cb §fcreate §b<id> <n> [size] <url>     §8— new block  §7size=16-256, default 128"));
-        src.sendMessage(Text.literal("§7  /cb §fdupe §b<id> <newId> [name]          §8— copy a block and all its settings"));
-        src.sendMessage(Text.literal("§7  /cb §fretexture §b<id> [size] <url>       §8— swap the main texture"));
-        src.sendMessage(Text.literal("§7  /cb §fresize §b<id> §3<16-256>            §8— rescale stored texture in-place"));
-        src.sendMessage(Text.literal("§7  /cb §frename §b<id> <n>               §8— rename a block"));
-        src.sendMessage(Text.literal("§7  /cb §fdelete §b<id>                   §8— permanently remove"));
-        src.sendMessage(Text.literal("§7  /cb §fgive §b<id> [amount] [player]    §8— add to inventory"));
-        src.sendMessage(Text.literal("§7  /cb §flist                            §8— show all blocks and slots used"));
+        src.sendMessage(Text.literal(H + "  Blocks"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "create " + A + "<id> <name> [size] <url>  " + G + "— new block (size 16-256, default 128)"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "retexture " + A + "<id> [size] <url>       " + G + "— swap texture"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "resize " + A + "<id> <16-256>             " + G + "— rescale stored texture"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "rename " + A + "<id> <name>               " + G + "— rename a block"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "dupe " + A + "<id> <newId> [name]         " + G + "— copy a block + all settings"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "delete " + A + "<id>                      " + G + "— permanently remove"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "give " + A + "<id> [amount] [player]      " + G + "— add to inventory"));
         src.sendMessage(Text.literal(D));
 
-        src.sendMessage(Text.literal("§e  Per-Face Textures"));
-        src.sendMessage(Text.literal("§7  /cb §fset§3(top§7|§3bottom§7|§3north§7|§3south§7|§3east§7|§3west§7)§fface §b<id> <url>"));
-        src.sendMessage(Text.literal("§7  /cb §fclearface §b<id> §3<face>         §8— revert one face to default"));
-        src.sendMessage(Text.literal("§7  /cb §fclearallfaces §b<id>             §8— revert every face"));
+        src.sendMessage(Text.literal(H + "  Per-Face Textures"));
+        src.sendMessage(Text.literal(G + "  §6Rainbow Rectangle §7— right-click any face of a block to paint it"));
+        src.sendMessage(Text.literal(G + "  §8Shift+click §7= 256px quality  |  Normal click §7= 128px"));
+        src.sendMessage(Text.literal(G + "  §8Creates a NEW variant block — original stays unchanged"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "editor " + A + "<id>                     " + G + "— open face editor GUI for a block"));
         src.sendMessage(Text.literal(D));
 
-        src.sendMessage(Text.literal("§e  Properties"));
-        src.sendMessage(Text.literal("§7  /cb §fsetglow §b<id> §3<0-15>          §8— light emission  §7(0 = off, 15 = max)"));
-        src.sendMessage(Text.literal("§7  /cb §fsethardness §b<id> §3<-1 to 50>  §8— break speed  §7(-1 unbreakable, 0 instant)"));
-        src.sendMessage(Text.literal("§7  /cb §fsetsound §b<id> §3<type>         §8— §7stone|wood|metal|glass|grass|sand|wool"));
+        src.sendMessage(Text.literal(H + "  Properties"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "setglow " + A + "<id> §3<0-15>            " + G + "— light emission  §8(0=off, 15=max like beacon)"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "sethardness " + A + "<id> §3<-1 to 50>    " + G + "— break speed  §8(-1=unbreakable, 0=instant)"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "setsound " + A + "<id> §3<sound>          " + G + "— §8stone wood metal glass grass sand wool"));
+        src.sendMessage(Text.literal(G + "  " + G + "§8                              gravel snow dirt coral bamboo nether_brick ice honey bone slime"));
         src.sendMessage(Text.literal(D));
 
-        src.sendMessage(Text.literal("§e  Tools"));
-        src.sendMessage(Text.literal("§7  /cb §fgiverectangle                   §8— §6Rainbow Rectangle §8face-paint wand"));
-        src.sendMessage(Text.literal("§7  /cb §fgivesquare §b<black|yellow|green> §8— color-swap square"));
-        src.sendMessage(Text.literal("§7  /cb §fgivetriangle §b<color>           §8— color-variant triangle"));
-        src.sendMessage(Text.literal("§7  /cb §fcolorchanger                    §8— give all 3 color squares at once"));
+        src.sendMessage(Text.literal(H + "  Tools"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "giverectangle                 " + G + "— §6Rainbow Rectangle §8face-paint wand"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "givesquare " + A + "§3<black|yellow|green> " + G + "— color-swap tool"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "givetriangle " + A + "§3<color>            " + G + "— color triangle tool"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "rectangle§r / §b" + C + "square <color>§r / §b" + C + "triangle <color>  " + G + "— short aliases"));
         src.sendMessage(Text.literal(D));
 
-        src.sendMessage(Text.literal("§e  Utilities"));
-        src.sendMessage(Text.literal("§7  /cb §fundo                            §8— undo last change"));
-        src.sendMessage(Text.literal("§7  /cb §fsettabicon §b<url>               §8— set the creative tab icon"));
-        src.sendMessage(Text.literal("§7  /cb §fimportfolder                    §8— bulk-import from config/customblocks/import/"));
-        src.sendMessage(Text.literal("§7  /cb §fexport                          §8— export block list to JSON"));
-        src.sendMessage(Text.literal("§7  /cb §fgui                             §8— §6open the chest GUI"));
+        src.sendMessage(Text.literal(H + "  Shapes"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "setshape " + A + "<id> <preset|coords>    " + G + "— set shape  §8(full slab thin carpet pillar small micro pane trapdoor fence stairs cross)"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "addshape " + A + "<id> <x1,y1,z1,x2,y2,z2>" + G + "— add a box to the shape"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "removeshape " + A + "<id> <index>          " + G + "— remove a box by index (0-based)"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "clearshape " + A + "<id>                  " + G + "— reset to full cube"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "setcollision " + A + "<id> <on|off>        " + G + "— toggle walkthrough"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "saveshape " + A + "<name> <id>            " + G + "— save shape as template"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "loadshape " + A + "<id> <name>            " + G + "— apply saved template"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "shapeeditor " + A + "<id>                 " + G + "— open shape editor GUI"));
         src.sendMessage(Text.literal(D));
 
-        src.sendMessage(Text.literal("  §8Press §7B §8for the HUD overlay  ·  No restart needed!"));
+        src.sendMessage(Text.literal(H + "  Utilities"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "undo                          " + G + "— undo last change  §8(up to 20 steps)"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "settabicon " + A + "<url>               " + G + "— set the creative tab icon"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "importfolder                  " + G + "— bulk-import from config/customblocks/import/"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "export                        " + G + "— export block list to JSON"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "list                          " + G + "— show all blocks"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "gui                           " + G + "— open chest GUI"));
+        src.sendMessage(Text.literal(D));
+        src.sendMessage(Text.literal("  §8Press §7B §8to open the overlay HUD · No restart needed!"));
         src.sendMessage(Text.literal(" "));
         return 1;
     }
 
     // ── Color items ───────────────────────────────────────────────────────────
 
-    private static int cmdColorChangerAll(ServerCommandSource src) {
-        int given = 0;
-        for (String col : new String[]{"black","yellow","green"}) given += cmdGiveSquareSilent(src, col);
-        if (given > 0) src.sendMessage(Text.literal("§a[CustomBlocks] Given all 3 color squares! Right-click a block to swap its color."));
-        else src.sendError(Text.literal("§cCould not give squares. Run as a player."));
-        return given > 0 ? 1 : 0;
-    }
 
-    private static int cmdGiveSquareSilent(ServerCommandSource src, String color) {
-        net.minecraft.util.Identifier sqId = net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, color + "_square");
-        net.minecraft.item.Item sqItem = net.minecraft.registry.Registries.ITEM.get(sqId);
-        if (sqItem == null || sqItem == net.minecraft.item.Items.AIR) return 0;
-        try { src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(sqItem, 1)); return 1; }
-        catch (Exception ex) { return 0; }
-    }
 
-    private static int cmdGiveSquare(ServerCommandSource src, String color) {
+    private static int cmdGiveSquareInternal(ServerCommandSource src, String color) {
         String c = color.toLowerCase().trim();
         if (!c.equals("black") && !c.equals("yellow") && !c.equals("green")) {
             src.sendError(Text.literal("§cValid colors: black, yellow, green")); return 0;
@@ -948,7 +1177,7 @@ public class CustomBlockCommand {
         return 1;
     }
 
-    private static int cmdGiveTriangle(ServerCommandSource src, String color) {
+    private static int cmdGiveTriangleInternal(ServerCommandSource src, String color) {
         String c = color.toLowerCase().trim();
         if (!c.equals("black") && !c.equals("yellow") && !c.equals("green")) {
             src.sendError(Text.literal("§cValid colors: black, yellow, green")); return 0;
@@ -963,7 +1192,7 @@ public class CustomBlockCommand {
         return 1;
     }
 
-    private static int cmdGiveRectangle(ServerCommandSource src) {
+    private static int cmdGiveRectangleInternal(ServerCommandSource src) {
         net.minecraft.util.Identifier rectId = net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, "rainbow_rectangle");
         net.minecraft.item.Item rectItem = net.minecraft.registry.Registries.ITEM.get(rectId);
         if (rectItem == null || rectItem == net.minecraft.item.Items.AIR) {
@@ -986,23 +1215,46 @@ public class CustomBlockCommand {
         return 1;
     }
 
+    private static int cmdEditor(ServerCommandSource src, String id) {
+        if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
+        try {
+            ServerPlayerEntity player = src.getPlayerOrThrow();
+            GuiManager.openEditor(player, id, 0);
+        } catch (Exception ex) {
+            src.sendError(Text.literal("§cRun as a player."));
+        }
+        return 1;
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static int usage(ServerCommandSource src, String cmd) {
         src.sendError(Text.literal(switch (cmd) {
             case "delete"       -> "§cUsage: /cb delete <id>";
             case "rename"       -> "§cUsage: /cb rename <id> <newname>";
+            case "reid"         -> "§cUsage: /cb reid <id> <newid>  — changes the block's ID (lowercase, a-z 0-9 _ -)";
             case "retexture"    -> "§cUsage: /cb retexture <id> <url>";
             case "give"         -> "§cUsage: /cb give <id> [amount 1-64] [player]";
             case "setglow"      -> "§cUsage: /cb setglow <id> <0-15>";
             case "sethardness"  -> "§cUsage: /cb sethardness <id> <-1 to 50>  (-1=unbreakable)";
-            case "setsound"     -> "§cUsage: /cb setsound <id> <stone|wood|grass|metal|glass|sand|wool>";
+            case "setsound"     -> "§cUsage: /cb setsound <id> <sound>  — stone|wood|grass|metal|glass|sand|wool|gravel|snow|dirt|coral|bamboo|nether_brick|ice|honey|bone|slime";
             case "settabicon"   -> "§cUsage: /cb settabicon <url>";
             case "clearface"    -> "§cUsage: /cb clearface <id> <top|bottom|north|south|east|west>";
             case "givesquare"   -> "§cUsage: /cb givesquare <black|yellow|green>";
             case "givetriangle" -> "§cUsage: /cb givetriangle <black|yellow|green>";
             case "clearallfaces"-> "§cUsage: /cb clearallfaces <id>";
             case "resize"       -> "§cUsage: /cb resize <id> <16-256>  — rescale stored texture";
+            case "editor" -> "§cUsage: /cb editor <id>";
+            case "setshape"     -> "§cUsage: /cb setshape <id> <preset|x1,y1,z1,x2,y2,z2>  — presets: full slab thin carpet pillar small micro pane trapdoor fence stairs cross";
+            case "addshape"     -> "§cUsage: /cb addshape <id> <x1,y1,z1,x2,y2,z2>";
+            case "removeshape"  -> "§cUsage: /cb removeshape <id> <boxIndex 0-15>";
+            case "clearshape"   -> "§cUsage: /cb clearshape <id>";
+            case "setcollision" -> "§cUsage: /cb setcollision <id> <on|off>";
+            case "saveshape"    -> "§cUsage: /cb saveshape <templateName> <id>";
+            case "loadshape"    -> "§cUsage: /cb loadshape <id> <templateName>";
+            case "shapeeditor"  -> "§cUsage: /cb shapeeditor <id>";
+            case "square"       -> "§cUsage: /cb square <black|yellow|green>";
+            case "triangle"     -> "§cUsage: /cb triangle <black|yellow|green>";
             default -> "§cUsage: /cb help";
         }));
         return 0;
@@ -1020,5 +1272,36 @@ public class CustomBlockCommand {
         Thread t = new Thread(r, "CB-Download");
         t.setDaemon(true);
         t.start();
+    }
+
+    /**
+     * Trigger light updates for all blocks of a given slot in a 32-block radius
+     * around every online player. Runs off the main thread.
+     */
+    private static void triggerGlowUpdate(MinecraftServer server, int slotIndex) {
+        String slotKey = "slot_" + slotIndex;
+        thread(() -> {
+            server.execute(() -> {
+                for (net.minecraft.server.network.ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                    net.minecraft.server.world.ServerWorld world = p.getServerWorld();
+                    int cx = p.getBlockX(), cy = p.getBlockY(), cz = p.getBlockZ();
+                    net.minecraft.util.math.BlockPos.Mutable mpos = new net.minecraft.util.math.BlockPos.Mutable();
+                    int radius = 32;
+                    for (int x = cx - radius; x <= cx + radius; x++) {
+                        for (int y = Math.max(world.getBottomY(), cy - radius);
+                             y <= Math.min(world.getTopY() - 1, cy + radius); y++) {
+                            for (int z = cz - radius; z <= cz + radius; z++) {
+                                mpos.set(x, y, z);
+                                net.minecraft.block.BlockState st = world.getBlockState(mpos);
+                                if (st.getBlock() instanceof com.customblocks.block.SlotBlock sb
+                                        && sb.getSlotKey().equals(slotKey)) {
+                                    world.getLightingProvider().checkBlock(mpos.toImmutable());
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        });
     }
 }

@@ -111,7 +111,7 @@ public class CustomBlocksScreen extends Screen {
     // ── Search ────────────────────────────────────────────────────────────────
     private TextFieldWidget fldSearch;
 
-    public CustomBlocksScreen() { super(Text.literal("Custom Blocks")); }
+    public CustomBlocksScreen() { super(Text.literal("CustomBlocks")); }
 
     // ── Init ──────────────────────────────────────────────────────────────────
     @Override
@@ -241,7 +241,7 @@ public class CustomBlocksScreen extends Screen {
 
         // Title bar
         ctx.fillGradient(px,py,px+pw,py+16, darkTheme?0xFF_1A1A40:0xFF_4040AA, cBg());
-        ctx.drawCenteredTextWithShadow(textRenderer, "Custom Blocks", px+pw/2, py+4, C_GOLD);
+        ctx.drawCenteredTextWithShadow(textRenderer, "CustomBlocks", px+pw/2, py+4, C_GOLD);
 
         // Divider
         ctx.fill(px+PAD+gridW()+PAD-1, py+16, px+PAD+gridW()+PAD, py+ph-4, cBorder());
@@ -352,7 +352,7 @@ public class CustomBlocksScreen extends Screen {
 
         if (filtered.isEmpty()) {
             ctx.drawCenteredTextWithShadow(textRenderer,
-                search.isEmpty() ? "No blocks yet — press New Block!" : "No match for \""+search+"\"",
+                search.isEmpty() ? "No blocks yet — click New Block!" : "No match for \""+search+"\"",
                 gx+gridW()/2, py+52+60, cGrey());
         }
     }

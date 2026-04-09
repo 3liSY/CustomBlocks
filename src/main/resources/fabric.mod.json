@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "customblocks",
   "version": "1.0.0",
-  "name": "Custom Blocks",
-  "description": "Add custom textured blocks using PNG images - no coding needed.",
-  "authors": [ "You" ],
+  "name": "PicBlocks",
+  "description": "Paint any image onto blocks — URL, GIF, per-face. No coding needed.",
+  "authors": [ "3liSY" ],
   "license": "MIT",
   "environment": "*",
   "entrypoints": {

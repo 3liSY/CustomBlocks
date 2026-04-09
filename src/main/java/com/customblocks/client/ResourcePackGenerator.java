@@ -38,7 +38,7 @@ public class ResourcePackGenerator {
     public static void generate(MinecraftClient client) {
         try {
             File mcDir    = client.runDirectory;
-            File packRoot = new File(mcDir, "resourcepacks/customblocks_generated");
+            File packRoot = new File(mcDir, "resourcepacks/picblocks_generated");
             File assets   = new File(packRoot, "assets/" + MOD_ID);
 
             new File(assets, "blockstates").mkdirs();
@@ -80,10 +80,32 @@ public class ResourcePackGenerator {
                 // ── Per-face textures ─────────────────────────────────────────
                 if (data != null && data.hasFaces()) {
                     for (Map.Entry<String, byte[]> face : data.faceTextures.entrySet()) {
+                        String faceKey = face.getKey();
+                        byte[] faceBytes = face.getValue();
                         File faceDest = new File(assets,
-                                "textures/block/" + slotKey + "_" + face.getKey() + ".png");
-                        if (!faceDest.exists() || faceDest.length() != face.getValue().length)
-                            writePng(face.getValue(), faceDest);
+                                "textures/block/" + slotKey + "_" + faceKey + ".png");
+                        if (!faceDest.exists() || faceDest.length() != faceBytes.length)
+                            writePng(faceBytes, faceDest);
+                        // Auto-detect animated face: if height > width, it's a vertical frame strip
+                        try {
+                            java.awt.image.BufferedImage faceImg =
+                                javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(faceBytes));
+                            if (faceImg != null && faceImg.getHeight() > faceImg.getWidth()) {
+                                int fw = faceImg.getWidth(), fh = faceImg.getHeight();
+                                int frames = fh / fw;
+                                File mcmeta = new File(assets,
+                                    "textures/block/" + slotKey + "_" + faceKey + ".png.mcmeta");
+                                StringBuilder sb = new StringBuilder("{"animation":{"interpolate":true,"frames":[");
+                                for (int fi = 0; fi < frames; fi++) {
+                                    if (fi > 0) sb.append(",");
+                                    sb.append(fi);
+                                }
+                                sb.append("]}}");
+                                try (java.io.FileWriter fw2 = new java.io.FileWriter(mcmeta, java.nio.charset.StandardCharsets.UTF_8)) {
+                                    fw2.write(sb.toString());
+                                }
+                            }
+                        } catch (Exception ignored) {}
                     }
                 }
 
@@ -95,25 +117,66 @@ public class ResourcePackGenerator {
 
                 // ── Block model ───────────────────────────────────────────────
                 JsonObject bm = new JsonObject();
-                if (data != null && data.hasFaces()) {
+                if (data != null && data.isShaped()) {
+                    // Shaped block — use explicit elements[], no parent
+                    JsonObject tex = new JsonObject();
+                    tex.addProperty("particle", MOD_ID + ":block/" + slotKey);
+                    // Build texture refs: per-face overrides or default
+                    for (String face : SlotManager.FACE_KEYS) {
+                        String mcFace = FACE_TO_MC.get(face);
+                        String texRef = data.faceTextures.containsKey(face)
+                                ? MOD_ID + ":block/" + slotKey + "_" + face
+                                : MOD_ID + ":block/" + slotKey;
+                        tex.addProperty(mcFace, texRef);
+                    }
+                    bm.add("textures", tex);
+                    com.google.gson.JsonArray elements = new com.google.gson.JsonArray();
+                    for (SlotManager.ShapeBox box : data.shapeBoxes) {
+                        JsonObject el = new JsonObject();
+                        com.google.gson.JsonArray from = new com.google.gson.JsonArray();
+                        from.add(box.x1()); from.add(box.y1()); from.add(box.z1());
+                        com.google.gson.JsonArray to = new com.google.gson.JsonArray();
+                        to.add(box.x2()); to.add(box.y2()); to.add(box.z2());
+                        el.add("from", from);
+                        el.add("to", to);
+                        JsonObject faces = new JsonObject();
+                        // UV: scale 0-16 coords proportionally to 0-16 UV space
+                        String[][] faceEntries = {
+                            {"down",  "bottom"}, {"up",   "top"},
+                            {"north", "north"},  {"south","south"},
+                            {"west",  "west"},   {"east", "east"}
+                        };
+                        for (String[] fe : faceEntries) {
+                            String mcFaceName = fe[0], cbFaceName = fe[1];
+                            JsonObject faceObj = new JsonObject();
+                            com.google.gson.JsonArray uv = new com.google.gson.JsonArray();
+                            // Simple full UV per face
+                            uv.add(0); uv.add(0); uv.add(16); uv.add(16);
+                            faceObj.add("uv", uv);
+                            faceObj.addProperty("texture", "#" + FACE_TO_MC.get(cbFaceName));
+                            faceObj.addProperty("cullface", mcFaceName);
+                            faces.add(mcFaceName, faceObj);
+                        }
+                        el.add("faces", faces);
+                        elements.add(el);
+                    }
+                    bm.add("elements", elements);
+                } else if (data != null && data.hasFaces()) {
                     // cube — explicit texture ref per face; missing faces fall back to default
                     bm.addProperty("parent", "minecraft:block/cube");
                     JsonObject tex = new JsonObject();
-                    // particle texture = default
                     tex.addProperty("particle", MOD_ID + ":block/" + slotKey);
                     for (String face : SlotManager.FACE_KEYS) {
                         String mcFace = FACE_TO_MC.get(face);
                         if (data.faceTextures.containsKey(face)) {
-                            // This face has an override
                             tex.addProperty(mcFace, MOD_ID + ":block/" + slotKey + "_" + face);
                         } else {
-                            // No override — use the default all-faces texture
                             tex.addProperty(mcFace, MOD_ID + ":block/" + slotKey);
                         }
                     }
                     bm.add("textures", tex);
                 } else {
-                    // cube_all — simple single texture, same as before
+                    // cube_all — simple single texture
                     bm.addProperty("parent", "minecraft:block/cube_all");
                     JsonObject tex = new JsonObject();
                     tex.addProperty("all", MOD_ID + ":block/" + slotKey);
@@ -127,11 +190,16 @@ public class ResourcePackGenerator {
                 writeJson(im, new File(assets, "models/item/" + slotKey + ".json"));
             }
 
-            // Tab icon
+            // Tab icon — written to item texture AND pack icon
             byte[] tabIcon = SlotManager.getTabIconTexture();
             File tabDest = new File(assets, "textures/item/tab_icon.png");
-            if (tabIcon != null && tabIcon.length > 0) writePng(tabIcon, tabDest);
-            else Files.write(tabDest.toPath(), PLACEHOLDER_PNG);
+            if (tabIcon != null && tabIcon.length > 0) {
+                writePng(tabIcon, tabDest);
+                // Also write as pack.png so it shows in the resource pack list
+                writePng(tabIcon, new File(packRoot, "pack.png"));
+            } else {
+                Files.write(tabDest.toPath(), PLACEHOLDER_PNG);
+            }
 
             // ── Color Square items — flat 16x16 coloured squares ─────────────────────
             String[][] squares = {{"black_square",  "10,10,10"},

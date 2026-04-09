@@ -23,6 +23,52 @@ public class SlotManager {
     /** Valid face keys. */
     public static final List<String> FACE_KEYS = List.of("top","bottom","north","south","east","west");
 
+    // ── Shape system ──────────────────────────────────────────────────────────
+
+    /** One bounding box in pixel units (0–16). Immutable. */
+    public record ShapeBox(float x1, float y1, float z1, float x2, float y2, float z2) {
+        public String toCoordString() {
+            return String.format("%.6g,%.6g,%.6g,%.6g,%.6g,%.6g", x1, y1, z1, x2, y2, z2);
+        }
+        public String toDisplayString() {
+            return String.format("(%.1f,%.1f,%.1f → %.1f,%.1f,%.1f)", x1, y1, z1, x2, y2, z2);
+        }
+        /** Parse "x1,y1,z1,x2,y2,z2" (pixel units). */
+        public static ShapeBox parse(String s) {
+            String[] p = s.split(",");
+            if (p.length != 6) throw new IllegalArgumentException("Need 6 comma-separated numbers");
+            return new ShapeBox(Float.parseFloat(p[0].trim()), Float.parseFloat(p[1].trim()),
+                                Float.parseFloat(p[2].trim()), Float.parseFloat(p[3].trim()),
+                                Float.parseFloat(p[4].trim()), Float.parseFloat(p[5].trim()));
+        }
+        public boolean valid() {
+            return x1 >= 0 && y1 >= 0 && z1 >= 0 && x2 <= 16 && y2 <= 16 && z2 <= 16
+                && x2 > x1 && y2 > y1 && z2 > z1;
+        }
+    }
+
+    /** Built-in shape presets. */
+    public static final Map<String, List<ShapeBox>> SHAPE_PRESETS;
+    static {
+        Map<String, List<ShapeBox>> m = new LinkedHashMap<>();
+        m.put("full",     List.of(new ShapeBox(0,0,0,16,16,16)));
+        m.put("slab",     List.of(new ShapeBox(0,0,0,16,8,16)));
+        m.put("thin",     List.of(new ShapeBox(0,0,0,16,4,16)));
+        m.put("carpet",   List.of(new ShapeBox(0,0,0,16,1,16)));
+        m.put("pillar",   List.of(new ShapeBox(4,0,4,12,16,12)));
+        m.put("small",    List.of(new ShapeBox(2,2,2,14,14,14)));
+        m.put("micro",    List.of(new ShapeBox(4,4,4,12,12,12)));
+        m.put("pane",     List.of(new ShapeBox(7,0,0,9,16,16)));
+        m.put("trapdoor", List.of(new ShapeBox(0,0,0,16,3,16)));
+        m.put("fence",    List.of(new ShapeBox(6,0,6,10,16,10), new ShapeBox(7,10,7,9,16,9)));
+        m.put("stairs",   List.of(new ShapeBox(0,0,0,16,8,16), new ShapeBox(0,8,0,16,16,8)));
+        m.put("cross",    List.of(new ShapeBox(7,0,0,9,16,16), new ShapeBox(0,0,7,16,16,9)));
+        SHAPE_PRESETS = Collections.unmodifiableMap(m);
+    }
+
+    /** User-saved shape templates: name → list of boxes. Persisted separately. */
+    private static final Map<String, List<ShapeBox>> SHAPE_TEMPLATES = new ConcurrentHashMap<>();
+
     // ── Undo stack ────────────────────────────────────────────────────────────
     private static final Deque<UndoEntry> UNDO_STACK = new ArrayDeque<>();
     private static final int MAX_UNDO = 20;
@@ -45,7 +91,8 @@ public class SlotManager {
         c.faceTextures.forEach((k, v) -> facesCopy.put(k, v.clone()));
         return new SlotData(c.index, c.customId, c.displayName,
                 c.texture != null ? c.texture.clone() : null,
-                c.lightLevel, c.hardness, c.soundType, facesCopy, c.animMeta);
+                c.lightLevel, c.hardness, c.soundType, facesCopy, c.animMeta,
+                c.shapeBoxes != null ? new ArrayList<>(c.shapeBoxes) : null, c.noCollision);
     }
 
     private static void pushRaw(UndoEntry entry) {
@@ -99,10 +146,15 @@ public class SlotManager {
         public final Map<String, byte[]> faceTextures;
         /** JSON string for Minecraft animated texture .mcmeta. Null if not animated. */
         public       String animMeta;
+        /** Custom shape boxes (pixel units 0-16). Null or empty = full cube. */
+        public       List<ShapeBox> shapeBoxes;
+        /** If true, no collision (can walk through). */
+        public       boolean noCollision;
 
         public SlotData(int index, String customId, String displayName, byte[] texture,
                         int lightLevel, float hardness, String soundType,
-                        Map<String, byte[]> faceTextures, String animMeta) {
+                        Map<String, byte[]> faceTextures, String animMeta,
+                        List<ShapeBox> shapeBoxes, boolean noCollision) {
             this.index       = index;
             this.customId    = customId;
             this.displayName = displayName;
@@ -113,26 +165,43 @@ public class SlotManager {
             this.faceTextures = (faceTextures != null)
                     ? new ConcurrentHashMap<>(faceTextures) : new ConcurrentHashMap<>();
             this.animMeta    = animMeta;
+            this.shapeBoxes  = (shapeBoxes != null && !shapeBoxes.isEmpty())
+                    ? new ArrayList<>(shapeBoxes) : null;
+            this.noCollision = noCollision;
+        }
+
+        // Legacy constructors (no shape)
+        public SlotData(int index, String customId, String displayName, byte[] texture,
+                        int lightLevel, float hardness, String soundType,
+                        Map<String, byte[]> faceTextures, String animMeta) {
+            this(index, customId, displayName, texture, lightLevel, hardness, soundType, faceTextures, animMeta, null, false);
         }
 
         public SlotData(int index, String customId, String displayName, byte[] texture,
                         int lightLevel, float hardness, String soundType,
                         Map<String, byte[]> faceTextures) {
-            this(index, customId, displayName, texture, lightLevel, hardness, soundType, faceTextures, null);
+            this(index, customId, displayName, texture, lightLevel, hardness, soundType, faceTextures, null, null, false);
         }
 
         public SlotData(int index, String customId, String displayName, byte[] texture,
                         int lightLevel, float hardness, String soundType) {
-            this(index, customId, displayName, texture, lightLevel, hardness, soundType, null, null);
+            this(index, customId, displayName, texture, lightLevel, hardness, soundType, null, null, null, false);
         }
 
         public SlotData(int index, String customId, String displayName, byte[] texture) {
-            this(index, customId, displayName, texture, 0, 1.5f, "stone", null, null);
+            this(index, customId, displayName, texture, 0, 1.5f, "stone", null, null, null, false);
         }
 
         public String  slotKey()     { return "slot_" + index; }
         public boolean hasFaces()    { return !faceTextures.isEmpty(); }
         public boolean isAnimated()  { return animMeta != null && !animMeta.isEmpty(); }
+        public boolean isShaped()    { return shapeBoxes != null && !shapeBoxes.isEmpty(); }
+        public String  shapeLabel()  {
+            if (!isShaped()) return "full";
+            for (Map.Entry<String, List<ShapeBox>> e : SHAPE_PRESETS.entrySet())
+                if (e.getValue().equals(shapeBoxes)) return e.getKey();
+            return shapeBoxes.size() + " box" + (shapeBoxes.size() == 1 ? "" : "es");
+        }
     }
 
     // ── Queries ───────────────────────────────────────────────────────────────
@@ -200,7 +269,22 @@ public class SlotManager {
         if (k == null) return false;
         SlotData o = SLOTS.get(k);
         SLOTS.put(k, new SlotData(o.index, o.customId, newName, o.texture,
-                o.lightLevel, o.hardness, o.soundType, o.faceTextures, o.animMeta));
+                o.lightLevel, o.hardness, o.soundType, o.faceTextures, o.animMeta,
+                o.shapeBoxes, o.noCollision));
+        return true;
+    }
+
+    /** Re-ID: change the customId of a block. Returns false if oldId not found or newId already taken. */
+    public static boolean reId(String oldId, String newId) {
+        if (!ID_TO_SLOT.containsKey(oldId)) return false;
+        if (ID_TO_SLOT.containsKey(newId)) return false;
+        String k = ID_TO_SLOT.remove(oldId);
+        SlotData o = SLOTS.get(k);
+        SlotData updated = new SlotData(o.index, newId, o.displayName, o.texture,
+                o.lightLevel, o.hardness, o.soundType, o.faceTextures, o.animMeta,
+                o.shapeBoxes, o.noCollision);
+        SLOTS.put(k, updated);
+        ID_TO_SLOT.put(newId, k);
         return true;
     }
 
@@ -209,7 +293,8 @@ public class SlotManager {
         if (k == null) return false;
         SlotData o = SLOTS.get(k);
         SLOTS.put(k, new SlotData(o.index, o.customId, o.displayName, texture,
-                o.lightLevel, o.hardness, o.soundType, o.faceTextures, o.animMeta));
+                o.lightLevel, o.hardness, o.soundType, o.faceTextures, o.animMeta,
+                o.shapeBoxes, o.noCollision));
         return true;
     }
 
@@ -254,7 +339,8 @@ public class SlotManager {
         if (k == null) return false;
         SlotData o = SLOTS.get(k);
         SLOTS.put(k, new SlotData(o.index, o.customId, o.displayName, o.texture,
-                o.lightLevel, o.hardness, o.soundType, o.faceTextures, animMeta));
+                o.lightLevel, o.hardness, o.soundType, o.faceTextures, animMeta,
+                o.shapeBoxes, o.noCollision));
         return true;
     }
 
@@ -266,7 +352,8 @@ public class SlotManager {
         Map<String, byte[]> faces = new ConcurrentHashMap<>(o.faceTextures);
         faces.put(face, texture);
         SLOTS.put(k, new SlotData(o.index, o.customId, o.displayName, o.texture,
-                o.lightLevel, o.hardness, o.soundType, faces, o.animMeta));
+                o.lightLevel, o.hardness, o.soundType, faces, o.animMeta,
+                o.shapeBoxes, o.noCollision));
         return true;
     }
 
@@ -277,7 +364,8 @@ public class SlotManager {
         Map<String, byte[]> faces = new ConcurrentHashMap<>(o.faceTextures);
         faces.remove(face);
         SLOTS.put(k, new SlotData(o.index, o.customId, o.displayName, o.texture,
-                o.lightLevel, o.hardness, o.soundType, faces, o.animMeta));
+                o.lightLevel, o.hardness, o.soundType, faces, o.animMeta,
+                o.shapeBoxes, o.noCollision));
         return true;
     }
 
@@ -286,8 +374,105 @@ public class SlotManager {
         if (k == null) return false;
         SlotData o = SLOTS.get(k);
         SLOTS.put(k, new SlotData(o.index, o.customId, o.displayName, o.texture,
-                o.lightLevel, o.hardness, o.soundType, null, o.animMeta));
+                o.lightLevel, o.hardness, o.soundType, null, o.animMeta,
+                o.shapeBoxes, o.noCollision));
         return true;
+    }
+
+    // ── Shape mutations ───────────────────────────────────────────────────────
+
+    /** Replace all shape boxes (null/empty = full cube). */
+    public static boolean setShape(String customId, List<ShapeBox> boxes) {
+        String k = ID_TO_SLOT.get(customId);
+        if (k == null) return false;
+        SlotData o = SLOTS.get(k);
+        SLOTS.put(k, new SlotData(o.index, o.customId, o.displayName, o.texture,
+                o.lightLevel, o.hardness, o.soundType, o.faceTextures, o.animMeta,
+                boxes, o.noCollision));
+        return true;
+    }
+
+    /** Add one more box (max 16). Returns false if block not found or already at 16 boxes. */
+    public static boolean addBox(String customId, ShapeBox box) {
+        String k = ID_TO_SLOT.get(customId);
+        if (k == null) return false;
+        SlotData o = SLOTS.get(k);
+        List<ShapeBox> boxes = o.shapeBoxes != null ? new ArrayList<>(o.shapeBoxes) : new ArrayList<>();
+        if (boxes.size() >= 16) return false;
+        boxes.add(box);
+        SLOTS.put(k, new SlotData(o.index, o.customId, o.displayName, o.texture,
+                o.lightLevel, o.hardness, o.soundType, o.faceTextures, o.animMeta,
+                boxes, o.noCollision));
+        return true;
+    }
+
+    /** Remove box at 0-based index. */
+    public static boolean removeBox(String customId, int index) {
+        String k = ID_TO_SLOT.get(customId);
+        if (k == null) return false;
+        SlotData o = SLOTS.get(k);
+        if (o.shapeBoxes == null || index < 0 || index >= o.shapeBoxes.size()) return false;
+        List<ShapeBox> boxes = new ArrayList<>(o.shapeBoxes);
+        boxes.remove(index);
+        SLOTS.put(k, new SlotData(o.index, o.customId, o.displayName, o.texture,
+                o.lightLevel, o.hardness, o.soundType, o.faceTextures, o.animMeta,
+                boxes.isEmpty() ? null : boxes, o.noCollision));
+        return true;
+    }
+
+    /** Reset to full cube shape. */
+    public static boolean clearShape(String customId) {
+        return setShape(customId, null);
+    }
+
+    /** Toggle collision. */
+    public static boolean setCollision(String customId, boolean collision) {
+        String k = ID_TO_SLOT.get(customId);
+        if (k == null) return false;
+        SlotData o = SLOTS.get(k);
+        SLOTS.put(k, new SlotData(o.index, o.customId, o.displayName, o.texture,
+                o.lightLevel, o.hardness, o.soundType, o.faceTextures, o.animMeta,
+                o.shapeBoxes, !collision));
+        return true;
+    }
+
+    /** Save current shape of a block as a named template. */
+    public static boolean saveTemplate(String templateName, String customId) {
+        SlotData d = getById(customId);
+        if (d == null) return false;
+        List<ShapeBox> boxes = d.shapeBoxes != null ? new ArrayList<>(d.shapeBoxes)
+                : SHAPE_PRESETS.get("full");
+        SHAPE_TEMPLATES.put(templateName, boxes);
+        saveTemplates();
+        return true;
+    }
+
+    /** Apply a named template to a block. */
+    public static boolean loadTemplate(String customId, String templateName) {
+        List<ShapeBox> boxes = SHAPE_TEMPLATES.get(templateName);
+        if (boxes == null) boxes = SHAPE_PRESETS.get(templateName);
+        if (boxes == null) return false;
+        return setShape(customId, new ArrayList<>(boxes));
+    }
+
+    public static Set<String> allTemplateNames() {
+        Set<String> all = new LinkedHashSet<>(SHAPE_PRESETS.keySet());
+        all.addAll(SHAPE_TEMPLATES.keySet());
+        return all;
+    }
+
+    /** Build a VoxelShape from a block's shape data. Returns null to mean "use default full cube". */
+    public static net.minecraft.util.shape.VoxelShape buildVoxelShape(String slotKey) {
+        SlotData d = getBySlot(slotKey);
+        if (d == null || !d.isShaped()) return null;
+        net.minecraft.util.shape.VoxelShape shape = net.minecraft.util.shape.VoxelShapes.empty();
+        for (ShapeBox b : d.shapeBoxes) {
+            shape = net.minecraft.util.shape.VoxelShapes.union(shape,
+                    net.minecraft.util.shape.VoxelShapes.cuboid(
+                            b.x1()/16f, b.y1()/16f, b.z1()/16f,
+                            b.x2()/16f, b.y2()/16f, b.z2()/16f));
+        }
+        return shape;
     }
 
     /**
@@ -333,6 +518,12 @@ public class SlotManager {
                 d.faceTextures.keySet().forEach(faces::add);
                 e.add("faces", faces);
             }
+            if (d.isShaped()) {
+                JsonArray shapeArr = new JsonArray();
+                for (ShapeBox b : d.shapeBoxes) shapeArr.add(b.toCoordString());
+                e.add("shapeBoxes", shapeArr);
+            }
+            if (d.noCollision) e.addProperty("noCollision", true);
             arr.add(e);
         }
         root.add("slots", arr);
@@ -396,8 +587,18 @@ public class SlotManager {
                         if (faceFile.exists()) faces.put(face, Files.readAllBytes(faceFile.toPath()));
                     }
                 }
+                List<ShapeBox> shapeBoxes = null;
+                if (e.has("shapeBoxes")) {
+                    shapeBoxes = new ArrayList<>();
+                    for (JsonElement bEl : e.getAsJsonArray("shapeBoxes")) {
+                        try { shapeBoxes.add(ShapeBox.parse(bEl.getAsString())); }
+                        catch (Exception ignored) {}
+                    }
+                    if (shapeBoxes.isEmpty()) shapeBoxes = null;
+                }
+                boolean noCollision = e.has("noCollision") && e.get("noCollision").getAsBoolean();
                 SlotData data = new SlotData(index, customId, displayName, texture,
-                        lightLevel, hardness, soundType, faces, animMeta);
+                        lightLevel, hardness, soundType, faces, animMeta, shapeBoxes, noCollision);
                 SLOTS.put("slot_" + index, data);
                 ID_TO_SLOT.put(customId, "slot_" + index);
             }
@@ -409,9 +610,38 @@ public class SlotManager {
             try { tabIconTexture = Files.readAllBytes(tabFile.toPath()); }
             catch (IOException ex) { LOGGER.error("Failed to load tab icon", ex); }
         }
+        loadTemplates();
     }
 
     // ── Client-side persistence ───────────────────────────────────────────────
+
+    public static void saveTemplates() {
+        File dir = getConfigDir(); dir.mkdirs();
+        JsonObject root = new JsonObject();
+        for (Map.Entry<String, List<ShapeBox>> entry : SHAPE_TEMPLATES.entrySet()) {
+            JsonArray arr = new JsonArray();
+            for (ShapeBox b : entry.getValue()) arr.add(b.toCoordString());
+            root.add(entry.getKey(), arr);
+        }
+        try (FileWriter fw = new FileWriter(new File(dir, "shape_templates.json"), StandardCharsets.UTF_8)) {
+            new GsonBuilder().setPrettyPrinting().create().toJson(root, fw);
+        } catch (IOException ex) { LOGGER.error("Failed to save shape_templates.json", ex); }
+    }
+
+    public static void loadTemplates() {
+        File f = new File(getConfigDir(), "shape_templates.json");
+        if (!f.exists()) return;
+        try {
+            JsonObject root = JsonParser.parseReader(new FileReader(f, StandardCharsets.UTF_8)).getAsJsonObject();
+            for (Map.Entry<String, com.google.gson.JsonElement> entry : root.entrySet()) {
+                List<ShapeBox> boxes = new ArrayList<>();
+                for (JsonElement el : entry.getValue().getAsJsonArray()) {
+                    try { boxes.add(ShapeBox.parse(el.getAsString())); } catch (Exception ignored) {}
+                }
+                if (!boxes.isEmpty()) SHAPE_TEMPLATES.put(entry.getKey(), boxes);
+            }
+        } catch (Exception ex) { LOGGER.error("Failed to load shape_templates.json", ex); }
+    }
 
     public static void loadFromClientDir(File mcDir) {
         File dir = new File(mcDir, "config/customblocks");
@@ -442,8 +672,18 @@ public class SlotManager {
                         if (faceFile.exists()) faces.put(face, Files.readAllBytes(faceFile.toPath()));
                     }
                 }
+                List<ShapeBox> shapeBoxes2 = null;
+                if (e.has("shapeBoxes")) {
+                    shapeBoxes2 = new ArrayList<>();
+                    for (JsonElement bEl : e.getAsJsonArray("shapeBoxes")) {
+                        try { shapeBoxes2.add(ShapeBox.parse(bEl.getAsString())); }
+                        catch (Exception ignored) {}
+                    }
+                    if (shapeBoxes2.isEmpty()) shapeBoxes2 = null;
+                }
+                boolean noCollision2 = e.has("noCollision") && e.get("noCollision").getAsBoolean();
                 SLOTS.put("slot_" + index, new SlotData(index, customId, displayName, texture,
-                        lightLevel, hardness, soundType, faces, animMeta));
+                        lightLevel, hardness, soundType, faces, animMeta, shapeBoxes2, noCollision2));
                 ID_TO_SLOT.put(customId, "slot_" + index);
             }
             File tabFile = new File(dir, "tab_icon.png");
@@ -470,6 +710,12 @@ public class SlotManager {
                 d.faceTextures.keySet().forEach(faces::add);
                 e.add("faces", faces);
             }
+            if (d.isShaped()) {
+                JsonArray shapeArr = new JsonArray();
+                for (ShapeBox b : d.shapeBoxes) shapeArr.add(b.toCoordString());
+                e.add("shapeBoxes", shapeArr);
+            }
+            if (d.noCollision) e.addProperty("noCollision", true);
             arr.add(e);
         }
         root.add("slots", arr);

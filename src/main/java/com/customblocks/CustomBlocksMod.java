@@ -38,7 +38,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 public class CustomBlocksMod implements ModInitializer {
 
     public static final String MOD_ID = "customblocks";
-    public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
+    public static final Logger LOGGER = LoggerFactory.getLogger("CustomBlocks");
 
     public static final SlotBlock[]      SLOT_BLOCKS = new SlotBlock[SlotManager.MAX_SLOTS];
     public static final SlotBlock.SlotItem[] SLOT_ITEMS = new SlotBlock.SlotItem[SlotManager.MAX_SLOTS];
@@ -121,7 +121,7 @@ public class CustomBlocksMod implements ModInitializer {
         // Creative tab
         Registry.register(Registries.ITEM_GROUP, CUSTOM_BLOCKS_TAB,
                 FabricItemGroup.builder()
-                        .displayName(Text.literal("Custom Blocks"))
+                        .displayName(Text.literal("CustomBlocks"))
                         .icon(() -> {
                             SlotManager.SlotData icon = SlotManager.getById("tab_icon");
                             if (icon != null) return new ItemStack(SLOT_ITEMS[icon.index]);
@@ -230,7 +230,7 @@ public class CustomBlocksMod implements ModInitializer {
         CustomBlockCommand.register();
         SlotManager.loadAll();
 
-        LOGGER.info("[CustomBlocks] Initialized. {} slot(s) loaded.", SlotManager.usedSlots());
+        LOGGER.info("[CustomBlocks] [CustomBlocks] Initialized. {} slot(s) loaded.", SlotManager.usedSlots());
     }
 
     public static void broadcastUpdate(MinecraftServer server, SlotUpdatePayload payload) {

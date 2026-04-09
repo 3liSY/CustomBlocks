@@ -3,6 +3,7 @@ package com.customblocks.block;
 import com.customblocks.SlotManager;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.ShapeContext;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
@@ -11,6 +12,8 @@ import net.minecraft.sound.BlockSoundGroup;
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.shape.VoxelShape;
+import net.minecraft.util.shape.VoxelShapes;
 import net.minecraft.world.BlockView;
 
 public class SlotBlock extends Block {
@@ -32,17 +35,47 @@ public class SlotBlock extends Block {
     }
 
     @Override
+    public VoxelShape getOutlineShape(BlockState state, BlockView world, BlockPos pos, ShapeContext ctx) {
+        VoxelShape s = SlotManager.buildVoxelShape(getSlotKey());
+        return s != null ? s : VoxelShapes.fullCube();
+    }
+
+    @Override
+    public VoxelShape getCollisionShape(BlockState state, BlockView world, BlockPos pos, ShapeContext ctx) {
+        SlotManager.SlotData d = SlotManager.getBySlot(getSlotKey());
+        if (d != null && d.noCollision) return VoxelShapes.empty();
+        VoxelShape s = SlotManager.buildVoxelShape(getSlotKey());
+        return s != null ? s : VoxelShapes.fullCube();
+    }
+
+    @Override
+    public VoxelShape getCullingShape(BlockState state, BlockView world, BlockPos pos) {
+        VoxelShape s = SlotManager.buildVoxelShape(getSlotKey());
+        return s != null ? s : VoxelShapes.fullCube();
+    }
+
+    @Override
     public BlockSoundGroup getSoundGroup(BlockState state) {
         SlotManager.SlotData d = SlotManager.getBySlot(getSlotKey());
         if (d == null) return BlockSoundGroup.STONE;
         return switch (d.soundType) {
-            case "wood"  -> BlockSoundGroup.WOOD;
-            case "grass" -> BlockSoundGroup.GRASS;
-            case "metal" -> BlockSoundGroup.METAL;
-            case "glass" -> BlockSoundGroup.GLASS;
-            case "sand"  -> BlockSoundGroup.SAND;
-            case "wool"  -> BlockSoundGroup.WOOL;
-            default      -> BlockSoundGroup.STONE;
+            case "wood"         -> BlockSoundGroup.WOOD;
+            case "grass"        -> BlockSoundGroup.GRASS;
+            case "metal"        -> BlockSoundGroup.METAL;
+            case "glass"        -> BlockSoundGroup.GLASS;
+            case "sand"         -> BlockSoundGroup.SAND;
+            case "wool"         -> BlockSoundGroup.WOOL;
+            case "gravel"       -> BlockSoundGroup.GRAVEL;
+            case "snow"         -> BlockSoundGroup.SNOW;
+            case "dirt"         -> BlockSoundGroup.DIRT;
+            case "coral"        -> BlockSoundGroup.WET_GRASS;
+            case "bamboo"       -> BlockSoundGroup.BAMBOO;
+            case "nether_brick" -> BlockSoundGroup.NETHER_BRICKS;
+            case "ice"          -> BlockSoundGroup.GLASS;
+            case "honey"        -> BlockSoundGroup.HONEY;
+            case "bone"         -> BlockSoundGroup.BONE;
+            case "slime"        -> BlockSoundGroup.SLIME;
+            default             -> BlockSoundGroup.STONE;
         };
     }
 

@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicLong;
 @Environment(EnvType.CLIENT)
 public class CustomBlocksClient implements ClientModInitializer {
 
-    private static final String PACK_ENTRY = "file/customblocks_generated";
+    private static final String PACK_ENTRY = "file/picblocks_generated";
     private static final AtomicBoolean reloadScheduled   = new AtomicBoolean(false);
     private static final AtomicBoolean generateRunning   = new AtomicBoolean(false);
     // Timestamp of last incoming packet — debounce fires 2s after THE LAST packet, not the first
@@ -43,11 +43,12 @@ public class CustomBlocksClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
 
+        // ── Keybindings ──────────────────────────────────────────────────────────
         openGuiKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.customblocks.open_gui",
+                "key.picblocks.open_gui",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_B,
-                "category.customblocks"
+                "category.picblocks"
         ));
 
         ClientLifecycleEvents.CLIENT_STARTED.register(client -> {
@@ -57,7 +58,7 @@ public class CustomBlocksClient implements ClientModInitializer {
         });
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            // Open GUI on B press
+            // B — open overlay GUI
             while (openGuiKey.wasPressed()) {
                 if (client.currentScreen == null)
                     client.setScreen(new CustomBlocksScreen());
@@ -139,6 +140,22 @@ public class CustomBlocksClient implements ClientModInitializer {
                         SlotManager.clearAllFaces(payload.customId());
                         TextureCache.invalidate(payload.customId());
                     }
+                    case "setshape" -> {
+                        if (payload.shapeData() != null) {
+                            java.util.List<SlotManager.ShapeBox> boxes = new java.util.ArrayList<>();
+                            if (!payload.shapeData().equals("full")) {
+                                for (String part : payload.shapeData().split(";")) {
+                                    try { boxes.add(SlotManager.ShapeBox.parse(part)); } catch (Exception ignored) {}
+                                }
+                            }
+                            SlotManager.setShape(payload.customId(), boxes.isEmpty() ? null : boxes);
+                        }
+                    }
+                    case "setcollision" -> {
+                        // shapeData holds "true" (has collision) or "false" (no collision)
+                        boolean hasCollision = !"false".equals(payload.shapeData());
+                        SlotManager.setCollision(payload.customId(), hasCollision);
+                    }
                     case "tabicon" -> {
                         SlotManager.setTabIconTexture(payload.texture());
                         scheduleGenerateAndReload(client);
@@ -148,7 +165,8 @@ public class CustomBlocksClient implements ClientModInitializer {
                 String action = payload.action();
                 boolean needsReload = action.equals("add") || action.equals("retexture")
                         || action.equals("remove") || action.equals("setface")
-                        || action.equals("clearface") || action.equals("clearfaces");
+                        || action.equals("clearface") || action.equals("clearfaces")
+                        || action.equals("setshape") || action.equals("setcollision");
                 if (needsReload) scheduleGenerateAndReload(client);
             });
         });
