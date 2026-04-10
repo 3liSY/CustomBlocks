@@ -96,8 +96,9 @@ public class GuiManager {
         int max   = total == 0 ? 0 : Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
         page = Math.max(0, Math.min(page, max));
         STATES.put(player.getUuid(), GuiState.picker(page));
+        final int finalPage = page;
         openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildPicker(page)),
+            (s, pi, p) -> new CbScreenHandler(s, pi, buildPicker(finalPage)),
             Text.literal("§b§l▶ §r§fChoose a block §7(ESC = back)")));
     }
 
@@ -303,7 +304,6 @@ public class GuiManager {
                     byte[] bytes = ImageProcessor.downloadAndProcess(text);
                     srv.execute(() -> {
                         SlotManager.setTabIconTexture(bytes);
-                        // Create or update "tab_icon" slot so creative tab icon getter finds it
                         if (SlotManager.hasId("tab_icon")) {
                             SlotManager.SlotData ex = SlotManager.getById("tab_icon");
                             SlotManager.updateTexture("tab_icon", bytes); SlotManager.saveAll();
@@ -502,7 +502,6 @@ public class GuiManager {
             CustomBlocksMod.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setcollision",upd.index,id,null,null,0,0,"stone",null,upd.noCollision?"false":"true"));
             send(player,"§a[Shape] Collision: §f"+(upd.noCollision?"§cOFF":"§aON")); reopenShapeEditor(player,id,rp,boxPage); return;
         }
-        // Presets: slots 10-21 (12 presets, skipping slot 9 which is the label)
         if (slot >= 10 && slot <= 21) {
             int pi = slot - 10;
             if (pi < PRESET_NAMES.length) {
@@ -513,16 +512,13 @@ public class GuiManager {
         }
         if (slot == 22) { PENDING.put(player.getUuid(), new PendingInput(InputAction.ADDSHAPE_COORDS,id,null,null,null,rp)); player.closeHandledScreen(); send(player,"§6[Shape] §eType coords (or §ccancel§e): §7x1,y1,z1,x2,y2,z2  §8(0–16)"); return; }
         if (slot == 23) { SlotManager.pushUndo(id,"clearshape"); SlotManager.clearShape(id); SlotManager.saveAll(); broadcastShape(player.getServer(),SlotManager.getById(id)); send(player,"§a[Shape] Cleared — full cube."); reopenShapeEditor(player,id,rp,0); return; }
-        // Boxes (slots 28-35)
         if (slot >= 28 && slot <= 35) {
             int boxIdx = boxPage*9 + (slot-28);
             if (boxIdx < boxes.size()) { SlotManager.pushUndo(id,"removeshape"); SlotManager.removeBox(id,boxIdx); SlotManager.saveAll(); broadcastShape(player.getServer(),SlotManager.getById(id)); send(player,"§a[Shape] Removed box #"+boxIdx+"."); int np=Math.min(boxPage,Math.max(0,(boxes.size()-2)/9)); reopenShapeEditor(player,id,rp,np); }
             return;
         }
-        // Shape variants (slots 37-44)
         List<SlotManager.SlotData> variants = findShapeVariants(id);
         if (slot >= 37 && slot <= 44) { int vi=slot-37; if(vi<variants.size()) openEditor(player,variants.get(vi).customId,rp); return; }
-        // Pagination
         if (slot==45 && boxPage>0) { reopenShapeEditor(player,id,rp,boxPage-1); return; }
         if (slot==53) { int maxPg=Math.max(0,(boxes.size()-1)/9); if(boxPage<maxPg) reopenShapeEditor(player,id,rp,boxPage+1); }
     }
@@ -614,7 +610,6 @@ public class GuiManager {
 
     private static SimpleInventory buildMain() {
         SimpleInventory inv = new SimpleInventory(54);
-        // Row 0: Primary actions
         inv.setStack(0, uiGlint(Items.LIME_CONCRETE,  "§a§l➕ Create New Block",         "§7Click → type ID, name, URL in chat",         "§8Creates a brand-new custom block"));
         inv.setStack(1, uiGlint(Items.CHEST,          "§b§l📂 Browse & Edit Blocks",      "§7Browse all blocks and open the full editor",  "§8Blocks: §f"+SlotManager.usedSlots()+" §8/ §f"+SlotManager.MAX_SLOTS));
         inv.setStack(2, SlotManager.undoStackSize()>0
@@ -626,7 +621,6 @@ public class GuiManager {
         inv.setStack(6, uiGlint(Items.HOPPER,         "§f§l📥 Import Folder",             "§7Import images from config/customblocks/import/","§8Runs: /cb importfolder"));
         inv.setStack(7, uiGlint(Items.NETHER_STAR,    "§f§l🔄 Reload All Data",           "§7Reload & sync to all players",               "§8Runs: /cb reload"));
         inv.setStack(8, ui(Items.TNT,                 "§c§l❌ Delete a Block",            "§7Click → type block ID in chat",              "§8Note: use Undo to restore"));
-        // Row 1: Tools & commands
         inv.setStack(9,  ui(Items.CYAN_STAINED_GLASS_PANE,"§b§l── Tools & Quick Commands ──","§7Block tools and shortcut commands below"));
         inv.setStack(10, uiGlint(Items.BLAZE_ROD,     "§6Rainbow Rectangle",              "§7Face-paint wand — right-click face → URL",   "§8Click to receive the tool"));
         inv.setStack(11, uiGlint(Items.WHITE_CONCRETE,"§fColor Square",                   "§7Flat-color region painter",                  "§8Click → choose: black | yellow | green"));
@@ -653,16 +647,13 @@ public class GuiManager {
         SimpleInventory inv = new SimpleInventory(54);
         List<SlotManager.SlotData> blocks = sortedBlocks();
         int total = blocks.size(), maxPage = total==0?0:Math.max(0,(total-1)/BLOCKS_PER_PAGE);
-        // Row 0
         inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Main Menu","§8(or press ESC)"));
         for (int i=1;i<=3;i++) inv.setStack(i,glass());
         inv.setStack(4, ui(Items.ENCHANTED_BOOK,"§e§lChoose a Block to Edit",
             "§7Click any block below to open its full editor",
             "§8"+Math.min(BLOCKS_PER_PAGE,Math.max(0,total-page*BLOCKS_PER_PAGE))+" of §f"+total+" §8blocks  •  Page §f"+(page+1)+"§8/§f"+(maxPage+1)));
         for (int i=5;i<=8;i++) inv.setStack(i,glass());
-        // Row 1: top border
         for (int i=9;i<=17;i++) inv.setStack(i, ui(Items.BLUE_STAINED_GLASS_PANE,"§r"));
-        // Rows 2-3: blocks (18 per page)
         int start = page * BLOCKS_PER_PAGE;
         for (int i=0; i<BLOCKS_PER_PAGE; i++) {
             int invSlot = 18+i, dataIdx = start+i;
@@ -677,9 +668,7 @@ public class GuiManager {
                 inv.setStack(invSlot, s);
             } else { inv.setStack(invSlot, glass()); }
         }
-        // Row 4: bottom border
         for (int i=36;i<=44;i++) inv.setStack(i, ui(Items.BLUE_STAINED_GLASS_PANE,"§r"));
-        // Row 5: pagination
         inv.setStack(45, page>0 ? uiGlint(Items.ARROW,"§7◀ Previous Page","§8Page "+page+" / "+(maxPage+1)) : ui(Items.GRAY_STAINED_GLASS_PANE,"§8◀ First Page",""));
         for (int i=46;i<=48;i++) inv.setStack(i,glass());
         inv.setStack(49, ui(Items.PAPER,"§ePage §f"+(page+1)+" §7/ §f"+(maxPage+1),"§7Total: §f"+total+" blocks"));
@@ -690,7 +679,6 @@ public class GuiManager {
 
     private static SimpleInventory buildEditor(SlotManager.SlotData d, boolean confirmDelete) {
         SimpleInventory inv = new SimpleInventory(54);
-        // Row 0
         inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Block List","§8(or press ESC)"));
         ItemStack disp = CustomBlocksMod.safeSlotItem(d.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(d.index)):ItemStack.EMPTY;
         disp.set(DataComponentTypes.CUSTOM_NAME,Text.literal("§e§l"+d.displayName).styled(s->s.withItalic(false)));
@@ -705,7 +693,6 @@ public class GuiManager {
         inv.setStack(8, confirmDelete
             ? uiGlint(Items.BARRIER, "§4§l⚠ CLICK AGAIN TO CONFIRM DELETE",               "§cThis will permanently delete: §f"+d.customId, "§c(Use Undo in main menu to restore)")
             : ui(Items.TNT,          "§c§l⚠ Delete This Block",                            "§7First click arms.  Second click deletes.",    "§8Undo available in main menu."));
-        // Row 1: Textures
         inv.setStack(9,  uiGlint(Items.PAINTING,              "§b⬛ Retexture All Faces",  "§7Replace texture on all faces",               "§8Click → paste URL"));
         inv.setStack(10, uiGlint(Items.ITEM_FRAME,            "§d⬡ Open Full Face Editor","§7Per-face textures + variant creation",        "§8Supports 6 independent face textures"));
         inv.setStack(11, faceBtn(d,Items.WHITE_CONCRETE,       "top",    "§f▲ TOP"));
@@ -715,7 +702,6 @@ public class GuiManager {
         inv.setStack(15, faceBtn(d,Items.MAGENTA_CONCRETE,     "west",   "§d▶ WEST"));
         inv.setStack(16, faceBtn(d,Items.LIGHT_GRAY_CONCRETE,  "bottom", "§7▼ BOTTOM"));
         inv.setStack(17, ui(Items.ORANGE_CONCRETE,             "§6⊘ Clear ALL Face Overrides","§7Resets all faces to default texture"));
-        // Row 2: Per-face clear
         inv.setStack(18, ui(Items.CYAN_STAINED_GLASS_PANE,"§7── Clear Individual Faces ──","§8Click any face button to remove its override"));
         inv.setStack(19, clearFaceBtn(d,Items.WHITE_STAINED_GLASS_PANE,      "top",    "§f✕ Clear TOP"));
         inv.setStack(20, clearFaceBtn(d,Items.CYAN_STAINED_GLASS_PANE,       "north",  "§b✕ Clear NORTH"));
@@ -724,7 +710,6 @@ public class GuiManager {
         inv.setStack(23, clearFaceBtn(d,Items.MAGENTA_STAINED_GLASS_PANE,    "west",   "§d✕ Clear WEST"));
         inv.setStack(24, clearFaceBtn(d,Items.LIGHT_GRAY_STAINED_GLASS_PANE, "bottom", "§7✕ Clear BOTTOM"));
         inv.setStack(25, glass()); inv.setStack(26, glass());
-        // Row 3: Light + Hard + Shape + Collision
         inv.setStack(27, ui(Items.RED_DYE,         "§c◀ Light -1",               "§7Now: §e"+d.lightLevel));
         inv.setStack(28, uiGlint(Items.GLOWSTONE_DUST,"§e✦ Light: §f"+d.lightLevel,"§70=off • 7=torch • 14=sea lantern • 15=max"));
         inv.setStack(29, ui(Items.YELLOW_DYE,      "§a▶ Light +1",               "§7Now: §e"+d.lightLevel));
@@ -736,7 +721,6 @@ public class GuiManager {
         inv.setStack(35, d.noCollision
             ? uiGlint(Items.BARRIER,    "§c⊘ Collision: §lOFF","§7Block has NO hitbox","§8Click to ENABLE collision")
             : uiGlint(Items.SLIME_BLOCK,"§a✔ Collision: §lON", "§7Block has normal collision","§8Click to DISABLE collision"));
-        // Rows 4-5: Sounds
         inv.setStack(36,soundItem(d,"stone",       Items.STONE,             "§fStone"));
         inv.setStack(37,soundItem(d,"wood",        Items.OAK_LOG,           "§fWood"));
         inv.setStack(38,soundItem(d,"grass",       Items.GRASS_BLOCK,       "§fGrass"));
@@ -762,7 +746,6 @@ public class GuiManager {
         SimpleInventory inv = new SimpleInventory(54);
         List<SlotManager.ShapeBox> boxes = d.shapeBoxes!=null?d.shapeBoxes:List.of();
         Item[] pItems = {Items.GRASS_BLOCK,Items.SMOOTH_STONE_SLAB,Items.STONE_SLAB,Items.MOSS_CARPET,Items.COBBLESTONE_WALL,Items.COMPARATOR,Items.COMPARATOR,Items.OAK_TRAPDOOR,Items.OAK_TRAPDOOR,Items.OAK_FENCE,Items.OAK_STAIRS,Items.TALL_GRASS};
-        // Row 0
         inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Editor","§8(or press ESC)"));
         for (int i=1;i<=3;i++) inv.setStack(i,glass());
         ItemStack info = CustomBlocksMod.safeSlotItem(d.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(d.index)):ItemStack.EMPTY;
@@ -771,13 +754,11 @@ public class GuiManager {
         inv.setStack(4, info);
         for (int i=5;i<=7;i++) inv.setStack(i,glass());
         inv.setStack(8, d.noCollision?uiGlint(Items.BARRIER,"§c⊘ Collision: §lOFF","§8Click to ENABLE"):uiGlint(Items.SLIME_BLOCK,"§a✔ Collision: §lON","§8Click to DISABLE"));
-        // Row 1: label + presets 0-7 (slots 9-17)
         inv.setStack(9, ui(Items.BLUE_STAINED_GLASS_PANE,"§9── Shape Presets ──","§7§nLeft-click§r§7 = new block  •  §7§nRight-click§r§7 = apply here"));
         for (int i=0; i<8 && i<PRESET_NAMES.length; i++) {
             String p=PRESET_NAMES[i]; boolean act=boxes.equals(SlotManager.SHAPE_PRESETS.get(p))||(boxes.isEmpty()&&"full".equals(p));
             inv.setStack(10+i, act?uiGlint(pItems[i],"§a§l"+p.toUpperCase()+" §a✔","§aActive • §8Left=new block  Right=apply here"):ui(pItems[i],"§b"+cap(p),"§7Preset shape","§8Left-click=new block  •  Right-click=apply here"));
         }
-        // Row 2: presets 8-11 + controls (slots 18-26)
         for (int i=8; i<PRESET_NAMES.length && i<12; i++) {
             String p=PRESET_NAMES[i]; boolean act=boxes.equals(SlotManager.SHAPE_PRESETS.get(p));
             inv.setStack(10+i, act?uiGlint(pItems[i],"§a§l"+p.toUpperCase()+" §a✔","§aActive • §8Left=new block  Right=apply here"):ui(pItems[i],"§b"+cap(p),"§7Preset shape","§8Left-click=new block  •  Right-click=apply here"));
@@ -785,12 +766,10 @@ public class GuiManager {
         inv.setStack(22, uiGlint(Items.LIME_DYE,"§a➕ Add Custom Box","§7Click → type coords","§8Format: x1,y1,z1,x2,y2,z2  (0–16)","§8Up to 16 boxes"));
         inv.setStack(23, ui(Items.ORANGE_DYE,"§6⊘ Clear All Boxes","§7Reset to full cube","§8Removes all custom shape boxes"));
         for (int i=24;i<=26;i++) inv.setStack(i,glass());
-        // Row 3: boxes header + list (slots 27-35)
         inv.setStack(27, ui(Items.PURPLE_STAINED_GLASS_PANE,"§5── Custom Boxes §8(click = remove) ──","§7Defines the block's physical shape / hitbox"));
         int bstart = boxPage*9;
         for (int i=0;i<8&&(bstart+i)<boxes.size();i++) { SlotManager.ShapeBox b=boxes.get(bstart+i); inv.setStack(28+i,ui(Items.STRUCTURE_VOID,"§e§lBox #"+(bstart+i),"§7"+b.toDisplayString(),"§8Click to remove")); }
         for (int s=28+Math.min(8,Math.max(0,boxes.size()-bstart));s<=35;s++) inv.setStack(s,glass());
-        // Row 4: shape variants
         List<SlotManager.SlotData> variants = findShapeVariants(d.customId);
         inv.setStack(36, ui(Items.LIME_STAINED_GLASS_PANE,"§a── Shape Variants §8(click to edit) ──","§7Blocks created from this block via presets","§8"+variants.size()+" variant(s)"));
         for (int i=0;i<Math.min(8,variants.size());i++) {
@@ -801,7 +780,6 @@ public class GuiManager {
             inv.setStack(37+i,vs);
         }
         for (int s=37+Math.min(8,variants.size());s<=44;s++) inv.setStack(s,glass());
-        // Row 5: pagination
         int tbp=boxes.isEmpty()?0:Math.max(0,(boxes.size()-1)/9);
         inv.setStack(45,boxPage>0?uiGlint(Items.ARROW,"§7◀ Prev Boxes","§8Page "+boxPage):glass());
         for(int i=46;i<=48;i++) inv.setStack(i,glass());
