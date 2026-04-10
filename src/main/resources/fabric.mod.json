@@ -2,11 +2,11 @@
   "schemaVersion": 1,
   "id": "customblocks",
   "version": "1.0.0",
-  "name": "CustomBlocks — Download: github.com/3liSY/CustomBlockss/releases/latest",
-  "description": "Make Custom Blocks with easy commands.",
-  "authors": [ "SrbGamerr" ],
+  "name": "PicBlocks",
+  "description": "Paint any image onto blocks — URL, GIF, per-face. No coding needed.",
+  "authors": [ "3liSY" ],
   "license": "MIT",
-  "environment": "server",
+  "environment": "*",
   "entrypoints": {
     "main":   [ "com.customblocks.CustomBlocksMod" ],
     "client": [ "com.customblocks.client.CustomBlocksClient" ]

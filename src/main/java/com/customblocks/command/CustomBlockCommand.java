@@ -336,21 +336,6 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("rectangle")
                     .executes(ctx -> cmdGiveRectangle(ctx.getSource())));
 
-            tree.then(CommandManager.literal("download")
-                .executes(ctx -> {
-                    ctx.getSource().sendMessage(net.minecraft.text.Text.empty()
-                        .append(net.minecraft.text.Text.literal("§6[CustomBlocks] §fDownload the mod: "))
-                        .append(net.minecraft.text.Text.literal("§b§nClick here")
-                            .styled(s -> s
-                                .withClickEvent(new net.minecraft.text.ClickEvent(
-                                    net.minecraft.text.ClickEvent.Action.OPEN_URL,
-                                    com.customblocks.CustomBlocksMod.DOWNLOAD_URL))
-                                .withUnderline(true)
-                                .withColor(net.minecraft.util.Formatting.AQUA)))
-                        .append(net.minecraft.text.Text.literal(" §7(" + com.customblocks.CustomBlocksMod.DOWNLOAD_URL + ")")));
-                    return 1;
-                }));
-
             dispatcher.register(tree);
             dispatcher.register(CommandManager.literal("cb")
                 .requires(src -> src.hasPermissionLevel(2))

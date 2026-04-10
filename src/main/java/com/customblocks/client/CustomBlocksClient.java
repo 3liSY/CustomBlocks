@@ -13,7 +13,6 @@ import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.fabricmc.fabric.api.client.networking.v1.ClientLoginNetworking;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.MinecraftClient;
@@ -43,17 +42,6 @@ public class CustomBlocksClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-
-        // Respond to server version check during login
-        ClientLoginNetworking.registerGlobalReceiver(CustomBlocksMod.VERSION_CHANNEL, (client, handler, buf, listenerAdder) -> {
-            net.minecraft.network.PacketByteBuf response = new net.minecraft.network.PacketByteBuf(io.netty.buffer.Unpooled.buffer());
-            String version = net.fabricmc.loader.api.FabricLoader.getInstance()
-                .getModContainer(CustomBlocksMod.MOD_ID)
-                .map(c -> c.getMetadata().getVersion().getFriendlyString())
-                .orElse("0.0.0");
-            response.writeString(version);
-            return java.util.concurrent.CompletableFuture.completedFuture(response);
-        });
 
         openGuiKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.customblocks.open_gui",

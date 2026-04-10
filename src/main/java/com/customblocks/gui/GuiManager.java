@@ -94,10 +94,10 @@ public class GuiManager {
     public static void openEditorPicker(ServerPlayerEntity player, int page) {
         int total = sortedBlocks().size();
         int max   = total == 0 ? 0 : Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
-        final int finalPage = Math.max(0, Math.min(page, max));
-        STATES.put(player.getUuid(), GuiState.picker(finalPage));
+        page = Math.max(0, Math.min(page, max));
+        STATES.put(player.getUuid(), GuiState.picker(page));
         openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildPicker(finalPage)),
+            (s, pi, p) -> new CbScreenHandler(s, pi, buildPicker(page)),
             Text.literal("§b§l▶ §r§fChoose a block §7(ESC = back)")));
     }
 

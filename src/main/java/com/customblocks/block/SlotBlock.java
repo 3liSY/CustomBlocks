@@ -67,6 +67,7 @@ public class SlotBlock extends Block {
             case "wool"         -> BlockSoundGroup.WOOL;
             case "gravel"       -> BlockSoundGroup.GRAVEL;
             case "snow"         -> BlockSoundGroup.SNOW;
+            case "dirt"         -> BlockSoundGroup.DIRT;
             case "coral"        -> BlockSoundGroup.WET_GRASS;
             case "bamboo"       -> BlockSoundGroup.BAMBOO;
             case "nether_brick" -> BlockSoundGroup.NETHER_BRICKS;
