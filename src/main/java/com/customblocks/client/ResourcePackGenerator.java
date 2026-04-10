@@ -139,23 +139,25 @@ public class ResourcePackGenerator {
                         el.add("from", from);
                         el.add("to", to);
                         JsonObject faces = new JsonObject();
-                        // UV: scale 0-16 coords proportionally to 0-16 UV space
-                        String[][] faceEntries = {
-                            {"down",  "bottom"}, {"up",   "top"},
-                            {"north", "north"},  {"south","south"},
-                            {"west",  "west"},   {"east", "east"}
-                        };
-                        for (String[] fe : faceEntries) {
-                            String mcFaceName = fe[0], cbFaceName = fe[1];
-                            JsonObject faceObj = new JsonObject();
-                            com.google.gson.JsonArray uv = new com.google.gson.JsonArray();
-                            // Simple full UV per face
-                            uv.add(0); uv.add(0); uv.add(16); uv.add(16);
-                            faceObj.add("uv", uv);
-                            faceObj.addProperty("texture", "#" + FACE_TO_MC.get(cbFaceName));
-                            faceObj.addProperty("cullface", mcFaceName);
-                            faces.add(mcFaceName, faceObj);
-                        }
+                        // UV: map each face to the correct portion of the 16x16 texture
+                        // based on the actual box coordinates, so a slab shows the right
+                        // slice of the texture rather than black+purple missing texture.
+                        float x1 = box.x1(), y1 = box.y1(), z1 = box.z1();
+                        float x2 = box.x2(), y2 = box.y2(), z2 = box.z2();
+
+                        // down  (bottom) face — uses X/Z coords
+                        addFaceWithUV(faces, "down",   "bottom", x1, z1, x2, z2);
+                        // up    (top)    face — uses X/Z coords
+                        addFaceWithUV(faces, "up",     "top",    x1, z1, x2, z2);
+                        // north face — uses X/Y coords (z1 side), UV flipped X
+                        addFaceWithUV(faces, "north",  "north",  16 - x2, 16 - y2, 16 - x1, 16 - y1);
+                        // south face — uses X/Y coords (z2 side)
+                        addFaceWithUV(faces, "south",  "south",  x1, 16 - y2, x2, 16 - y1);
+                        // west  face — uses Z/Y coords (x1 side)
+                        addFaceWithUV(faces, "west",   "west",   z1, 16 - y2, z2, 16 - y1);
+                        // east  face — uses Z/Y coords (x2 side), UV flipped Z
+                        addFaceWithUV(faces, "east",   "east",   16 - z2, 16 - y2, 16 - z1, 16 - y1);
+
                         el.add("faces", faces);
                         elements.add(el);
                     }
@@ -480,6 +482,25 @@ public class ResourcePackGenerator {
         } catch (Exception e) {
             return PLACEHOLDER_PNG;
         }
+    }
+
+    /**
+     * Add a Minecraft block model face with correct UV coordinates based on the
+     * box's extent, so shaped blocks (slabs, etc.) sample the right region of the
+     * texture instead of rendering as black+purple missing texture.
+     */
+    private static void addFaceWithUV(JsonObject faces, String mcFaceName, String cbFaceName,
+                                       float u1, float v1, float u2, float v2) {
+        JsonObject faceObj = new JsonObject();
+        com.google.gson.JsonArray uv = new com.google.gson.JsonArray();
+        uv.add(Math.max(0f, Math.min(16f, u1)));
+        uv.add(Math.max(0f, Math.min(16f, v1)));
+        uv.add(Math.max(0f, Math.min(16f, u2)));
+        uv.add(Math.max(0f, Math.min(16f, v2)));
+        faceObj.add("uv", uv);
+        faceObj.addProperty("texture", "#" + FACE_TO_MC.get(cbFaceName));
+        faceObj.addProperty("cullface", mcFaceName);
+        faces.add(mcFaceName, faceObj);
     }
 
     private static void writeChunk(java.io.ByteArrayOutputStream out, String type, byte[] data) throws Exception {

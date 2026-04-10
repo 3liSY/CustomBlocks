@@ -69,8 +69,9 @@ public class SlotManager {
     /** User-saved shape templates: name → list of boxes. Persisted separately. */
     private static final Map<String, List<ShapeBox>> SHAPE_TEMPLATES = new ConcurrentHashMap<>();
 
-    // ── Undo stack ────────────────────────────────────────────────────────────
+    // ── Undo / Redo stacks ───────────────────────────────────────────────────
     private static final Deque<UndoEntry> UNDO_STACK = new ArrayDeque<>();
+    private static final Deque<UndoEntry> REDO_STACK = new ArrayDeque<>();
     private static final int MAX_UNDO = 20;
 
     /**
@@ -100,6 +101,8 @@ public class SlotManager {
             UNDO_STACK.push(entry);
             while (UNDO_STACK.size() > MAX_UNDO) UNDO_STACK.pollLast();
         }
+        // New mutation clears redo history
+        synchronized (REDO_STACK) { REDO_STACK.clear(); }
     }
 
     /** Push current state before a mutating operation (retexture, setface, setglow…). */
@@ -137,6 +140,42 @@ public class SlotManager {
             if (UNDO_STACK.isEmpty()) return "";
             UndoEntry e = UNDO_STACK.peek();
             return e.description() + " on " + e.customId();
+        }
+    }
+
+    // ── Redo stack ────────────────────────────────────────────────────────────
+
+    /** Push a redo entry (called internally when undo is executed). */
+    public static void pushRedo(UndoEntry entry) {
+        synchronized (REDO_STACK) {
+            REDO_STACK.push(entry);
+            while (REDO_STACK.size() > MAX_UNDO) REDO_STACK.pollLast();
+        }
+    }
+
+    public static UndoEntry popRedo() {
+        synchronized (REDO_STACK) {
+            return REDO_STACK.isEmpty() ? null : REDO_STACK.pop();
+        }
+    }
+
+    public static int redoStackSize() {
+        synchronized (REDO_STACK) { return REDO_STACK.size(); }
+    }
+
+    public static String peekRedoDescription() {
+        synchronized (REDO_STACK) {
+            if (REDO_STACK.isEmpty()) return "";
+            UndoEntry e = REDO_STACK.peek();
+            return e.description() + " on " + e.customId();
+        }
+    }
+
+    /** Push to undo stack WITHOUT clearing redo — used internally when applying redo. */
+    public static void pushUndoForRedo(UndoEntry entry) {
+        synchronized (UNDO_STACK) {
+            UNDO_STACK.push(entry);
+            while (UNDO_STACK.size() > MAX_UNDO) UNDO_STACK.pollLast();
         }
     }
 

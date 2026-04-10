@@ -3,6 +3,7 @@ package com.customblocks.gui;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.inventory.Inventory;
+import net.minecraft.inventory.SimpleInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.screen.GenericContainerScreenHandler;
 import net.minecraft.screen.ScreenHandlerType;
@@ -12,20 +13,34 @@ import net.minecraft.server.network.ServerPlayerEntity;
 /**
  * Custom screen handler for all CB GUI screens.
  *
- * KEY FIXES:
- * 1. onClosed() now distinguishes "player pressed ESC" from "server reopened a new screen".
- *    When the server calls openHandledScreen(), it sets REOPENING_SCREENS before the call
- *    so onClosed() (which fires on the OLD handler) knows not to trigger ESC-back navigation.
- *
- * 2. We NEVER call clearState() from onClosed(). Every openXxx() writes the new state
- *    BEFORE openHandledScreen() is called, so clearing here would wipe the fresh state
- *    and make every second click a no-op (state == null → handleClick returns immediately).
+ * KEY BEHAVIOURS:
+ * 1. onClosed() distinguishes "player pressed ESC" from "server reopened a new screen".
+ * 2. refreshWith() allows updating slot contents IN PLACE without reopening the screen,
+ *    which prevents the cursor from snapping to the centre of the screen on every click.
+ * 3. We NEVER call clearState() from onClosed().
  */
 public class CbScreenHandler extends GenericContainerScreenHandler {
 
+    private final Inventory inventory;
+    private boolean disposed = false;
+
     public CbScreenHandler(int syncId, PlayerInventory playerInventory, Inventory inventory) {
         super(ScreenHandlerType.GENERIC_9X6, syncId, playerInventory, inventory, 6);
+        this.inventory = inventory;
     }
+
+    /**
+     * Update the visible inventory contents IN PLACE and sync to the client.
+     * This avoids reopening the screen (which resets the mouse cursor position).
+     */
+    public void refreshWith(SimpleInventory newInv) {
+        for (int i = 0; i < Math.min(54, newInv.size()); i++) {
+            inventory.setStack(i, newInv.getStack(i));
+        }
+        this.syncState();
+    }
+
+    public boolean isDisposed() { return disposed; }
 
     @Override
     public void onSlotClick(int slotIndex, int button, SlotActionType actionType, PlayerEntity player) {
@@ -46,19 +61,12 @@ public class CbScreenHandler extends GenericContainerScreenHandler {
     @Override
     public void onClosed(PlayerEntity player) {
         super.onClosed(player);
+        disposed = true;
         if (!(player instanceof ServerPlayerEntity sp)) return;
 
-        // If the server itself is opening a new screen (REOPENING_SCREENS is set),
-        // this onClosed() is firing because the OLD screen is being replaced.
-        // Do nothing — the new state is already written by the openXxx() call.
         if (GuiManager.isReopeningScreen(sp.getUuid())) return;
-
-        // If there is a pending chat-input action, the player closed the GUI to type
-        // in chat. Don't navigate back — let them type their answer.
         if (GuiManager.hasPending(sp)) return;
 
-        // Otherwise the player pressed ESC (or /close). Navigate one level back.
-        // handleEscBack() will re-open the parent screen, or do nothing if at root.
         sp.getServer().execute(() -> GuiManager.handleEscBack(sp));
     }
 }

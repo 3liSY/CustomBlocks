@@ -188,6 +188,14 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("undo")
                     .executes(ctx -> cmdUndo(ctx.getSource())))
 
+                // ── redo ────────────────────────────────────────────────────
+                .then(CommandManager.literal("redo")
+                    .executes(ctx -> cmdRedo(ctx.getSource())))
+
+                // ── admingui ─────────────────────────────────────────────────
+                .then(CommandManager.literal("admingui")
+                    .executes(ctx -> cmdAdminGui(ctx.getSource())))
+
                 // (givesquare/givetriangle/giverectangle removed — use /cb square, /cb triangle, /cb rectangle)
 
                 // ── dupe / duplicate ────────────────────────────────────────
@@ -830,17 +838,28 @@ public class CustomBlockCommand {
                 return 0;
             }
             int idx = d.index;
+            // Push to redo before removing
+            SlotManager.UndoEntry redoEntry = new SlotManager.UndoEntry(entry.customId(), snapshotForCmd(d), "create", true);
+            SlotManager.pushRedo(redoEntry);
             SlotManager.remove(entry.customId());
             SlotManager.saveAll();
             CustomBlocksMod.broadcastUpdate(server,
                 new SlotUpdatePayload("remove", idx, entry.customId(), null, null, 0, 0, "stone"));
             src.sendMessage(Text.literal("§a[CustomBlocks] Undid create of §f" + entry.customId()
-                + "§a. §7(" + SlotManager.undoStackSize() + " left)"));
+                + "§a. §7(" + SlotManager.undoStackSize() + " undo left)"));
+            if (SlotManager.undoStackSize() > 0)
+                src.sendMessage(Text.literal("§8  → Next undo: §7\"" + SlotManager.peekUndoDescription() + "\""));
             return 1;
         }
 
         // ── Undo a mutation or a deletion ────────────────────────────────────
         SlotManager.SlotData prev = entry.previousState();
+        // Save current state for redo
+        SlotManager.SlotData curForRedo = SlotManager.getById(prev.customId);
+        if (curForRedo != null) {
+            SlotManager.UndoEntry redoEntry = new SlotManager.UndoEntry(entry.customId(), snapshotForCmd(curForRedo), entry.description(), entry.wasDeleted());
+            SlotManager.pushRedo(redoEntry);
+        }
         boolean restored = SlotManager.restoreSnapshot(prev, entry.wasDeleted());
         if (!restored) {
             src.sendError(Text.literal("§c[CustomBlocks] Cannot undo — slot for '" + entry.customId() + "' is now occupied by another block."));
@@ -851,7 +870,6 @@ public class CustomBlockCommand {
         SlotManager.SlotData d = SlotManager.getById(prev.customId);
         if (d != null) {
             if (entry.wasDeleted()) {
-                // Block was re-added: send "add" then restore every face
                 CustomBlocksMod.broadcastUpdate(server,
                     new SlotUpdatePayload("add", d.index, d.customId, d.displayName, d.texture,
                             d.lightLevel, d.hardness, d.soundType));
@@ -860,12 +878,10 @@ public class CustomBlockCommand {
                         new SlotUpdatePayload("setface", d.index, d.customId, null, fe.getValue(),
                                 d.lightLevel, d.hardness, d.soundType, fe.getKey()));
             } else {
-                // Normal restore: texture + wipe stale faces + re-send snapshot faces + props + name
                 if (d.texture != null)
                     CustomBlocksMod.broadcastUpdate(server,
                         new SlotUpdatePayload("retexture", d.index, d.customId, null, d.texture,
                                 d.lightLevel, d.hardness, d.soundType));
-                // Clear all faces on clients first, then re-apply only what the snapshot had
                 CustomBlocksMod.broadcastUpdate(server,
                     new SlotUpdatePayload("clearfaces", d.index, d.customId, null, null,
                             d.lightLevel, d.hardness, d.soundType));
@@ -876,13 +892,108 @@ public class CustomBlockCommand {
                 CustomBlocksMod.broadcastUpdate(server,
                     new SlotUpdatePayload("setprop", d.index, d.customId, null, null,
                             d.lightLevel, d.hardness, d.soundType));
-                // Always re-sync display name in case a rename was undone
                 CustomBlocksMod.broadcastUpdate(server,
                     new SlotUpdatePayload("rename", d.index, d.customId, d.displayName, null, 0, 0, "stone"));
             }
         }
         src.sendMessage(Text.literal("§a[CustomBlocks] Undid \"" + entry.description() + "\" on §f"
-            + entry.customId() + "§a. §7(" + SlotManager.undoStackSize() + " left)"));
+            + entry.customId() + "§a. §7(" + SlotManager.undoStackSize() + " undo left, " + SlotManager.redoStackSize() + " redo)"));
+        if (SlotManager.undoStackSize() > 0)
+            src.sendMessage(Text.literal("§8  → Next undo: §7\"" + SlotManager.peekUndoDescription() + "\""));
+        return 1;
+    }
+
+    /** Redo the last undone action. */
+    private static int cmdRedo(ServerCommandSource src) {
+        if (SlotManager.redoStackSize() == 0) {
+            src.sendMessage(Text.literal("§7[CustomBlocks] Nothing to redo."));
+            return 1;
+        }
+        SlotManager.UndoEntry entry = SlotManager.popRedo();
+        if (entry == null) { src.sendMessage(Text.literal("§7[CustomBlocks] Nothing to redo.")); return 1; }
+
+        MinecraftServer server = src.getServer();
+
+        if (entry.previousState() == null) {
+            // Redo deletion
+            SlotManager.SlotData d = SlotManager.getById(entry.customId());
+            if (d != null) {
+                SlotManager.UndoEntry undoEntry = new SlotManager.UndoEntry(entry.customId(), snapshotForCmd(d), "delete", true);
+                SlotManager.pushUndoForRedo(undoEntry);
+                SlotManager.remove(entry.customId());
+                SlotManager.saveAll();
+                CustomBlocksMod.broadcastUpdate(server,
+                    new SlotUpdatePayload("remove", d.index, entry.customId(), null, null, 0, 0, "stone"));
+            }
+            src.sendMessage(Text.literal("§a[CustomBlocks] Redid delete of §f" + entry.customId()
+                + "§a. §7(" + SlotManager.redoStackSize() + " redo left)"));
+            if (SlotManager.redoStackSize() > 0)
+                src.sendMessage(Text.literal("§8  → Next redo: §7\"" + SlotManager.peekRedoDescription() + "\""));
+            return 1;
+        }
+
+        SlotManager.SlotData prev = entry.previousState();
+        SlotManager.SlotData curForUndo = SlotManager.getById(prev.customId);
+        if (curForUndo != null) {
+            SlotManager.UndoEntry undoEntry = new SlotManager.UndoEntry(entry.customId(), snapshotForCmd(curForUndo), entry.description(), entry.wasDeleted());
+            SlotManager.pushUndoForRedo(undoEntry);
+        }
+
+        boolean restored = SlotManager.restoreSnapshot(prev, entry.wasDeleted());
+        if (!restored) {
+            src.sendError(Text.literal("§c[CustomBlocks] Cannot redo — slot conflict for '" + entry.customId() + "'."));
+            return 0;
+        }
+        SlotManager.saveAll();
+
+        SlotManager.SlotData d = SlotManager.getById(prev.customId);
+        if (d != null) {
+            if (entry.wasDeleted()) {
+                CustomBlocksMod.broadcastUpdate(server,
+                    new SlotUpdatePayload("add", d.index, d.customId, d.displayName, d.texture,
+                            d.lightLevel, d.hardness, d.soundType));
+            } else {
+                if (d.texture != null)
+                    CustomBlocksMod.broadcastUpdate(server,
+                        new SlotUpdatePayload("retexture", d.index, d.customId, null, d.texture,
+                                d.lightLevel, d.hardness, d.soundType));
+                CustomBlocksMod.broadcastUpdate(server,
+                    new SlotUpdatePayload("clearfaces", d.index, d.customId, null, null,
+                            d.lightLevel, d.hardness, d.soundType));
+                for (var fe : d.faceTextures.entrySet())
+                    CustomBlocksMod.broadcastUpdate(server,
+                        new SlotUpdatePayload("setface", d.index, d.customId, null, fe.getValue(),
+                                d.lightLevel, d.hardness, d.soundType, fe.getKey()));
+                CustomBlocksMod.broadcastUpdate(server,
+                    new SlotUpdatePayload("setprop", d.index, d.customId, null, null,
+                            d.lightLevel, d.hardness, d.soundType));
+                CustomBlocksMod.broadcastUpdate(server,
+                    new SlotUpdatePayload("rename", d.index, d.customId, d.displayName, null, 0, 0, "stone"));
+            }
+        }
+        src.sendMessage(Text.literal("§a[CustomBlocks] Redid \"" + entry.description() + "\" on §f"
+            + entry.customId() + "§a. §7(" + SlotManager.redoStackSize() + " redo left, " + SlotManager.undoStackSize() + " undo)"));
+        if (SlotManager.redoStackSize() > 0)
+            src.sendMessage(Text.literal("§8  → Next redo: §7\"" + SlotManager.peekRedoDescription() + "\""));
+        return 1;
+    }
+
+    private static SlotManager.SlotData snapshotForCmd(SlotManager.SlotData d) {
+        java.util.Map<String, byte[]> facesCopy = new java.util.concurrent.ConcurrentHashMap<>();
+        d.faceTextures.forEach((k, v) -> facesCopy.put(k, v.clone()));
+        return new SlotManager.SlotData(d.index, d.customId, d.displayName,
+                d.texture != null ? d.texture.clone() : null,
+                d.lightLevel, d.hardness, d.soundType, facesCopy, d.animMeta,
+                d.shapeBoxes != null ? new java.util.ArrayList<>(d.shapeBoxes) : null, d.noCollision);
+    }
+
+    private static int cmdAdminGui(ServerCommandSource src) {
+        try {
+            net.minecraft.server.network.ServerPlayerEntity player = src.getPlayerOrThrow();
+            com.customblocks.gui.GuiManager.openAdminGui(player);
+        } catch (Exception ex) {
+            src.sendError(Text.literal("§cRun as a player."));
+        }
         return 1;
     }
 
@@ -1136,7 +1247,9 @@ public class CustomBlockCommand {
         src.sendMessage(Text.literal(D));
 
         src.sendMessage(Text.literal(H + "  Utilities"));
-        src.sendMessage(Text.literal(G + "  /cb " + C + "undo                          " + G + "— undo last change  §8(up to 20 steps)"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "undo                          " + G + "— undo last change  §8(up to 20 steps, shows next)"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "redo                          " + G + "— redo the last undone change"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "admingui                      " + G + "— open server-wide admin control panel"));
         src.sendMessage(Text.literal(G + "  /cb " + C + "settabicon " + A + "<url>               " + G + "— set the creative tab icon"));
         src.sendMessage(Text.literal(G + "  /cb " + C + "importfolder                  " + G + "— bulk-import from config/customblocks/import/"));
         src.sendMessage(Text.literal(G + "  /cb " + C + "export                        " + G + "— export block list to JSON"));
@@ -1227,7 +1340,7 @@ public class CustomBlockCommand {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
         try {
             ServerPlayerEntity player = src.getPlayerOrThrow();
-            GuiManager.openEditor(player, id, 0);
+            GuiManager.openEditor(player, id, 0, true);  // fromCommand = true → 1-press ESC exits
         } catch (Exception ex) {
             src.sendError(Text.literal("§cRun as a player."));
         }
