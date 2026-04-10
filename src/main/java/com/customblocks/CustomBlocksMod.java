@@ -14,6 +14,8 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.itemgroup.v1.FabricItemGroup;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import net.fabricmc.fabric.api.networking.v1.ServerLoginConnectionEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerLoginNetworking;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.block.AbstractBlock;
@@ -38,6 +40,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 public class CustomBlocksMod implements ModInitializer {
 
     public static final String MOD_ID = "customblocks";
+    public static final String DOWNLOAD_URL = "https://github.com/3liSY/CustomBlockss/releases/latest";
+    public static final net.minecraft.util.Identifier VERSION_CHANNEL = net.minecraft.util.Identifier.of(MOD_ID, "version_check");
     public static final Logger LOGGER = LoggerFactory.getLogger("CustomBlocks");
 
     public static final SlotBlock[]      SLOT_BLOCKS = new SlotBlock[SlotManager.MAX_SLOTS];
@@ -113,6 +117,39 @@ public class CustomBlocksMod implements ModInitializer {
             // Rectangle face-paint sessions
             return !RectangleToolItem.handleChatInput(sender, content);
         });
+
+        // Version check — kick missing/outdated clients with clickable download link
+        ServerLoginNetworking.registerGlobalReceiver(VERSION_CHANNEL, (server, handler, understood, buf, synchronizer, responseSender) -> {
+            if (!understood) {
+                handler.disconnect(net.minecraft.text.Text.empty()
+                    .append(net.minecraft.text.Text.literal("§cThis server requires §fCustomBlocks§c!\n\n"))
+                    .append(net.minecraft.text.Text.literal("§b§nClick here to download it")
+                        .styled(s -> s
+                            .withClickEvent(new net.minecraft.text.ClickEvent(
+                                net.minecraft.text.ClickEvent.Action.OPEN_URL, DOWNLOAD_URL))
+                            .withUnderline(true)
+                            .withColor(net.minecraft.util.Formatting.AQUA))));
+                return;
+            }
+            String clientVersion = buf.readString(32767);
+            String serverVersion = net.fabricmc.loader.api.FabricLoader.getInstance()
+                .getModContainer(MOD_ID)
+                .map(c -> c.getMetadata().getVersion().getFriendlyString())
+                .orElse("0.0.0");
+            if (!clientVersion.equals(serverVersion)) {
+                handler.disconnect(net.minecraft.text.Text.empty()
+                    .append(net.minecraft.text.Text.literal("§cYour CustomBlocks is outdated!\n§7Server needs: §a" + serverVersion + " §7| You have: §c" + clientVersion + "\n\n"))
+                    .append(net.minecraft.text.Text.literal("§b§nClick here to download the latest version")
+                        .styled(s -> s
+                            .withClickEvent(new net.minecraft.text.ClickEvent(
+                                net.minecraft.text.ClickEvent.Action.OPEN_URL, DOWNLOAD_URL))
+                            .withUnderline(true)
+                            .withColor(net.minecraft.util.Formatting.AQUA))));
+            }
+        });
+
+        ServerLoginConnectionEvents.QUERY_START.register((handler, server, sender, synchronizer) ->
+            sender.sendPacket(VERSION_CHANNEL, new net.minecraft.network.PacketByteBuf(io.netty.buffer.Unpooled.buffer())));
 
         // Network
         PayloadTypeRegistry.playS2C().register(FullSyncPayload.ID, FullSyncPayload.CODEC);

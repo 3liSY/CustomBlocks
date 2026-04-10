@@ -25,11 +25,19 @@ jobs:
       - name: Build
         run: gradle clean build --no-build-cache --rerun-tasks
 
-      - name: List build outputs
-        run: ls -la build/libs/
+      - name: Get version and commit info
+        id: info
+        run: |
+          echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+          echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Upload JAR
-        uses: actions/upload-artifact@v4
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: customblocks-mod
-          path: build/libs/customblocks-1.0.0.jar
+          tag_name: build-${{ steps.info.outputs.date }}-${{ steps.info.outputs.sha }}
+          name: Build ${{ steps.info.outputs.date }} (${{ steps.info.outputs.sha }})
+          body: "Automatic build from commit ${{ steps.info.outputs.sha }}"
+          files: build/libs/customblocks-1.0.0.jar
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
