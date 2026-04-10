@@ -50,6 +50,8 @@ public class CustomBlocksMod implements ModInitializer {
     // Batch texture sending — ConcurrentHashMap so broadcastUpdate is safe from any thread
     private static final Map<UUID, ConcurrentLinkedQueue<SlotUpdatePayload>> PENDING_TEXTURES = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<UUID, Integer> SEND_DELAY = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<String, Text> PENDING_KICK_MESSAGES = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<UUID, Integer> KICK_TIMERS = new java.util.concurrent.ConcurrentHashMap<>();
     private static final int DELAY_TICKS = 60;  // 3s after join before sending textures
     private static final int BATCH_SIZE   = 4;  // textures per tick — slow & steady, no kick risk
 
@@ -118,12 +120,14 @@ public class CustomBlocksMod implements ModInitializer {
             return !RectangleToolItem.handleChatInput(sender, content);
         });
 
-        // Version check — kick missing/outdated clients with clickable download link
+        // Version check — store pending kick, delivered as clickable chat on JOIN
         ServerLoginNetworking.registerGlobalReceiver(VERSION_CHANNEL, (server, handler, understood, buf, synchronizer, responseSender) -> {
+            String playerName = getProfileName(handler);
+            if (playerName == null) return;
             if (!understood) {
-                handler.disconnect(net.minecraft.text.Text.empty()
-                    .append(net.minecraft.text.Text.literal("§cThis server requires §fCustomBlocks§c!\n\n"))
-                    .append(net.minecraft.text.Text.literal("§b§nClick here to download it")
+                PENDING_KICK_MESSAGES.put(playerName, Text.empty()
+                    .append(Text.literal("§cThis server requires §fCustomBlocks§c! "))
+                    .append(Text.literal("§b§nClick here to download it")
                         .styled(s -> s
                             .withClickEvent(new net.minecraft.text.ClickEvent(
                                 net.minecraft.text.ClickEvent.Action.OPEN_URL, DOWNLOAD_URL))
@@ -137,9 +141,9 @@ public class CustomBlocksMod implements ModInitializer {
                 .map(c -> c.getMetadata().getVersion().getFriendlyString())
                 .orElse("0.0.0");
             if (!clientVersion.equals(serverVersion)) {
-                handler.disconnect(net.minecraft.text.Text.empty()
-                    .append(net.minecraft.text.Text.literal("§cYour CustomBlocks is outdated!\n§7Server needs: §a" + serverVersion + " §7| You have: §c" + clientVersion + "\n\n"))
-                    .append(net.minecraft.text.Text.literal("§b§nClick here to download the latest version")
+                PENDING_KICK_MESSAGES.put(playerName, Text.empty()
+                    .append(Text.literal("§cYour CustomBlocks is outdated! §7Server: §a" + serverVersion + " §7| You: §c" + clientVersion + " "))
+                    .append(Text.literal("§b§nClick here to update")
                         .styled(s -> s
                             .withClickEvent(new net.minecraft.text.ClickEvent(
                                 net.minecraft.text.ClickEvent.Action.OPEN_URL, DOWNLOAD_URL))
@@ -202,6 +206,14 @@ public class CustomBlocksMod implements ModInitializer {
 
         // On join: send metadata immediately, queue textures for delayed batch sending
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            // Check if this player needs to be kicked (missing/outdated mod)
+            String playerName = handler.player.getName().getString();
+            Text kickMessage = PENDING_KICK_MESSAGES.remove(playerName);
+            if (kickMessage != null) {
+                handler.player.sendMessage(kickMessage, false);
+                KICK_TIMERS.put(handler.player.getUuid(), 40); // kick after 2 seconds
+                return;
+            }
             List<FullSyncPayload.SlotEntry> meta = new ArrayList<>();
             for (SlotManager.SlotData d : SlotManager.allSlots()) {
                 meta.add(new FullSyncPayload.SlotEntry(
@@ -237,12 +249,24 @@ public class CustomBlocksMod implements ModInitializer {
             UUID uuid = handler.player.getUuid();
             PENDING_TEXTURES.remove(uuid);
             SEND_DELAY.remove(uuid);
+            KICK_TIMERS.remove(uuid);
         });
 
-        // Each tick: drip-feed queued textures (4 per tick, after 3s delay)
+        // Each tick: process delayed kicks + drip-feed queued textures
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
                 UUID uuid = player.getUuid();
+                // Delayed kick for missing/outdated mod
+                Integer kickTimer = KICK_TIMERS.get(uuid);
+                if (kickTimer != null) {
+                    if (kickTimer <= 0) {
+                        KICK_TIMERS.remove(uuid);
+                        player.networkHandler.disconnect(Text.literal("§cDownload CustomBlocks: " + DOWNLOAD_URL));
+                    } else {
+                        KICK_TIMERS.put(uuid, kickTimer - 1);
+                    }
+                    continue;
+                }
                 Integer delay = SEND_DELAY.get(uuid);
                 if (delay == null) continue;
                 if (delay > 0) { SEND_DELAY.put(uuid, delay - 1); continue; }
@@ -284,6 +308,21 @@ public class CustomBlocksMod implements ModInitializer {
                     ServerPlayNetworking.send(player, new SlotUpdatePayload("setface", d.index, d.customId, null, fe.getValue(), d.lightLevel, d.hardness, d.soundType, fe.getKey()));
             }
         }
+    }
+
+    /** Safe SLOT_ITEMS accessor — returns null if index is out of range. */
+    /** Gets player name from login handler via reflection (GameProfile is set after auth). */
+    private static String getProfileName(net.minecraft.server.network.ServerLoginNetworkHandler handler) {
+        for (java.lang.reflect.Field f : handler.getClass().getDeclaredFields()) {
+            if (f.getType() == com.mojang.authlib.GameProfile.class) {
+                f.setAccessible(true);
+                try {
+                    com.mojang.authlib.GameProfile gp = (com.mojang.authlib.GameProfile) f.get(handler);
+                    if (gp != null) return gp.getName();
+                } catch (Exception ignored) {}
+            }
+        }
+        return null;
     }
 
     /** Safe SLOT_ITEMS accessor — returns null if index is out of range. */
