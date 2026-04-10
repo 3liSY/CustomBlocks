@@ -1,6 +1,6 @@
-# 🧱 CustomBlocks (PicBlocks)
+# 🧱 CustomBlocks
 
-> Paint any image onto Minecraft blocks — from a URL, a GIF, or per-face. No coding needed.
+> Turn any image onto Minecraft blocks — from a URL, a GIF, etc. No coding needed.
 
 **Minecraft:** 1.21.1 &nbsp;|&nbsp; **Loader:** Fabric &nbsp;|&nbsp; **Author:** [Srb Gamer](https://www.youtube.com/@SrbGamerr)
 
@@ -38,8 +38,7 @@ All commands start with `/customblock` (or `/cb`).
 
 | Command | Description |
 |---|---|
-| `create <id>` | Create a new custom block |
-| `createurl <id> <url>` | Create a block from an image URL |
+| `create <id>` | Create a new custom block from a URL |
 | `delete <id>` | Delete a block |
 | `rename <id> <newname>` | Rename a block |
 | `retexture <id> <url>` | Change the texture of an existing block |
@@ -69,9 +68,11 @@ All commands start with `/customblock` (or `/cb`).
 ## 📜 License / الترخيص
 
 This mod is **not open source**. It is protected under a custom copyright license.
+
 هذا الـ Mod **ليس مفتوح المصدر**. وهو محمي بموجب ترخيص حقوق نشر خاص.
 
 Before using, sharing, or including this mod anywhere — **read the license first**.
+
 قبل استخدام هذا الـ Mod أو مشاركته أو تضمينه في أي مكان — **اقرأ الترخيص أولاً**.
 
 👉 [Read the License (English)](LICENSE)
