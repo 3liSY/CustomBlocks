@@ -132,6 +132,14 @@ public class SlotManager {
         synchronized (UNDO_STACK) { return UNDO_STACK.size(); }
     }
 
+    public static String peekUndoDescription() {
+        synchronized (UNDO_STACK) {
+            if (UNDO_STACK.isEmpty()) return "";
+            UndoEntry e = UNDO_STACK.peek();
+            return e.description() + " on " + e.customId();
+        }
+    }
+
     // ── Data class ────────────────────────────────────────────────────────────
 
     public static class SlotData {

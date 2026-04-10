@@ -124,16 +124,16 @@ public class CustomBlocksMod implements ModInitializer {
                         .displayName(Text.literal("CustomBlocks"))
                         .icon(() -> {
                             SlotManager.SlotData icon = SlotManager.getById("tab_icon");
-                            if (icon != null) return new ItemStack(SLOT_ITEMS[icon.index]);
+                            if (icon != null && safeSlotItem(icon.index) != null) return new ItemStack(safeSlotItem(icon.index));
                             for (SlotManager.SlotData d : SlotManager.allSlots())
                                 if (!d.customId.equals("tab_icon"))
-                                    return new ItemStack(SLOT_ITEMS[d.index]);
+                                    return safeSlotItem(d.index) != null ? new ItemStack(safeSlotItem(d.index)) : ItemStack.EMPTY;
                             return new ItemStack(Items.BOOKSHELF);
                         })
                         .entries((ctx, entries) -> {
                             for (SlotManager.SlotData d : SlotManager.allSlots())
                                 if (!d.customId.equals("tab_icon"))
-                                    entries.add(SLOT_ITEMS[d.index]);
+                                    if (safeSlotItem(d.index) != null) entries.add(safeSlotItem(d.index));
                             // Color square items
                             for (String col : new String[]{"black", "yellow", "green"}) {
                                 net.minecraft.item.Item sq = Registries.ITEM.get(Identifier.of(MOD_ID, col + "_square"));
@@ -171,15 +171,8 @@ public class CustomBlocksMod implements ModInitializer {
                         d.index, d.customId, d.displayName, null,
                         d.lightLevel, d.hardness, d.soundType));
             }
-            // Count the exact number of texture packets we will send so the client
-            // can fire exactly ONE reload after receiving the last one.
-            int texPacketCount = 0;
-            for (SlotManager.SlotData d : SlotManager.allSlots()) {
-                if (d.texture != null && d.texture.length > 0) texPacketCount++;
-                texPacketCount += d.faceTextures.size();
-            }
             ServerPlayNetworking.send(handler.player,
-                    new FullSyncPayload(meta, SlotManager.getTabIconTexture(), texPacketCount));
+                    new FullSyncPayload(meta, SlotManager.getTabIconTexture()));
 
             ConcurrentLinkedQueue<SlotUpdatePayload> queue = new ConcurrentLinkedQueue<>();
             SlotManager.allSlots().stream()
@@ -238,6 +231,28 @@ public class CustomBlocksMod implements ModInitializer {
         SlotManager.loadAll();
 
         LOGGER.info("[CustomBlocks] [CustomBlocks] Initialized. {} slot(s) loaded.", SlotManager.usedSlots());
+    }
+
+    /** Re-send full sync + all textures to every connected player (used by /cb reload). */
+    public static void broadcastFullSync(MinecraftServer server) {
+        for (var player : server.getPlayerManager().getPlayerList()) {
+            List<FullSyncPayload.SlotEntry> meta = new java.util.ArrayList<>();
+            for (SlotManager.SlotData d : SlotManager.allSlots())
+                meta.add(new FullSyncPayload.SlotEntry(d.index, d.customId, d.displayName, null, d.lightLevel, d.hardness, d.soundType));
+            ServerPlayNetworking.send(player, new FullSyncPayload(meta, SlotManager.getTabIconTexture()));
+            for (SlotManager.SlotData d : SlotManager.allSlots()) {
+                if (d.texture != null && d.texture.length > 0)
+                    ServerPlayNetworking.send(player, new SlotUpdatePayload("add", d.index, d.customId, d.displayName, d.texture, d.lightLevel, d.hardness, d.soundType));
+                for (var fe : d.faceTextures.entrySet())
+                    ServerPlayNetworking.send(player, new SlotUpdatePayload("setface", d.index, d.customId, null, fe.getValue(), d.lightLevel, d.hardness, d.soundType, fe.getKey()));
+            }
+        }
+    }
+
+    /** Safe SLOT_ITEMS accessor — returns null if index is out of range. */
+    public static SlotBlock.SlotItem safeSlotItem(int index) {
+        if (index < 0 || index >= SLOT_ITEMS.length || SLOT_ITEMS[index] == null) return null;
+        return SLOT_ITEMS[index];
     }
 
     public static void broadcastUpdate(MinecraftServer server, SlotUpdatePayload payload) {

@@ -8,15 +8,8 @@ import net.minecraft.util.Identifier;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Server → Client on join.
- * Metadata only (textures come via SlotUpdatePayload).
- * pendingTexturePackets = total number of "add"/"setface" packets that will
- * follow so the client can fire exactly ONE resource reload after receiving
- * all of them (instead of one reload on join + another after textures arrive).
- */
-public record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture,
-                               int pendingTexturePackets) implements CustomPayload {
+/** Server → Client on join. Metadata only (textures come via SlotUpdatePayload). */
+public record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture) implements CustomPayload {
 
     public static final Id<FullSyncPayload> ID =
             new Id<>(Identifier.of("customblocks", "full_sync"));
@@ -44,8 +37,6 @@ public record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture,
                     buf.writeString(e.soundType() != null ? e.soundType() : "stone");
                 }
                 buf.writeByteArray(value.tabIconTexture() != null ? value.tabIconTexture() : new byte[0]);
-                // NEW: texture packet count so client knows when to do its single reload
-                buf.writeVarInt(value.pendingTexturePackets());
             },
             buf -> {
                 int size = buf.readVarInt();
@@ -62,10 +53,8 @@ public record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture,
                             tex.length > 0 ? tex : null, lightLevel, hardness, soundType));
                 }
                 byte[] tabIcon = buf.readByteArray(10_485_760);
-                // NEW: read pending count (guard with readableBytes for old servers)
-                int pendingCount = buf.readableBytes() > 0 ? buf.readVarInt() : 0;
                 if (buf.readableBytes() > 0) buf.skipBytes(buf.readableBytes());
-                return new FullSyncPayload(entries, tabIcon.length > 0 ? tabIcon : null, pendingCount);
+                return new FullSyncPayload(entries, tabIcon.length > 0 ? tabIcon : null);
             }
     );
 

@@ -15,7 +15,6 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.Map;
-import java.util.Map;
 
 @Environment(EnvType.CLIENT)
 public class ResourcePackGenerator {
@@ -38,7 +37,7 @@ public class ResourcePackGenerator {
     public static void generate(MinecraftClient client) {
         try {
             File mcDir    = client.runDirectory;
-            File packRoot = new File(mcDir, "resourcepacks/picblocks_generated");
+            File packRoot = new File(mcDir, "resourcepacks/customblocks_generated");
             File assets   = new File(packRoot, "assets/" + MOD_ID);
 
             new File(assets, "blockstates").mkdirs();

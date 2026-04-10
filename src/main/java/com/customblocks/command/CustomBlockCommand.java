@@ -188,21 +188,7 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("undo")
                     .executes(ctx -> cmdUndo(ctx.getSource())))
 
-                // ── tool items ──────────────────────────────────────────────
-                .then(CommandManager.literal("givesquare")
-                    .executes(ctx -> usage(ctx.getSource(), "givesquare"))
-                    .then(CommandManager.argument("color", StringArgumentType.word())
-                        .suggests((ctx, builder) -> { builder.suggest("black"); builder.suggest("yellow"); builder.suggest("green"); return builder.buildFuture(); })
-                        .executes(ctx -> cmdGiveSquare(ctx.getSource(), StringArgumentType.getString(ctx, "color")))))
-
-                .then(CommandManager.literal("givetriangle")
-                    .executes(ctx -> usage(ctx.getSource(), "givetriangle"))
-                    .then(CommandManager.argument("color", StringArgumentType.word())
-                        .suggests((ctx, builder) -> { builder.suggest("black"); builder.suggest("yellow"); builder.suggest("green"); return builder.buildFuture(); })
-                        .executes(ctx -> cmdGiveTriangle(ctx.getSource(), StringArgumentType.getString(ctx, "color")))))
-
-                .then(CommandManager.literal("giverectangle")
-                    .executes(ctx -> cmdGiveRectangle(ctx.getSource())))
+                // (givesquare/givetriangle/giverectangle removed — use /cb square, /cb triangle, /cb rectangle)
 
                 // ── dupe / duplicate ────────────────────────────────────────
                 .then(CommandManager.literal("dupe")
@@ -246,10 +232,9 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("help")
                     .executes(ctx -> cmdHelp(ctx.getSource())))
 
-                // ── gui ──────────────────────────────────────────────────────
-                // ── editor ─────────────────────────────────────────────
+                // ── editor — works with or without ID ──────────────────────
                 .then(CommandManager.literal("editor")
-                    .executes(ctx -> usage(ctx.getSource(), "editor"))
+                    .executes(ctx -> cmdEditorPicker(ctx.getSource()))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
                         .executes(ctx -> cmdEditor(ctx.getSource(),
@@ -258,6 +243,10 @@ public class CustomBlockCommand {
                 // ── gui ──────────────────────────────────────────────────────
                 .then(CommandManager.literal("gui")
                     .executes(ctx -> cmdGui(ctx.getSource())))
+
+                // ── reload ───────────────────────────────────────────────────
+                .then(CommandManager.literal("reload")
+                    .executes(ctx -> cmdReload(ctx.getSource())))
 
                 // ── setshape ─────────────────────────────────────────────────
                 .then(CommandManager.literal("setshape")
@@ -333,12 +322,14 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("square")
                     .executes(ctx -> usage(ctx.getSource(), "square"))
                     .then(CommandManager.argument("color", StringArgumentType.word())
+                        .suggests((ctx, b) -> { b.suggest("black"); b.suggest("yellow"); b.suggest("green"); return b.buildFuture(); })
                         .executes(ctx -> cmdGiveSquare(ctx.getSource(),
                             StringArgumentType.getString(ctx, "color")))))
 
                 .then(CommandManager.literal("triangle")
                     .executes(ctx -> usage(ctx.getSource(), "triangle"))
                     .then(CommandManager.argument("color", StringArgumentType.word())
+                        .suggests((ctx, b) -> { b.suggest("black"); b.suggest("yellow"); b.suggest("green"); return b.buildFuture(); })
                         .executes(ctx -> cmdGiveTriangle(ctx.getSource(),
                             StringArgumentType.getString(ctx, "color")))))
 
@@ -669,7 +660,7 @@ public class CustomBlockCommand {
     private static int cmdGive(ServerCommandSource src, String id, int amount, Collection<ServerPlayerEntity> targets) {
         SlotManager.SlotData d = SlotManager.getById(id);
         if (d == null) { src.sendError(notFound(id)); return 0; }
-        SlotBlock.SlotItem item = CustomBlocksMod.SLOT_ITEMS[d.index];
+        SlotBlock.SlotItem item = CustomBlocksMod.safeSlotItem(d.index); if (item == null) { src.sendError(Text.literal("§cSlot item missing for index " + d.index)); return 0; }
         ItemStack stack = new ItemStack(item, Math.max(1, Math.min(64, amount)));
         if (targets == null || targets.isEmpty()) {
             try {
@@ -1128,10 +1119,9 @@ public class CustomBlockCommand {
         src.sendMessage(Text.literal(D));
 
         src.sendMessage(Text.literal(H + "  Tools"));
-        src.sendMessage(Text.literal(G + "  /cb " + C + "giverectangle                 " + G + "— §6Rainbow Rectangle §8face-paint wand"));
-        src.sendMessage(Text.literal(G + "  /cb " + C + "givesquare " + A + "§3<black|yellow|green> " + G + "— color-swap tool"));
-        src.sendMessage(Text.literal(G + "  /cb " + C + "givetriangle " + A + "§3<color>            " + G + "— color triangle tool"));
-        src.sendMessage(Text.literal(G + "  /cb " + C + "rectangle§r / §b" + C + "square <color>§r / §b" + C + "triangle <color>  " + G + "— short aliases"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "rectangle                     " + G + "— §6Rainbow Rectangle §8face-paint wand"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "square " + A + "§3<black|yellow|green>    " + G + "— color-swap tool"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "triangle " + A + "§3<black|yellow|green>  " + G + "— color triangle tool"));
         src.sendMessage(Text.literal(D));
 
         src.sendMessage(Text.literal(H + "  Shapes"));
@@ -1152,6 +1142,7 @@ public class CustomBlockCommand {
         src.sendMessage(Text.literal(G + "  /cb " + C + "export                        " + G + "— export block list to JSON"));
         src.sendMessage(Text.literal(G + "  /cb " + C + "list                          " + G + "— show all blocks"));
         src.sendMessage(Text.literal(G + "  /cb " + C + "gui                           " + G + "— open chest GUI"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "reload                        " + G + "— reload all blocks & sync to all players"));
         src.sendMessage(Text.literal(D));
         src.sendMessage(Text.literal("  §8Press §7B §8to open the overlay HUD · No restart needed!"));
         src.sendMessage(Text.literal(" "));
@@ -1165,7 +1156,7 @@ public class CustomBlockCommand {
     private static int cmdGiveSquareInternal(ServerCommandSource src, String color) {
         String c = color.toLowerCase().trim();
         if (!c.equals("black") && !c.equals("yellow") && !c.equals("green")) {
-            src.sendError(Text.literal("§cValid colors: black, yellow, green")); return 0;
+            src.sendError(Text.literal("§c'" + color + "' is not a valid color. Choose: §fblack §7| §fyellow §7| §fgreen")); return 0;
         }
         net.minecraft.util.Identifier id = net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, c + "_square");
         net.minecraft.item.Item item = net.minecraft.registry.Registries.ITEM.get(id);
@@ -1180,7 +1171,7 @@ public class CustomBlockCommand {
     private static int cmdGiveTriangleInternal(ServerCommandSource src, String color) {
         String c = color.toLowerCase().trim();
         if (!c.equals("black") && !c.equals("yellow") && !c.equals("green")) {
-            src.sendError(Text.literal("§cValid colors: black, yellow, green")); return 0;
+            src.sendError(Text.literal("§c'" + color + "' is not a valid color. Choose: §fblack §7| §fyellow §7| §fgreen")); return 0;
         }
         net.minecraft.util.Identifier id = net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, c + "_triangle");
         net.minecraft.item.Item item = net.minecraft.registry.Registries.ITEM.get(id);
@@ -1202,6 +1193,23 @@ public class CustomBlockCommand {
             src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(rectItem, 1));
             src.sendMessage(Text.literal("§6[CustomBlocks] §eGiven §6Rainbow Rectangle§e! §7Right-click any block face and paste an image URL."));
         } catch (Exception ex) { src.sendError(Text.literal("§cRun as a player.")); return 0; }
+        return 1;
+    }
+
+    private static int cmdReload(ServerCommandSource src) {
+        SlotManager.loadAll();
+        CustomBlocksMod.broadcastFullSync(src.getServer());
+        src.sendMessage(Text.literal("§a[CustomBlocks] Reloaded all blocks and synced to all players."));
+        return 1;
+    }
+
+    private static int cmdEditorPicker(ServerCommandSource src) {
+        try {
+            ServerPlayerEntity player = src.getPlayerOrThrow();
+            GuiManager.openEditorPicker(player);
+        } catch (Exception ex) {
+            src.sendError(Text.literal("§cRun as a player."));
+        }
         return 1;
     }
 
@@ -1244,7 +1252,7 @@ public class CustomBlockCommand {
             case "givetriangle" -> "§cUsage: /cb givetriangle <black|yellow|green>";
             case "clearallfaces"-> "§cUsage: /cb clearallfaces <id>";
             case "resize"       -> "§cUsage: /cb resize <id> <16-256>  — rescale stored texture";
-            case "editor" -> "§cUsage: /cb editor <id>";
+            case "editor" -> "§cUsage: /cb editor [id]  — omit ID to pick from a list";
             case "setshape"     -> "§cUsage: /cb setshape <id> <preset|x1,y1,z1,x2,y2,z2>  — presets: full slab thin carpet pillar small micro pane trapdoor fence stairs cross";
             case "addshape"     -> "§cUsage: /cb addshape <id> <x1,y1,z1,x2,y2,z2>";
             case "removeshape"  -> "§cUsage: /cb removeshape <id> <boxIndex 0-15>";

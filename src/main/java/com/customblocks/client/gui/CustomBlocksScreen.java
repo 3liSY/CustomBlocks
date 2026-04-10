@@ -382,7 +382,7 @@ public class CustomBlocksScreen extends Screen {
         ctx.getMatrices().push();
         float scale = 5.0f;
         ctx.getMatrices().scale(scale, scale, 1f);
-        ItemStack stack = new ItemStack(CustomBlocksMod.SLOT_ITEMS[data.index]);
+        ItemStack stack = (CustomBlocksMod.safeSlotItem(data.index) != null ? new ItemStack(CustomBlocksMod.safeSlotItem(data.index)) : ItemStack.EMPTY);
         ctx.drawItem(stack, (int)((pvX)/scale), (int)((pvY)/scale));
         ctx.getMatrices().pop();
 
@@ -730,6 +730,7 @@ public class CustomBlocksScreen extends Screen {
         };
         if (!sortAsc) cmp=cmp.reversed();
         filtered.sort(cmp);
+        scroll = 0; // reset scroll when filter changes to prevent out-of-bounds rendering
     }
 
     private void updateButtonStates() {

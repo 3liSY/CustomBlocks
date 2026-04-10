@@ -29,17 +29,13 @@ import java.util.concurrent.atomic.AtomicLong;
 @Environment(EnvType.CLIENT)
 public class CustomBlocksClient implements ClientModInitializer {
 
-    private static final String PACK_ENTRY = "file/picblocks_generated";
-    private static final AtomicBoolean reloadScheduled   = new AtomicBoolean(false);
+    private static final String PACK_ENTRY = "file/customblocks_generated";
+    private static final AtomicBoolean reloadInFlight    = new AtomicBoolean(false);
     private static final AtomicBoolean generateRunning   = new AtomicBoolean(false);
-    // Timestamp of last incoming packet — debounce fires 2s after THE LAST packet, not the first
     private static final AtomicLong    lastPacketTime    = new AtomicLong(0);
-    // How many "add"/"setface" texture packets are still expected from the current join sync.
-    // While > 0 we suppress reloads; the reload fires when this hits 0.
-    private static final java.util.concurrent.atomic.AtomicInteger pendingTextureCount =
-            new java.util.concurrent.atomic.AtomicInteger(0);
+    // True while processing the initial join burst — suppresses individual packet reloads
+    private static volatile boolean    joinBurst         = false;
 
-    // Set to true after reload — creative tab will refresh on next tick if open
     public static volatile boolean pendingCreativeRefresh = false;
 
     private static KeyBinding openGuiKey;
@@ -47,12 +43,11 @@ public class CustomBlocksClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
 
-        // ── Keybindings ──────────────────────────────────────────────────────────
         openGuiKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.picblocks.open_gui",
+                "key.customblocks.open_gui",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_B,
-                "category.picblocks"
+                "category.customblocks"
         ));
 
         ClientLifecycleEvents.CLIENT_STARTED.register(client -> {
@@ -62,17 +57,13 @@ public class CustomBlocksClient implements ClientModInitializer {
         });
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            // B — open overlay GUI
             while (openGuiKey.wasPressed()) {
                 if (client.currentScreen == null)
                     client.setScreen(new CustomBlocksScreen());
             }
-
-            // After resource reload, bust the ItemGroup icon cache and refresh creative tab
             if (pendingCreativeRefresh && client.player != null) {
                 pendingCreativeRefresh = false;
                 bustItemGroupIconCache();
-                // Reopen creative screen to rebuild display stacks
                 if (client.currentScreen instanceof CreativeInventoryScreen) {
                     client.setScreen(new CreativeInventoryScreen(
                             client.player,
@@ -83,34 +74,25 @@ public class CustomBlocksClient implements ClientModInitializer {
             }
         });
 
-        // ── FullSyncPayload ─────────────────────────────────────────────────────
+        // ── FullSyncPayload — initial join ────────────────────────────────
         ClientPlayNetworking.registerGlobalReceiver(FullSyncPayload.ID, (payload, context) -> {
             MinecraftClient client = context.client();
             client.execute(() -> {
-                // Clear stale data from previous session
+                joinBurst = true;  // suppress per-packet reloads during initial burst
                 SlotManager.clearAll();
-                TextureCache.invalidateAll();  // prevent stale GPU textures after rejoin
+                TextureCache.invalidateAll();
                 for (FullSyncPayload.SlotEntry e : payload.entries()) {
                     SlotManager.assignAtIndex(e.index(), e.customId(), e.displayName(), null);
                     SlotManager.setProperties(e.customId(), e.lightLevel(), e.hardness(), e.soundType());
                 }
                 if (payload.tabIconTexture() != null)
                     SlotManager.setTabIconTexture(payload.tabIconTexture());
-
-                // FIX: set how many texture packets we expect.
-                // The reload will fire exactly once — when the last texture packet arrives.
-                // If there are no textures at all, reload immediately (covers empty servers).
-                int expected = payload.pendingTexturePackets();
-                pendingTextureCount.set(expected);
-                if (expected == 0) {
-                    scheduleGenerateAndReload(client);
-                }
-                // else: reload is deferred to when pendingTextureCount hits 0 in the
-                // SlotUpdatePayload handler below.
+                // Schedule one deferred reload after the burst settles (4s debounce for join)
+                scheduleGenerateAndReload(client, 4000L);
             });
         });
 
-        // ── SlotUpdatePayload ───────────────────────────────────────────────────
+        // ── SlotUpdatePayload ─────────────────────────────────────────────
         ClientPlayNetworking.registerGlobalReceiver(SlotUpdatePayload.ID, (payload, context) -> {
             MinecraftClient client = context.client();
             client.execute(() -> {
@@ -163,67 +145,54 @@ public class CustomBlocksClient implements ClientModInitializer {
                         }
                     }
                     case "setcollision" -> {
-                        // shapeData holds "true" (has collision) or "false" (no collision)
                         boolean hasCollision = !"false".equals(payload.shapeData());
                         SlotManager.setCollision(payload.customId(), hasCollision);
                     }
                     case "tabicon" -> {
                         SlotManager.setTabIconTexture(payload.texture());
-                        scheduleGenerateAndReload(client);
+                        if (!joinBurst) scheduleGenerateAndReload(client, 2000L);
                         return;
                     }
                 }
-                String action = payload.action();
-                boolean needsReload = action.equals("add") || action.equals("retexture")
-                        || action.equals("remove") || action.equals("setface")
-                        || action.equals("clearface") || action.equals("clearfaces")
-                        || action.equals("setshape") || action.equals("setcollision");
-                if (needsReload) {
-                    // FIX: during the initial join sync, "add" and "setface" packets are
-                    // part of a batch whose count was announced in FullSyncPayload.
-                    // Suppress individual reloads; fire exactly ONE when the last packet arrives.
-                    if (pendingTextureCount.get() > 0
-                            && (action.equals("add") || action.equals("setface"))) {
-                        if (pendingTextureCount.decrementAndGet() == 0) {
-                            scheduleGenerateAndReload(client); // all textures received — reload once
-                        }
-                        // else: more packets still coming, wait
-                    } else {
-                        // Normal runtime update (retexture, remove, clearface, setshape, etc.)
-                        scheduleGenerateAndReload(client);
-                    }
+
+                // Only trigger reload for actions that actually change rendered appearance,
+                // and only when NOT in the initial join burst (which uses its own deferred reload)
+                if (!joinBurst) {
+                    String action = payload.action();
+                    boolean needsReload = action.equals("add") || action.equals("retexture")
+                            || action.equals("remove") || action.equals("setface")
+                            || action.equals("clearface") || action.equals("clearfaces")
+                            || action.equals("setshape");
+                    if (needsReload) scheduleGenerateAndReload(client, 2000L);
+                } else {
+                    // Still in join burst — keep refreshing the debounce timer
+                    lastPacketTime.set(System.currentTimeMillis());
                 }
             });
         });
 
-        // ── HUD overlay: show block name only (no ID) ───────────────────────────
+        // ── HUD overlay ───────────────────────────────────────────────────
         HudRenderCallback.EVENT.register((ctx, tickCounter) -> {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.world == null || client.player == null) return;
             if (!(client.crosshairTarget instanceof BlockHitResult bhr)) return;
-
             var state = client.world.getBlockState(bhr.getBlockPos());
             if (!(state.getBlock() instanceof SlotBlock sb)) return;
-
             SlotManager.SlotData data = SlotManager.getBySlot(sb.getSlotKey());
             if (data == null) return;
-
             String name = data.displayName;
             int cx = ctx.getScaledWindowWidth() / 2;
             int w  = client.textRenderer.getWidth(name);
-
             ctx.fill(cx - w / 2 - 5, 38, cx + w / 2 + 5, 52, 0x88000000);
             ctx.drawCenteredTextWithShadow(client.textRenderer, name, cx, 42, 0xFFFFFFFF);
         });
     }
 
-    /** Clear the cached icon on our ItemGroup so MC re-calls our supplier lambda. */
     private static void bustItemGroupIconCache() {
         try {
             net.minecraft.item.ItemGroup group =
                 net.minecraft.registry.Registries.ITEM_GROUP.get(CustomBlocksMod.CUSTOM_BLOCKS_TAB);
             if (group == null) return;
-            // Try by common Yarn-mapped field names first, then fall back to type scan
             String[] candidates = {"icon", "field_24603", "iconStack"};
             for (String name : candidates) {
                 try {
@@ -231,60 +200,55 @@ public class CustomBlocksClient implements ClientModInitializer {
                     f.setAccessible(true);
                     if (f.get(group) instanceof net.minecraft.item.ItemStack) {
                         f.set(group, net.minecraft.item.ItemStack.EMPTY);
-                        CustomBlocksMod.LOGGER.info("[CustomBlocks] Tab icon cache cleared via field '{}'.", name);
                         return;
                     }
                 } catch (NoSuchFieldException ignored) {}
             }
-            // Fallback: scan all ItemStack fields
             for (java.lang.reflect.Field f : net.minecraft.item.ItemGroup.class.getDeclaredFields()) {
                 if (f.getType() == net.minecraft.item.ItemStack.class) {
                     f.setAccessible(true);
                     f.set(group, net.minecraft.item.ItemStack.EMPTY);
-                    CustomBlocksMod.LOGGER.info("[CustomBlocks] Tab icon cache cleared via type scan.");
                     return;
                 }
             }
-            CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not find ItemGroup icon field — tab icon may not update.");
         } catch (Exception e) {
             CustomBlocksMod.LOGGER.error("[CustomBlocks] bustItemGroupIconCache failed: {}", e.getMessage());
         }
     }
 
     /**
-     * True debounce: stamps current time on every call.
-     * Background thread waits until 2s of silence, does I/O off-thread,
-     * then reloads. generateRunning is cleared BEFORE reload so new
-     * packets that arrive during reload start a fresh cycle.
+     * Debounced generate+reload. debounceMs is how long to wait after the
+     * last call before actually doing the work. Join burst uses 4000ms so
+     * all initial texture packets settle before the single reload fires.
+     * Live edits use 2000ms so they feel responsive.
      */
-    private static void scheduleGenerateAndReload(MinecraftClient client) {
+    private static void scheduleGenerateAndReload(MinecraftClient client, long debounceMs) {
         lastPacketTime.set(System.currentTimeMillis());
         if (generateRunning.compareAndSet(false, true)) {
             Thread t = new Thread(() -> {
-                // Wait until 2s of silence since last packet
+                // Wait for silence
                 while (true) {
-                    long remaining = 2000L - (System.currentTimeMillis() - lastPacketTime.get());
+                    long remaining = debounceMs - (System.currentTimeMillis() - lastPacketTime.get());
                     if (remaining <= 0) break;
                     try { Thread.sleep(Math.max(50, remaining)); } catch (InterruptedException ignored) { break; }
                 }
-                // Heavy I/O off main thread
                 SlotManager.saveToClientDir(client.runDirectory);
                 ResourcePackGenerator.generate(client);
-                // Back to main thread for reload
                 client.execute(() -> {
                     injectPackIfNeeded(client);
-                    // Reset flag HERE so packets arriving during reload can start a new cycle
+                    joinBurst = false;  // join burst is definitely over by now
                     generateRunning.set(false);
-                    if (reloadScheduled.compareAndSet(false, true)) {
+                    // Only fire one reload at a time — if one is already in flight,
+                    // the files are already written and it will pick them up
+                    if (reloadInFlight.compareAndSet(false, true)) {
                         client.reloadResources().thenRun(() ->
                             client.execute(() -> {
-                                reloadScheduled.set(false);
+                                reloadInFlight.set(false);
                                 CustomBlocksMod.LOGGER.info("[CustomBlocks] Resources reloaded.");
                                 pendingCreativeRefresh = true;
                             })
                         );
                     } else {
-                        // Reload already in flight — files are written, it will pick them up
                         pendingCreativeRefresh = true;
                     }
                 });
@@ -292,6 +256,8 @@ public class CustomBlocksClient implements ClientModInitializer {
             t.setDaemon(true);
             t.start();
         }
+        // If generateRunning is already true, the running thread will see
+        // the updated lastPacketTime and extend its wait — no new thread needed
     }
 
     private static void injectPackIfNeeded(MinecraftClient client) {

@@ -71,13 +71,31 @@ public class GuiManager {
     // ── Public API ─────────────────────────────────────────────────────────────
 
     public static void openMain(ServerPlayerEntity player, int page) {
-        int maxPage = Math.max(0, (sortedBlocks().size() - 1) / BLOCKS_PER_PAGE);
+        int total = sortedBlocks().size();
+        int maxPage = total == 0 ? 0 : Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
         page = Math.max(0, Math.min(page, maxPage));
         STATES.put(player.getUuid(), GuiState.main(page));
         SimpleInventory inv = buildMain(page);
         player.openHandledScreen(new SimpleNamedScreenHandlerFactory(
             (s, pi, p) -> new CbScreenHandler(s, pi, inv),
-            Text.literal("§6§l✦ §r§fCustomBlocks")));
+            Text.literal("§6§l✦ §r§fCustomBlocks — Main Menu")));
+    }
+
+    /** Opens a block-picker chest GUI — used by /cb editor with no ID. */
+    public static void openEditorPicker(ServerPlayerEntity player) {
+        openEditorPicker(player, 0);
+    }
+
+    public static void openEditorPicker(ServerPlayerEntity player, int page) {
+        int total = sortedBlocks().size();
+        int maxPage = total == 0 ? 0 : Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
+        page = Math.max(0, Math.min(page, maxPage));
+        // Reuse MAIN state with a special page sentinel we track via GuiMode
+        STATES.put(player.getUuid(), new GuiState(GuiMode.MAIN, page, "__picker__", false, 0));
+        SimpleInventory inv = buildPicker(page);
+        player.openHandledScreen(new SimpleNamedScreenHandlerFactory(
+            (s, pi, p) -> new CbScreenHandler(s, pi, inv),
+            Text.literal("§b§l▶ §r§fChoose a block to edit")));
     }
 
     public static void openEditor(ServerPlayerEntity player, String id, int returnPage) {
@@ -131,7 +149,7 @@ public class GuiManager {
 
         if (text.equalsIgnoreCase("cancel")) {
             send(player, "§7[CustomBlocks] Cancelled.");
-            if (blockId != null) openEditor(player, blockId, rp);
+            if (blockId != null && !blockId.startsWith("__") && SlotManager.hasId(blockId)) openEditor(player, blockId, rp);
             else openMain(player, rp);
             return true;
         }
@@ -139,6 +157,17 @@ public class GuiManager {
         switch (pending.action()) {
 
             case CREATE_ID -> {
+                // Sentinel: delete block from main GUI
+                if ("__delete__".equals(blockId)) {
+                    String delId = text.toLowerCase().trim();
+                    if (!SlotManager.hasId(delId)) { send(player, "§c'" + delId + "' not found."); openMain(player, rp); return true; }
+                    SlotManager.SlotData dd = SlotManager.getById(delId);
+                    SlotManager.pushUndoDelete(delId);
+                    SlotManager.remove(delId); SlotManager.saveAll();
+                    CustomBlocksMod.broadcastUpdate(player.getServer(), new SlotUpdatePayload("remove", dd.index, delId, null, null, 0, 0, "stone"));
+                    send(player, "§a[GUI] Deleted '§f" + delId + "§a'. Use /cb undo to restore.");
+                    openMain(player, rp); return true;
+                }
                 String id = text.toLowerCase().replaceAll("[^a-z0-9_]", "_");
                 if (id.isEmpty())           { send(player, "§cInvalid ID."); openMain(player, rp); return true; }
                 if (SlotManager.hasId(id))  { send(player, "§c'" + id + "' already exists."); openMain(player, rp); return true; }
@@ -278,7 +307,7 @@ public class GuiManager {
                                 for (var fe : fresh.faceTextures.entrySet())
                                     CustomBlocksMod.broadcastUpdate(server, new SlotUpdatePayload("setface", fresh.index, varId, null, fe.getValue(), fresh.lightLevel, fresh.hardness, fresh.soundType, fe.getKey()));
                             }
-                            player.getInventory().insertStack(new ItemStack(CustomBlocksMod.SLOT_ITEMS[newBlock.index], 1));
+                            player.getInventory().insertStack((CustomBlocksMod.safeSlotItem(newBlock.index) != null ? new ItemStack(CustomBlocksMod.safeSlotItem(newBlock.index), 1) : ItemStack.EMPTY));
                             send(player, "§a[GUI] Variant '§f" + varId + "§a' created & given! Original untouched.");
                             openFaceEditor(player, varId, rp);
                         });
@@ -335,6 +364,34 @@ public class GuiManager {
             }
 
             case REID_TEXT -> {
+                // Sentinel: giving square/triangle from main GUI
+                if ("__givesquare__".equals(blockId)) {
+                    String col = text.toLowerCase().trim();
+                    if (!col.equals("black") && !col.equals("yellow") && !col.equals("green")) {
+                        send(player, "§c'" + text + "' invalid. Choose: §fblack §7| §fyellow §7| §fgreen");
+                        openMain(player, rp); return true;
+                    }
+                    net.minecraft.util.Identifier sqId = net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, col + "_square");
+                    net.minecraft.item.Item sqItem = net.minecraft.registry.Registries.ITEM.get(sqId);
+                    if (sqItem != null && sqItem != Items.AIR)
+                        player.getInventory().insertStack(new ItemStack(sqItem, 1));
+                    send(player, "§a[GUI] Given §f" + col + " Square§a!");
+                    openMain(player, rp); return true;
+                }
+                if ("__givetriangle__".equals(blockId)) {
+                    String col = text.toLowerCase().trim();
+                    if (!col.equals("black") && !col.equals("yellow") && !col.equals("green")) {
+                        send(player, "§c'" + text + "' invalid. Choose: §fblack §7| §fyellow §7| §fgreen");
+                        openMain(player, rp); return true;
+                    }
+                    net.minecraft.util.Identifier triId = net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, col + "_triangle");
+                    net.minecraft.item.Item triItem = net.minecraft.registry.Registries.ITEM.get(triId);
+                    if (triItem != null && triItem != Items.AIR)
+                        player.getInventory().insertStack(new ItemStack(triItem, 1));
+                    send(player, "§a[GUI] Given §f" + col + " Triangle§a!");
+                    openMain(player, rp); return true;
+                }
+                // Normal re-id
                 String newId = text.toLowerCase().replaceAll("[^a-z0-9_\\-]", "_");
                 if (newId.isEmpty()) { send(player, "§cInvalid ID."); openEditor(player, blockId, rp); return true; }
                 if (SlotManager.hasId(newId)) { send(player, "§c'" + newId + "' already taken."); openEditor(player, blockId, rp); return true; }
@@ -371,65 +428,89 @@ public class GuiManager {
 
     private static void handleMainClick(ServerPlayerEntity player, GuiState state, int slot) {
         int page = state.page();
+        boolean isPicker = "__picker__".equals(state.editingId());
 
-        // Row 0: controls
-        if (slot == 0) {   // Create new block
-            PENDING.put(player.getUuid(), new PendingInput(InputAction.CREATE_ID, null, null, null, null, page));
-            player.closeHandledScreen();
-            send(player, "§6[GUI] §eEnter a block §fID§e (letters/numbers/underscores, e.g. §fmy_block§e) or §ccancel§e:");
-            return;
-        }
-        if (slot == 4) {   // Set tab icon
-            PENDING.put(player.getUuid(), new PendingInput(InputAction.SETTABICON_URL, null, null, null, null, page));
-            player.closeHandledScreen();
-            send(player, "§6[GUI] §ePaste an image URL for the §fcreative tab icon§e (or §ccancel§e):");
-            return;
-        }
-        if (slot == 8) {   // Undo
-            if (SlotManager.undoStackSize() == 0) { send(player, "§7[CustomBlocks] Nothing to undo."); openMain(player, page); return; }
-            SlotManager.UndoEntry entry = SlotManager.popUndo();
-            if (entry == null) { openMain(player, page); return; }
-            MinecraftServer guiServer = player.getServer();
-
-            if (entry.previousState() == null) {
-                // undo create
-                SlotManager.SlotData cd = SlotManager.getById(entry.customId());
-                if (cd != null) {
-                    int cidx = cd.index;
-                    SlotManager.remove(entry.customId()); SlotManager.saveAll();
-                    CustomBlocksMod.broadcastUpdate(guiServer, new SlotUpdatePayload("remove", cidx, entry.customId(), null, null, 0, 0, "stone"));
-                    send(player, "§a[GUI] Undid create of §f" + entry.customId());
-                }
-                openMain(player, page); return;
+        // Picker mode — just select a block to edit
+        if (isPicker) {
+            if (slot == 45) { openEditorPicker(player, Math.max(0, page - 1)); return; }
+            if (slot == 53) { openEditorPicker(player, page + 1); return; }
+            if (slot == 0)  { openMain(player, 0); return; } // back to main
+            if (slot >= 9 && slot <= 44) {
+                List<SlotManager.SlotData> blocks = sortedBlocks();
+                int idx = page * BLOCKS_PER_PAGE + (slot - 9);
+                if (idx < blocks.size()) openEditor(player, blocks.get(idx).customId, page);
             }
+            return;
+        }
 
-            if (SlotManager.restoreSnapshot(entry.previousState(), entry.wasDeleted())) {
-                SlotManager.saveAll();
-                SlotManager.SlotData d = SlotManager.getById(entry.previousState().customId);
-                if (d != null) {
-                    if (entry.wasDeleted()) {
-                        CustomBlocksMod.broadcastUpdate(guiServer, new SlotUpdatePayload("add", d.index, d.customId, d.displayName, d.texture, d.lightLevel, d.hardness, d.soundType));
-                    } else {
-                        if (d.texture != null) CustomBlocksMod.broadcastUpdate(guiServer, new SlotUpdatePayload("retexture", d.index, d.customId, null, d.texture, d.lightLevel, d.hardness, d.soundType));
-                        CustomBlocksMod.broadcastUpdate(guiServer, new SlotUpdatePayload("clearfaces", d.index, d.customId, null, null, d.lightLevel, d.hardness, d.soundType));
+        // Normal main menu
+        switch (slot) {
+            case 0 -> { // Create new block
+                PENDING.put(player.getUuid(), new PendingInput(InputAction.CREATE_ID, null, null, null, null, page));
+                player.closeHandledScreen();
+                send(player, "§6[GUI] §eType a block §fID §e(e.g. §fmy_block§e) — letters, numbers, underscores only (or §ccancel§e):");
+            }
+            case 1 -> openEditorPicker(player, 0); // Browse/edit blocks
+            case 2 -> { // Undo
+                if (SlotManager.undoStackSize() == 0) { send(player, "§7[CustomBlocks] Nothing to undo."); openMain(player, page); return; }
+                SlotManager.UndoEntry entry = SlotManager.popUndo();
+                if (entry == null) { openMain(player, page); return; }
+                MinecraftServer guiServer = player.getServer();
+                if (entry.previousState() == null) {
+                    SlotManager.SlotData cd = SlotManager.getById(entry.customId());
+                    if (cd != null) {
+                        int cidx = cd.index;
+                        SlotManager.remove(entry.customId()); SlotManager.saveAll();
+                        CustomBlocksMod.broadcastUpdate(guiServer, new SlotUpdatePayload("remove", cidx, entry.customId(), null, null, 0, 0, "stone"));
+                        send(player, "§a[GUI] Undid create of §f" + entry.customId());
                     }
-                    for (var fe : d.faceTextures.entrySet())
-                        CustomBlocksMod.broadcastUpdate(guiServer, new SlotUpdatePayload("setface", d.index, d.customId, null, fe.getValue(), d.lightLevel, d.hardness, d.soundType, fe.getKey()));
-                    CustomBlocksMod.broadcastUpdate(guiServer, new SlotUpdatePayload("setprop", d.index, d.customId, null, null, d.lightLevel, d.hardness, d.soundType));
-                    CustomBlocksMod.broadcastUpdate(guiServer, new SlotUpdatePayload("rename", d.index, d.customId, d.displayName, null, 0, 0, "stone"));
+                    openMain(player, page); return;
                 }
-                send(player, "§a[GUI] Undid §f\"" + entry.description() + "\"§a on §f" + entry.customId() + " §7(" + SlotManager.undoStackSize() + " left)");
+                if (SlotManager.restoreSnapshot(entry.previousState(), entry.wasDeleted())) {
+                    SlotManager.saveAll();
+                    SlotManager.SlotData d = SlotManager.getById(entry.previousState().customId);
+                    if (d != null) {
+                        if (entry.wasDeleted()) CustomBlocksMod.broadcastUpdate(guiServer, new SlotUpdatePayload("add", d.index, d.customId, d.displayName, d.texture, d.lightLevel, d.hardness, d.soundType));
+                        else {
+                            if (d.texture != null) CustomBlocksMod.broadcastUpdate(guiServer, new SlotUpdatePayload("retexture", d.index, d.customId, null, d.texture, d.lightLevel, d.hardness, d.soundType));
+                            CustomBlocksMod.broadcastUpdate(guiServer, new SlotUpdatePayload("clearfaces", d.index, d.customId, null, null, d.lightLevel, d.hardness, d.soundType));
+                        }
+                        for (var fe : d.faceTextures.entrySet())
+                            CustomBlocksMod.broadcastUpdate(guiServer, new SlotUpdatePayload("setface", d.index, d.customId, null, fe.getValue(), d.lightLevel, d.hardness, d.soundType, fe.getKey()));
+                        CustomBlocksMod.broadcastUpdate(guiServer, new SlotUpdatePayload("setprop", d.index, d.customId, null, null, d.lightLevel, d.hardness, d.soundType));
+                        CustomBlocksMod.broadcastUpdate(guiServer, new SlotUpdatePayload("rename", d.index, d.customId, d.displayName, null, 0, 0, "stone"));
+                    }
+                    send(player, "§a[GUI] Undid §f\"" + entry.description() + "\"§a on §f" + entry.previousState().customId + " §7(" + SlotManager.undoStackSize() + " left)");
+                }
+                openMain(player, page);
             }
-            openMain(player, page); return;
-        }
-        if (slot == 45) { openMain(player, page - 1); return; }
-        if (slot == 53) { openMain(player, page + 1); return; }
-
-        // Blocks in list (slots 9–44)
-        if (slot >= 9 && slot <= 44) {
-            List<SlotManager.SlotData> blocks = sortedBlocks();
-            int idx = page * BLOCKS_PER_PAGE + (slot - 9);
-            if (idx < blocks.size()) openEditor(player, blocks.get(idx).customId, page);
+            case 3 -> { // Set tab icon
+                PENDING.put(player.getUuid(), new PendingInput(InputAction.SETTABICON_URL, null, null, null, null, page));
+                player.closeHandledScreen();
+                send(player, "§6[GUI] §ePaste an image URL for the §fcreative tab icon §e(or §ccancel§e):");
+            }
+            // Row 1 command shortcuts (slots 9-17)
+            case 9  -> { player.closeHandledScreen(); send(player, "§b[GUI] §eRun: §f/cb list"); player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb list"); }
+            case 10 -> { player.closeHandledScreen(); send(player, "§b[GUI] §eRun: §f/cb help"); player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb help"); }
+            case 11 -> { player.closeHandledScreen(); send(player, "§b[GUI] §eRun: §f/cb reload"); player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb reload"); }
+            case 12 -> { player.closeHandledScreen(); send(player, "§b[GUI] §eRun: §f/cb importfolder"); player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb importfolder"); }
+            case 13 -> { player.closeHandledScreen(); send(player, "§b[GUI] §eRun: §f/cb export"); player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb export"); }
+            case 14 -> { player.closeHandledScreen(); send(player, "§6[GUI] §eType ID to delete (or §ccancel§e):"); PENDING.put(player.getUuid(), new PendingInput(InputAction.CREATE_ID, "__delete__", null, null, null, page)); }
+            case 15 -> { // Give rectangle
+                player.getInventory().insertStack(new ItemStack(net.minecraft.registry.Registries.ITEM.get(net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, "rainbow_rectangle")), 1));
+                send(player, "§6[GUI] §eGiven §6Rainbow Rectangle§e!");
+                openMain(player, page);
+            }
+            case 16 -> { // Give square
+                PENDING.put(player.getUuid(), new PendingInput(InputAction.REID_TEXT, "__givesquare__", null, null, null, page));
+                player.closeHandledScreen();
+                send(player, "§6[GUI] §eType color: §fblack §7| §fyellow §7| §fgreen §e(or §ccancel§e):");
+            }
+            case 17 -> { // Give triangle
+                PENDING.put(player.getUuid(), new PendingInput(InputAction.REID_TEXT, "__givetriangle__", null, null, null, page));
+                player.closeHandledScreen();
+                send(player, "§6[GUI] §eType color: §fblack §7| §fyellow §7| §fgreen §e(or §ccancel§e):");
+            }
         }
     }
 
@@ -444,7 +525,7 @@ public class GuiManager {
             case 0 -> openMain(player, returnPage);
             case 3 -> { /* display only */ }
             case 4 -> { // Give
-                player.getInventory().insertStack(new ItemStack(CustomBlocksMod.SLOT_ITEMS[d.index], 1));
+                player.getInventory().insertStack((CustomBlocksMod.safeSlotItem(d.index) != null ? new ItemStack(CustomBlocksMod.safeSlotItem(d.index), 1) : ItemStack.EMPTY));
                 send(player, "§a[GUI] Given 1x §f" + d.displayName + "§a.");
                 reopenEditor(player, id, returnPage);
             }
@@ -506,7 +587,9 @@ public class GuiManager {
             case 34 -> openShapeEditor(player, id, returnPage);
             case 35 -> { // Toggle collision
                 SlotManager.pushUndo(id,"setcollision");
-                SlotManager.setCollision(id, d.noCollision); // noCollision true → set to false (collision on), etc.
+                // setCollision(id, collision) stores !collision as noCollision
+                // so pass !d.noCollision to actually toggle
+                SlotManager.setCollision(id, !d.noCollision);
                 SlotManager.saveAll();
                 SlotManager.SlotData updated = SlotManager.getById(id);
                 CustomBlocksMod.broadcastUpdate(player.getServer(), new SlotUpdatePayload(
@@ -556,7 +639,7 @@ public class GuiManager {
         if (slot == 0) { openEditor(player, id, returnPage); return; }
         if (slot == 8) { // toggle collision
             SlotManager.pushUndo(id, "setcollision");
-            SlotManager.setCollision(id, d.noCollision);
+            SlotManager.setCollision(id, !d.noCollision);
             SlotManager.saveAll();
             SlotManager.SlotData upd = SlotManager.getById(id);
             CustomBlocksMod.broadcastUpdate(player.getServer(), new SlotUpdatePayload(
@@ -711,7 +794,7 @@ public class GuiManager {
             }
             case 53 -> {
                 // Give 1x to self
-                player.getInventory().insertStack(new ItemStack(CustomBlocksMod.SLOT_ITEMS[d.index], 1));
+                player.getInventory().insertStack((CustomBlocksMod.safeSlotItem(d.index) != null ? new ItemStack(CustomBlocksMod.safeSlotItem(d.index), 1) : ItemStack.EMPTY));
                 send(player, "§a[GUI] Given 1x §f" + d.displayName + "§a.");
             }
         }
@@ -723,50 +806,100 @@ public class GuiManager {
     private static SimpleInventory buildMain(int page) {
         SimpleInventory inv = new SimpleInventory(54);
 
-        // Row 0: toolbar
-        inv.setStack(0, uiGlint(Items.LIME_CONCRETE,  "§a§l+ New Block",  "§7Create a new custom block"));
-        for (int i = 1; i <= 3; i++) inv.setStack(i, glass());
-        inv.setStack(4, ui(Items.PAINTING, "§e✦ Set Tab Icon", "§7Click → paste image URL in chat"));
-        for (int i = 5; i <= 7; i++) inv.setStack(i, glass());
-        inv.setStack(8, SlotManager.undoStackSize() > 0
-            ? uiGlint(Items.ARROW, "§6↩ Undo", "§7" + SlotManager.undoStackSize() + " action(s) available")
-            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Undo", "§7Nothing to undo"));
+        // ── Row 0: Core actions ──────────────────────────────────────────
+        inv.setStack(0, uiGlint(Items.LIME_CONCRETE, "§a§l+ Create New Block",
+            "§7Click → type ID then name then URL in chat",
+            "§8Creates a new custom block"));
+        inv.setStack(1, uiGlint(Items.CHEST, "§e§l▶ Browse & Edit Blocks",
+            "§7Click → opens block picker",
+            "§8Pick any block to open its full editor",
+            "§8Blocks: §f" + SlotManager.usedSlots() + " §8/ §f" + SlotManager.MAX_SLOTS));
+        inv.setStack(2, SlotManager.undoStackSize() > 0
+            ? uiGlint(Items.COMPASS, "§6§l↩ Undo Last Change",
+                "§7Click to undo: §f\"" + (SlotManager.undoStackSize() > 0 ? SlotManager.peekUndoDescription() : "") + "\"",
+                "§8" + SlotManager.undoStackSize() + " action(s) in undo stack")
+            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Undo (nothing to undo)", "§7Make some changes first"));
+        inv.setStack(3, ui(Items.PAINTING, "§e✦ Set Creative Tab Icon",
+            "§7Click → paste image URL in chat",
+            "§8Changes the icon of the CustomBlocks creative tab"));
+        for (int i = 4; i <= 8; i++) inv.setStack(i, glass());
 
-        // Rows 1–4: block list (up to 36 per page)
+        // ── Row 1: Quick command buttons ─────────────────────────────────
+        inv.setStack(9,  uiGlint(Items.BOOK,          "§b/cb list",           "§7Show all custom blocks in chat"));
+        inv.setStack(10, uiGlint(Items.WRITABLE_BOOK, "§b/cb help",           "§7Show all commands in chat"));
+        inv.setStack(11, uiGlint(Items.NETHER_STAR,   "§b/cb reload",         "§7Reload all data & sync to all players"));
+        inv.setStack(12, uiGlint(Items.HOPPER,        "§b/cb importfolder",   "§7Import images from config/customblocks/import/"));
+        inv.setStack(13, uiGlint(Items.PAPER,         "§b/cb export",         "§7Export block list to JSON"));
+        inv.setStack(14, uiGlint(Items.TNT,           "§c/cb delete <id>",    "§7Click → type block ID in chat to delete"));
+        inv.setStack(15, uiGlint(Items.BLAZE_ROD,     "§6Rainbow Rectangle",  "§7Click to receive the face-paint wand",
+            "§8Right-click any block face → paste URL"));
+        inv.setStack(16, uiGlint(Items.WHITE_CONCRETE,"§fColor Square",        "§7Click → choose: §fblack §7| §fyellow §7| §fgreen",
+            "§8Color-swap tool"));
+        inv.setStack(17, uiGlint(Items.WHITE_CARPET,  "§fColor Triangle",      "§7Click → choose: §fblack §7| §fyellow §7| §fgreen",
+            "§8Color triangle tool"));
+
+        // ── Rows 2–4: empty/glass ────────────────────────────────────────
+        for (int i = 18; i <= 44; i++) inv.setStack(i, glass());
+
+        // ── Row 5: stats footer ───────────────────────────────────────────
+        inv.setStack(45, glass()); inv.setStack(46, glass()); inv.setStack(47, glass());
+        inv.setStack(48, glass());
+        inv.setStack(49, ui(Items.COMPASS, "§7Stats",
+            "§7Blocks used: §f" + SlotManager.usedSlots() + " §7/ §f" + SlotManager.MAX_SLOTS,
+            "§7Undo stack: §f" + SlotManager.undoStackSize(),
+            "§7Free slots: §f" + SlotManager.freeSlots()));
+        inv.setStack(50, glass()); inv.setStack(51, glass()); inv.setStack(52, glass());
+        inv.setStack(53, glass());
+
+        return inv;
+    }
+
+    /** Block picker — clean paginated list, click any block to open its editor. */
+    private static SimpleInventory buildPicker(int page) {
+        SimpleInventory inv = new SimpleInventory(54);
         List<SlotManager.SlotData> blocks = sortedBlocks();
+        int total = blocks.size();
+        int maxPage = total == 0 ? 0 : Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
+
+        // Row 0: header
+        inv.setStack(0, uiGlint(Items.ARROW, "§c◀ Back to Main Menu", "§7Return to main CustomBlocks menu"));
+        for (int i = 1; i <= 3; i++) inv.setStack(i, glass());
+        inv.setStack(4, ui(Items.BOOK, "§eChoose a block to edit",
+            "§7Click any block below to open its editor",
+            "§8Showing §f" + Math.min(BLOCKS_PER_PAGE, Math.max(0, total - page * BLOCKS_PER_PAGE)) + " §8of §f" + total + " §8blocks"));
+        for (int i = 5; i <= 8; i++) inv.setStack(i, glass());
+
+        // Rows 1–4: block list (36 per page)
         int start = page * BLOCKS_PER_PAGE;
         for (int i = 0; i < BLOCKS_PER_PAGE; i++) {
             int invSlot = 9 + i;
             int dataIdx = start + i;
             if (dataIdx < blocks.size()) {
                 SlotManager.SlotData d = blocks.get(dataIdx);
-                ItemStack stack = new ItemStack(CustomBlocksMod.SLOT_ITEMS[d.index]);
-                List<Text> lore = new ArrayList<>();
-                lore.add(lore("§7ID: §f" + d.customId));
-                lore.add(lore("§8#" + d.index + (d.lightLevel > 0 ? "  §6✦" + d.lightLevel : "") + (d.hardness < 0 ? "  §c∞" : "") + (d.isAnimated() ? "  §b⟳" : "") + (d.hasFaces() ? "  §d⬡faces" : "")));
-                lore.add(lore("§7Sound: §f" + d.soundType));
+                ItemStack stack = (CustomBlocksMod.safeSlotItem(d.index) != null ? new ItemStack(CustomBlocksMod.safeSlotItem(d.index)) : ItemStack.EMPTY);
                 stack.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§f§l" + d.displayName).styled(s -> s.withItalic(false)));
-                stack.set(DataComponentTypes.LORE, new LoreComponent(lore));
+                stack.set(DataComponentTypes.LORE, new LoreComponent(List.of(
+                    lore("§7ID: §f" + d.customId),
+                    lore("§7Shape: §b" + d.shapeLabel() + "  §7Light: §e" + d.lightLevel),
+                    lore("§7Sound: §f" + d.soundType + "  §7Hard: §f" + hardnessLabel(d.hardness)),
+                    lore((d.hasFaces() ? "§d⬡ faces  " : "") + (d.isAnimated() ? "§b⟳ animated  " : "") + (d.noCollision ? "§c⊘ no-collision" : ""))
+                )));
                 inv.setStack(invSlot, stack);
             } else {
                 inv.setStack(invSlot, glass());
             }
         }
 
-        // Row 5: navigation
-        int total = blocks.size();
-        int maxPage = Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
+        // Row 5: pagination
         inv.setStack(45, page > 0
-            ? ui(Items.ARROW, "§7◀ Page " + page + " / " + (maxPage + 1), "§8Previous page")
-            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8◀ No Previous", ""));
+            ? uiGlint(Items.ARROW, "§7◀ Previous  (page " + page + ")", "§8Click to go back")
+            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8◀ First page", ""));
         for (int i = 46; i <= 48; i++) inv.setStack(i, glass());
-        inv.setStack(49, ui(Items.BOOK, "§ePage §f" + (page + 1) + " §7/ §f" + (maxPage + 1),
-            "§7Showing " + Math.min(BLOCKS_PER_PAGE, total - page * BLOCKS_PER_PAGE) + " / " + total + " blocks",
-            "§7Total slots used: §f" + SlotManager.usedSlots() + " / " + SlotManager.MAX_SLOTS));
+        inv.setStack(49, ui(Items.BOOK, "§ePage §f" + (page + 1) + " §7/ §f" + (maxPage + 1)));
         for (int i = 50; i <= 52; i++) inv.setStack(i, glass());
         inv.setStack(53, page < maxPage
-            ? ui(Items.ARROW, "§7Page " + (page + 2) + " ▶", "§8Next page")
-            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8No Next Page ▶", ""));
+            ? uiGlint(Items.ARROW, "§7Next ▶  (page " + (page + 2) + ")", "§8Click to go forward")
+            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Last page ▶", ""));
         return inv;
     }
 
@@ -776,7 +909,7 @@ public class GuiManager {
         // ── Row 0: Header / Info / Delete ──────────────────────────────────
         inv.setStack(0, uiGlint(Items.ARROW, "§c◀ Back to List", "§7Return to block list"));
         inv.setStack(1, glass()); inv.setStack(2, glass());
-        ItemStack disp = new ItemStack(CustomBlocksMod.SLOT_ITEMS[d.index]);
+        ItemStack disp = (CustomBlocksMod.safeSlotItem(d.index) != null ? new ItemStack(CustomBlocksMod.safeSlotItem(d.index)) : ItemStack.EMPTY);
         disp.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§e§l" + d.displayName).styled(s -> s.withItalic(false)));
         disp.set(DataComponentTypes.LORE, new LoreComponent(List.of(
             lore("§7ID: §f" + d.customId),
@@ -882,7 +1015,7 @@ public class GuiManager {
 
         // Row 0: Back, block info, collision, clear shape
         inv.setStack(0, uiGlint(Items.ARROW, "§c◀ Back to Editor", "§7Return to block editor"));
-        ItemStack info = new ItemStack(CustomBlocksMod.SLOT_ITEMS[d.index]);
+        ItemStack info = (CustomBlocksMod.safeSlotItem(d.index) != null ? new ItemStack(CustomBlocksMod.safeSlotItem(d.index)) : ItemStack.EMPTY);
         info.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§e§l" + d.displayName).styled(s -> s.withItalic(false)));
         info.set(DataComponentTypes.LORE, new LoreComponent(List.of(
             lore("§7Shape: §b" + d.shapeLabel()),
@@ -953,7 +1086,7 @@ public class GuiManager {
         // Row 0: header
         inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Editor", "§7Return to block editor"));
         for (int i = 1; i <= 3; i++) inv.setStack(i, glass());
-        ItemStack disp = new ItemStack(CustomBlocksMod.SLOT_ITEMS[d.index]);
+        ItemStack disp = (CustomBlocksMod.safeSlotItem(d.index) != null ? new ItemStack(CustomBlocksMod.safeSlotItem(d.index)) : ItemStack.EMPTY);
         disp.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§d§l⬡ §r§f" + d.displayName).styled(s -> s.withItalic(false)));
         disp.set(DataComponentTypes.LORE, new LoreComponent(List.of(
             lore("§7ID: §f" + d.customId),

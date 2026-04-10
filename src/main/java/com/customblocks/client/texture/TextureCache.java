@@ -32,8 +32,6 @@ public class TextureCache {
             var tm = MinecraftClient.getInstance().getTextureManager();
             try { tm.destroyTexture(texId); } catch (Exception ignored) {}
             tm.registerTexture(texId, tex);
-            // Force immediate GPU upload while on the render thread
-            tex.bindTexture();
             TexInfo info = new TexInfo(texId, w, h);
             CACHE.put(customId, info);
             return info;

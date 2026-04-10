@@ -209,7 +209,7 @@ public class RectangleToolItem extends Item {
 
                     // Give player 1 of the new block
                     player.getInventory().insertStack(
-                        new ItemStack(CustomBlocksMod.SLOT_ITEMS[newBlock.index], 1));
+                        (CustomBlocksMod.safeSlotItem(newBlock.index) != null ? new ItemStack(CustomBlocksMod.safeSlotItem(newBlock.index), 1) : ItemStack.EMPTY));
 
                     // Broadcast add + face to all clients
                     SlotManager.SlotData fresh = SlotManager.getById(variantId);

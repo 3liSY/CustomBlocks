@@ -113,11 +113,11 @@ public final class ImageProcessor {
                 .timeout(Duration.ofSeconds(20))
                 .build();
         HttpResponse<byte[]> res = HTTP.send(req, HttpResponse.BodyHandlers.ofByteArray());
-        if (res.statusCode() != 200)
-            throw new IOException("HTTP " + res.statusCode() + " — check the URL is publicly accessible.");
+        if (res.statusCode() < 200 || res.statusCode() >= 300)
+            throw new IOException("HTTP " + res.statusCode() + " from " + url);
         byte[] body = res.body();
-        if (body.length > 10_485_760)
-            throw new IOException("Image too large (max 10 MB, got " + (body.length / 1024) + " KB)");
+        if (body == null || body.length == 0) throw new IOException("Empty response from " + url);
+        if (body.length > 20_971_520) throw new IOException("Image too large (max 20MB): " + body.length + " bytes");
         return body;
     }
 
@@ -336,6 +336,8 @@ public final class ImageProcessor {
 
             int numFrames = reader.getNumImages(true);
             if (numFrames <= 1) { reader.dispose(); return null; }
+            // Cap frames to prevent OOM with huge GIFs
+            numFrames = Math.min(numFrames, 64);
 
             BufferedImage frame0 = reader.read(0);
             int fw = frame0.getWidth(), fh = frame0.getHeight();
