@@ -1,5 +1,8 @@
 package com.customblocks.client;
 
+import com.customblocks.client.gui.AnimBlockScreen;
+import com.customblocks.network.AnimSettingsPayload;
+import com.customblocks.network.OpenAnimGuiPayload;
 import com.customblocks.CustomBlocksMod;
 import com.customblocks.SlotManager;
 import com.customblocks.block.SlotBlock;
@@ -84,6 +87,9 @@ public class CustomBlocksClient implements ClientModInitializer {
                 for (FullSyncPayload.SlotEntry e : payload.entries()) {
                     SlotManager.assignAtIndex(e.index(), e.customId(), e.displayName(), null);
                     SlotManager.setProperties(e.customId(), e.lightLevel(), e.hardness(), e.soundType());
+                    // Restore animMeta so ResourcePackGenerator writes .mcmeta on join
+                    if (e.animMeta() != null && !e.animMeta().isEmpty())
+                        SlotManager.setAnimMeta(e.customId(), e.animMeta());
                 }
                 if (payload.tabIconTexture() != null)
                     SlotManager.setTabIconTexture(payload.tabIconTexture());
@@ -105,6 +111,21 @@ public class CustomBlocksClient implements ClientModInitializer {
                                     payload.displayName(), payload.texture());
                         SlotManager.setProperties(payload.customId(),
                                 payload.lightLevel(), payload.hardness(), payload.soundType());
+                        // KEY FIX: apply animMeta so .mcmeta file gets written
+                        if (payload.animMeta() != null && !payload.animMeta().isEmpty())
+                            SlotManager.setAnimMeta(payload.customId(), payload.animMeta());
+                        TextureCache.invalidate(payload.customId());
+                    }
+                    case "retexture" -> {
+                        SlotManager.updateTexture(payload.customId(), payload.texture());
+                        if (payload.animMeta() != null && !payload.animMeta().isEmpty())
+                            SlotManager.setAnimMeta(payload.customId(), payload.animMeta());
+                        TextureCache.invalidate(payload.customId());
+                    }
+                    case "animsettings" -> {
+                        // Pure animMeta update — no texture change, just reload .mcmeta
+                        if (payload.animMeta() != null && !payload.animMeta().isEmpty())
+                            SlotManager.setAnimMeta(payload.customId(), payload.animMeta());
                         TextureCache.invalidate(payload.customId());
                     }
                     case "remove" -> {
@@ -114,10 +135,6 @@ public class CustomBlocksClient implements ClientModInitializer {
                     case "rename"  -> SlotManager.rename(payload.customId(), payload.displayName());
                     case "setprop" -> SlotManager.setProperties(payload.customId(),
                             payload.lightLevel(), payload.hardness(), payload.soundType());
-                    case "retexture" -> {
-                        SlotManager.updateTexture(payload.customId(), payload.texture());
-                        TextureCache.invalidate(payload.customId());
-                    }
                     case "setface" -> {
                         if (payload.face() != null && payload.texture() != null) {
                             SlotManager.setFaceTexture(payload.customId(), payload.face(), payload.texture());
@@ -162,11 +179,26 @@ public class CustomBlocksClient implements ClientModInitializer {
                     boolean needsReload = action.equals("add") || action.equals("retexture")
                             || action.equals("remove") || action.equals("setface")
                             || action.equals("clearface") || action.equals("clearfaces")
-                            || action.equals("setshape");
+                            || action.equals("setshape") || action.equals("animsettings");
                     if (needsReload) scheduleGenerateAndReload(client, 2000L);
                 } else {
                     // Still in join burst — keep refreshing the debounce timer
                     lastPacketTime.set(System.currentTimeMillis());
+                }
+            });
+        });
+
+        // ── OpenAnimGuiPayload — server tells client to open animation settings ──
+        ClientPlayNetworking.registerGlobalReceiver(OpenAnimGuiPayload.ID, (payload, context) -> {
+            MinecraftClient client = context.client();
+            client.execute(() -> {
+                if (client.currentScreen == null) {
+                    client.setScreen(new AnimBlockScreen(
+                            payload.customId(),
+                            payload.displayName(),
+                            payload.animMeta(),
+                            payload.frameCount()
+                    ));
                 }
             });
         });

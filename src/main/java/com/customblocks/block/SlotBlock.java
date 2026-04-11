@@ -1,6 +1,8 @@
 package com.customblocks.block;
 
 import com.customblocks.SlotManager;
+import com.customblocks.network.OpenAnimGuiPayload;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.ShapeContext;
@@ -8,13 +10,17 @@ import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.sound.BlockSoundGroup;
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
+import net.minecraft.util.ActionResult;
+import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.shape.VoxelShape;
 import net.minecraft.util.shape.VoxelShapes;
 import net.minecraft.world.BlockView;
+import net.minecraft.world.World;
 
 public class SlotBlock extends Block {
 
@@ -32,6 +38,42 @@ public class SlotBlock extends Block {
     public MutableText getName() {
         String name = SlotManager.getDisplayName(getSlotKey());
         return Text.literal(name != null ? name : "Custom Block " + slotIndex);
+    }
+
+    /**
+     * Right-click an animated block → open the Animation Settings GUI.
+     * Only triggers on animated blocks (GIF / APNG).
+     * Returns PASS for non-animated blocks so normal item use still works.
+     */
+    @Override
+    protected ActionResult onUse(BlockState state, World world, BlockPos pos,
+                                  PlayerEntity player, BlockHitResult hit) {
+        if (world.isClient) return ActionResult.SUCCESS;
+
+        SlotManager.SlotData data = SlotManager.getBySlot(getSlotKey());
+        if (data == null || !data.isAnimated()) return ActionResult.PASS;
+
+        if (player instanceof ServerPlayerEntity sp) {
+            // Count frames from the animMeta
+            int frames = countFrames(data.animMeta);
+            ServerPlayNetworking.send(sp, new OpenAnimGuiPayload(
+                    data.customId,
+                    data.displayName,
+                    data.animMeta,
+                    frames
+            ));
+        }
+        return ActionResult.SUCCESS;
+    }
+
+    /** Parse frame count from animMeta JSON without full Gson dependency. */
+    private static int countFrames(String animMeta) {
+        if (animMeta == null) return 0;
+        // Quick count of "index": occurrences
+        int count = 0;
+        int idx = 0;
+        while ((idx = animMeta.indexOf("\"index\"", idx)) != -1) { count++; idx += 7; }
+        return count > 0 ? count : 1;
     }
 
     @Override

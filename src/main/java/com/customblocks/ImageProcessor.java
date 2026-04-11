@@ -61,9 +61,16 @@ public final class ImageProcessor {
     /** Full pipeline with custom target size: download → convert → pad → remove bg → resize. */
     public static byte[] downloadAndProcess(String url, int targetSize) throws IOException, InterruptedException {
         byte[] raw = download(url);
-        if (isAnimatedGif(raw)) {
-            GifResult gif = processGif(raw, targetSize);
+        // Handle any animated format (GIF, APNG, animated WebP)
+        if (isAnimatedImage(raw)) {
+            GifResult gif = processAnimatedImage(raw, targetSize);
             if (gif != null) return gif.stripPng;
+        }
+        // AVIF detection — not yet supported, give a clear error
+        if (isAvif(raw)) {
+            throw new IOException(
+                "AVIF format is not yet supported. Please convert your AVIF to GIF or APNG first. " +
+                "You can use ezgif.com or ffmpeg: ffmpeg -i input.avif output.gif");
         }
         byte[] png = toPng(raw);
         png = padToSquare(png);
@@ -293,6 +300,114 @@ public final class ImageProcessor {
     }
 
     /**
+     * Returns true for any animated/multi-frame image format:
+     * GIF, APNG, animated WebP (WEBPVP8X with ANIM chunk), AVIF sequences.
+     */
+    public static boolean isAnimatedImage(byte[] raw) {
+        if (raw.length < 12) return false;
+        return isAnimatedGif(raw) || isAnimatedPng(raw) || isAnimatedWebP(raw);
+    }
+
+    /**
+     * Detect APNG — a PNG that contains the 'acTL' animation control chunk.
+     * Normal PNGs only have IHDR/IDAT/etc; APNG also has acTL + fcTL + fdAT.
+     */
+    public static boolean isAnimatedPng(byte[] raw) {
+        if (raw.length < 8) return false;
+        // PNG magic bytes
+        if (!( raw[0]==(byte)0x89 && raw[1]==0x50 && raw[2]==0x4E && raw[3]==0x47
+            && raw[4]==0x0D && raw[5]==0x0A && raw[6]==0x1A && raw[7]==0x0A)) return false;
+        // Scan for 'acTL' chunk type (bytes: 0x61 0x63 0x54 0x4C)
+        for (int i = 8; i < raw.length - 7; i++) {
+            if (raw[i]=='a' && raw[i+1]=='c' && raw[i+2]=='T' && raw[i+3]=='L') return true;
+        }
+        return false;
+    }
+
+    /**
+     * Detect animated WebP — has RIFF header, WEBP marker, and an ANIM chunk.
+     */
+    public static boolean isAnimatedWebP(byte[] raw) {
+        if (raw.length < 16) return false;
+        if (!(raw[0]=='R' && raw[1]=='I' && raw[2]=='F' && raw[3]=='F')) return false;
+        if (!(raw[8]=='W' && raw[9]=='E' && raw[10]=='B' && raw[11]=='P')) return false;
+        // Look for 'ANIM' chunk
+        for (int i = 12; i < Math.min(raw.length - 4, 512); i++) {
+            if (raw[i]=='A' && raw[i+1]=='N' && raw[i+2]=='I' && raw[i+3]=='M') return true;
+        }
+        return false;
+    }
+
+    /**
+     * Process any animated image (GIF, APNG, animated WebP) into a vertical PNG strip + mcmeta.
+     * For APNG and animated WebP, attempts to read via ImageIO (TwelveMonkeys adds WebP support).
+     * Returns null if the image has ≤1 frame or cannot be processed.
+     */
+    public static GifResult processAnimatedImage(byte[] raw, int frameSize) {
+        if (isAnimatedGif(raw))   return processGif(raw, frameSize);
+        if (isAnimatedPng(raw))   return processApng(raw, frameSize);
+        if (isAnimatedWebP(raw))  return processGif(raw, frameSize); // ImageIO handles multi-frame WebP via TwelveMonkeys
+        return null;
+    }
+
+    /**
+     * Process an APNG into a vertical strip + mcmeta, same pipeline as processGif.
+     * Uses ImageIO's GIF reader path — APNG requires TwelveMonkeys or similar plugin.
+     * Falls back gracefully: if only 1 frame is readable, returns null (use static pipeline).
+     */
+    public static GifResult processApng(byte[] pngBytes, int frameSize) {
+        frameSize = Math.max(16, Math.min(MAX_SIZE, frameSize));
+        try {
+            ImageInputStream iis = ImageIO.createImageInputStream(new ByteArrayInputStream(pngBytes));
+            // Try PNG reader that supports APNG (TwelveMonkeys or JDK)
+            Iterator<ImageReader> it = ImageIO.getImageReadersByFormatName("png");
+            ImageReader reader = null;
+            while (it.hasNext()) {
+                ImageReader r = it.next();
+                r.setInput(iis, false);
+                try {
+                    if (r.getNumImages(true) > 1) { reader = r; break; }
+                } catch (Exception ignored) { r.dispose(); }
+            }
+            if (reader == null) return null;
+
+            int numFrames = Math.min(reader.getNumImages(true), 64);
+            if (numFrames <= 1) { reader.dispose(); return null; }
+
+            java.util.List<BufferedImage> frames = new java.util.ArrayList<>();
+            int defaultDelay = 2; // ticks
+            for (int i = 0; i < numFrames; i++) {
+                try { frames.add(toArgb(reader.read(i))); } catch (Exception e) { break; }
+            }
+            reader.dispose();
+            if (frames.size() <= 1) return null;
+
+            // Build strip
+            BufferedImage strip = new BufferedImage(frameSize, frameSize * frames.size(), BufferedImage.TYPE_INT_ARGB);
+            Graphics2D sg = strip.createGraphics();
+            sg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            sg.setColor(java.awt.Color.BLACK);
+            sg.fillRect(0, 0, frameSize, frameSize * frames.size());
+            for (int i = 0; i < frames.size(); i++)
+                sg.drawImage(frames.get(i), 0, i * frameSize, frameSize, frameSize, null);
+            sg.dispose();
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ImageIO.write(strip, "PNG", baos);
+
+            StringBuilder mcmeta = new StringBuilder("{\"animation\":{\"frames\":[");
+            for (int i = 0; i < frames.size(); i++) {
+                if (i > 0) mcmeta.append(",");
+                mcmeta.append("{\"index\":").append(i).append(",\"time\":").append(defaultDelay).append("}");
+            }
+            mcmeta.append("]}}");
+            return new GifResult(baos.toByteArray(), mcmeta.toString(), frames.size());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
      * Extract GIF frames into a vertical PNG strip + Minecraft animation .mcmeta JSON.
      * Returns null if the GIF has <= 1 frame (use regular processing instead).
      */
@@ -448,6 +563,18 @@ public final class ImageProcessor {
         g.drawImage(src, 0, 0, null);
         g.dispose();
         return copy;
+    }
+
+    /**
+     * Detect AVIF format (ISO Base Media File Format with 'avif' or 'avis' brand).
+     * AVIF starts with a ftyp box containing 'avif' or 'avis' as the major brand.
+     */
+    public static boolean isAvif(byte[] raw) {
+        if (raw.length < 12) return false;
+        // Check for ftyp box: bytes 4-7 = "ftyp", bytes 8-11 = brand
+        if (!(raw[4]=='f' && raw[5]=='t' && raw[6]=='y' && raw[7]=='p')) return false;
+        String brand = new String(raw, 8, Math.min(4, raw.length - 8));
+        return brand.startsWith("avif") || brand.startsWith("avis");
     }
 
     private static String detectFormat(byte[] raw) {

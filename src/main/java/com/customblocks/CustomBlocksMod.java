@@ -114,9 +114,40 @@ public class CustomBlocksMod implements ModInitializer {
             return !RectangleToolItem.handleChatInput(sender, content);
         });
 
-        // Network
-        PayloadTypeRegistry.playS2C().register(FullSyncPayload.ID, FullSyncPayload.CODEC);
-        PayloadTypeRegistry.playS2C().register(SlotUpdatePayload.ID, SlotUpdatePayload.CODEC);
+        // Network — S2C
+        PayloadTypeRegistry.playS2C().register(FullSyncPayload.ID,    FullSyncPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(SlotUpdatePayload.ID,  SlotUpdatePayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(com.customblocks.network.OpenAnimGuiPayload.ID,
+                com.customblocks.network.OpenAnimGuiPayload.CODEC);
+        // Network — C2S
+        PayloadTypeRegistry.playC2S().register(com.customblocks.network.AnimSettingsPayload.ID,
+                com.customblocks.network.AnimSettingsPayload.CODEC);
+
+        // Handle AnimSettingsPayload from client: update animMeta and broadcast
+        ServerPlayNetworking.registerGlobalReceiver(
+                com.customblocks.network.AnimSettingsPayload.ID,
+                (payload, context) -> {
+                    context.server().execute(() -> {
+                        String cid  = payload.customId();
+                        String meta = payload.animMeta();
+                        if (cid == null || meta == null || meta.isEmpty()) return;
+                        if (!SlotManager.hasId(cid)) return;
+                        SlotManager.pushUndo(cid, "animsettings");
+                        SlotManager.setAnimMeta(cid, meta);
+                        SlotManager.saveAll();
+                        SlotManager.SlotData d = SlotManager.getById(cid);
+                        if (d == null) return;
+                        // Broadcast updated animMeta to all clients via SlotUpdatePayload
+                        SlotUpdatePayload pkt = new SlotUpdatePayload(
+                                "animsettings", d.index, cid, d.displayName,
+                                null, d.lightLevel, d.hardness, d.soundType,
+                                null, null, meta);
+                        broadcastUpdate(context.server(), pkt);
+                        LOGGER.info("[CustomBlocks] animMeta updated for '{}' by {}", cid,
+                                context.player().getName().getString());
+                    });
+                }
+        );
 
         // Creative tab
         Registry.register(Registries.ITEM_GROUP, CUSTOM_BLOCKS_TAB,
@@ -163,13 +194,14 @@ public class CustomBlocksMod implements ModInitializer {
                     new ItemStack(state.getBlock())));
         });
 
-        // On join: send metadata immediately, queue textures for delayed batch sending
+        // On join: send metadata (including animMeta) immediately, queue textures for delayed batch sending
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             List<FullSyncPayload.SlotEntry> meta = new ArrayList<>();
             for (SlotManager.SlotData d : SlotManager.allSlots()) {
+                // Include animMeta so the client knows which blocks are animated from the start
                 meta.add(new FullSyncPayload.SlotEntry(
                         d.index, d.customId, d.displayName, null,
-                        d.lightLevel, d.hardness, d.soundType));
+                        d.lightLevel, d.hardness, d.soundType, d.animMeta));
             }
             ServerPlayNetworking.send(handler.player,
                     new FullSyncPayload(meta, SlotManager.getTabIconTexture()));
@@ -178,11 +210,12 @@ public class CustomBlocksMod implements ModInitializer {
             SlotManager.allSlots().stream()
                     .sorted(Comparator.comparingInt(d -> d.index))
                     .forEach(d -> {
-                        // Queue main texture
+                        // Queue main texture — include animMeta so client writes the .mcmeta file
                         if (d.texture != null && d.texture.length > 0)
                             queue.add(new SlotUpdatePayload("add", d.index, d.customId, d.displayName,
-                                    d.texture, d.lightLevel, d.hardness, d.soundType));
-                        // Queue each face texture override so the joining player sees them
+                                    d.texture, d.lightLevel, d.hardness, d.soundType,
+                                    null, null, d.animMeta));
+                        // Queue each face texture override
                         for (var faceEntry : d.faceTextures.entrySet()) {
                             queue.add(new SlotUpdatePayload("setface", d.index, d.customId, null,
                                     faceEntry.getValue(), d.lightLevel, d.hardness, d.soundType,
@@ -238,13 +271,17 @@ public class CustomBlocksMod implements ModInitializer {
         for (var player : server.getPlayerManager().getPlayerList()) {
             List<FullSyncPayload.SlotEntry> meta = new java.util.ArrayList<>();
             for (SlotManager.SlotData d : SlotManager.allSlots())
-                meta.add(new FullSyncPayload.SlotEntry(d.index, d.customId, d.displayName, null, d.lightLevel, d.hardness, d.soundType));
+                meta.add(new FullSyncPayload.SlotEntry(d.index, d.customId, d.displayName, null,
+                        d.lightLevel, d.hardness, d.soundType, d.animMeta));
             ServerPlayNetworking.send(player, new FullSyncPayload(meta, SlotManager.getTabIconTexture()));
             for (SlotManager.SlotData d : SlotManager.allSlots()) {
                 if (d.texture != null && d.texture.length > 0)
-                    ServerPlayNetworking.send(player, new SlotUpdatePayload("add", d.index, d.customId, d.displayName, d.texture, d.lightLevel, d.hardness, d.soundType));
+                    ServerPlayNetworking.send(player, new SlotUpdatePayload("add", d.index, d.customId,
+                            d.displayName, d.texture, d.lightLevel, d.hardness, d.soundType,
+                            null, null, d.animMeta));
                 for (var fe : d.faceTextures.entrySet())
-                    ServerPlayNetworking.send(player, new SlotUpdatePayload("setface", d.index, d.customId, null, fe.getValue(), d.lightLevel, d.hardness, d.soundType, fe.getKey()));
+                    ServerPlayNetworking.send(player, new SlotUpdatePayload("setface", d.index, d.customId,
+                            null, fe.getValue(), d.lightLevel, d.hardness, d.soundType, fe.getKey()));
             }
         }
     }

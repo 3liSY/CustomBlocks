@@ -393,7 +393,7 @@ public class CustomBlockCommand {
                     SlotManager.saveAll();
                     CustomBlocksMod.broadcastUpdate(server,
                         new SlotUpdatePayload("add", d.index, id, name, finalBytes,
-                                d.lightLevel, d.hardness, d.soundType));
+                                d.lightLevel, d.hardness, d.soundType, null, null, finalAnim));
                     src.sendMessage(Text.literal("§a[CustomBlocks] '" + name + "' created! §7(slot " + d.index + ")"));
                 });
             } catch (Exception e) {
@@ -431,7 +431,7 @@ public class CustomBlockCommand {
         d = SlotManager.getById(newId);
         CustomBlocksMod.broadcastUpdate(src.getServer(),
             new SlotUpdatePayload("add", d.index, newId, finalName, texCopy,
-                    d.lightLevel, d.hardness, d.soundType));
+                    d.lightLevel, d.hardness, d.soundType, null, null, d.animMeta));
         src.sendMessage(Text.literal("§a[CustomBlocks] Duplicated '§f" + sourceId + "§a' → '§f" + newId + "§a' §7(slot " + d.index + ")"));
         return 1;
     }
@@ -480,7 +480,7 @@ public class CustomBlockCommand {
             new SlotUpdatePayload("remove", d.index, oldId, null, null, 0, 0, "stone"));
         CustomBlocksMod.broadcastUpdate(src.getServer(),
             new SlotUpdatePayload("add", updated.index, newId, updated.displayName, updated.texture,
-                updated.lightLevel, updated.hardness, updated.soundType));
+                updated.lightLevel, updated.hardness, updated.soundType, null, null, updated.animMeta));
         src.sendMessage(Text.literal("§a[CustomBlocks] Re-ID'd §f'" + oldId + "' §a→ §f'" + newId + "'."));
         return 1;
     }
@@ -655,7 +655,7 @@ public class CustomBlockCommand {
                     SlotManager.saveAll();
                     CustomBlocksMod.broadcastUpdate(server,
                         new SlotUpdatePayload("retexture", d.index, id, null, fb,
-                                d.lightLevel, d.hardness, d.soundType));
+                                d.lightLevel, d.hardness, d.soundType, null, null, fa));
                     src.sendMessage(Text.literal("§a[CustomBlocks] Texture updated for '" + id + "'."));
                 });
             } catch (Exception e) {
@@ -872,7 +872,7 @@ public class CustomBlockCommand {
             if (entry.wasDeleted()) {
                 CustomBlocksMod.broadcastUpdate(server,
                     new SlotUpdatePayload("add", d.index, d.customId, d.displayName, d.texture,
-                            d.lightLevel, d.hardness, d.soundType));
+                            d.lightLevel, d.hardness, d.soundType, null, null, d.animMeta));
                 for (var fe : d.faceTextures.entrySet())
                     CustomBlocksMod.broadcastUpdate(server,
                         new SlotUpdatePayload("setface", d.index, d.customId, null, fe.getValue(),
@@ -951,7 +951,7 @@ public class CustomBlockCommand {
             if (entry.wasDeleted()) {
                 CustomBlocksMod.broadcastUpdate(server,
                     new SlotUpdatePayload("add", d.index, d.customId, d.displayName, d.texture,
-                            d.lightLevel, d.hardness, d.soundType));
+                            d.lightLevel, d.hardness, d.soundType, null, null, d.animMeta));
             } else {
                 if (d.texture != null)
                     CustomBlocksMod.broadcastUpdate(server,
@@ -1113,7 +1113,7 @@ public class CustomBlockCommand {
                     if (anim != null) SlotManager.setAnimMeta(id, anim);
                     SlotManager.pushUndoCreate(id);
                     CustomBlocksMod.broadcastUpdate(server,
-                        new SlotUpdatePayload("add", d.index, id, name, b, d.lightLevel, d.hardness, d.soundType));
+                        new SlotUpdatePayload("add", d.index, id, name, b, d.lightLevel, d.hardness, d.soundType, null, null, d.animMeta));
                     created++;
                 }
                 if (created > 0) SlotManager.saveAll();

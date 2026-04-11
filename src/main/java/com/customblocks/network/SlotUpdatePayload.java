@@ -15,23 +15,33 @@ public record SlotUpdatePayload(
         float  hardness,
         String soundType,
         String face,
-        String shapeData
+        String shapeData,
+        String animMeta    // animation mcmeta JSON; null = not animated
 ) implements CustomPayload {
 
-    /** Convenience constructor — no face, no shapeData. */
+    /** No face, no shapeData, no animMeta. */
     public SlotUpdatePayload(String action, int slotIndex, String customId,
                               String displayName, byte[] texture,
                               int lightLevel, float hardness, String soundType) {
         this(action, slotIndex, customId, displayName, texture,
-             lightLevel, hardness, soundType, null, null);
+             lightLevel, hardness, soundType, null, null, null);
     }
 
-    /** Convenience constructor — face but no shapeData. */
+    /** With face, no shapeData, no animMeta. */
     public SlotUpdatePayload(String action, int slotIndex, String customId,
                               String displayName, byte[] texture,
                               int lightLevel, float hardness, String soundType, String face) {
         this(action, slotIndex, customId, displayName, texture,
-             lightLevel, hardness, soundType, face, null);
+             lightLevel, hardness, soundType, face, null, null);
+    }
+
+    /** With face and shapeData, no animMeta. */
+    public SlotUpdatePayload(String action, int slotIndex, String customId,
+                              String displayName, byte[] texture,
+                              int lightLevel, float hardness, String soundType,
+                              String face, String shapeData) {
+        this(action, slotIndex, customId, displayName, texture,
+             lightLevel, hardness, soundType, face, shapeData, null);
     }
 
     public static final Id<SlotUpdatePayload> ID =
@@ -49,6 +59,7 @@ public record SlotUpdatePayload(
                 buf.writeString(value.soundType()   != null ? value.soundType()   : "stone");
                 buf.writeString(value.face()        != null ? value.face()        : "");
                 buf.writeString(value.shapeData()   != null ? value.shapeData()   : "");
+                buf.writeString(value.animMeta()    != null ? value.animMeta()    : "");
             },
             buf -> {
                 String action     = buf.readString();
@@ -61,6 +72,7 @@ public record SlotUpdatePayload(
                 String soundType  = buf.readString();
                 String face       = buf.readableBytes() > 0 ? buf.readString() : "";
                 String shapeData  = buf.readableBytes() > 0 ? buf.readString() : "";
+                String animMeta   = buf.readableBytes() > 0 ? buf.readString() : "";
                 if (buf.readableBytes() > 0) buf.skipBytes(buf.readableBytes());
                 return new SlotUpdatePayload(
                         action, index,
@@ -70,7 +82,8 @@ public record SlotUpdatePayload(
                         lightLevel, hardness,
                         soundType.isEmpty() ? "stone" : soundType,
                         face.isEmpty()      ? null : face,
-                        shapeData.isEmpty() ? null : shapeData
+                        shapeData.isEmpty() ? null : shapeData,
+                        animMeta.isEmpty()  ? null : animMeta
                 );
             }
     );

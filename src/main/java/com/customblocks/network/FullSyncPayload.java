@@ -8,7 +8,7 @@ import net.minecraft.util.Identifier;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Server → Client on join. Metadata only (textures come via SlotUpdatePayload). */
+/** Server → Client on join. Metadata + animMeta per slot (textures come via SlotUpdatePayload). */
 public record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture) implements CustomPayload {
 
     public static final Id<FullSyncPayload> ID =
@@ -21,8 +21,15 @@ public record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture) im
             byte[] texture,
             int    lightLevel,
             float  hardness,
-            String soundType
-    ) {}
+            String soundType,
+            String animMeta    // NEW: null if not animated
+    ) {
+        /** Legacy constructor without animMeta. */
+        public SlotEntry(int index, String customId, String displayName, byte[] texture,
+                         int lightLevel, float hardness, String soundType) {
+            this(index, customId, displayName, texture, lightLevel, hardness, soundType, null);
+        }
+    }
 
     public static final PacketCodec<PacketByteBuf, FullSyncPayload> CODEC = PacketCodec.of(
             (value, buf) -> {
@@ -35,6 +42,7 @@ public record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture) im
                     buf.writeVarInt(e.lightLevel());
                     buf.writeFloat(e.hardness());
                     buf.writeString(e.soundType() != null ? e.soundType() : "stone");
+                    buf.writeString(e.animMeta()  != null ? e.animMeta()  : "");
                 }
                 buf.writeByteArray(value.tabIconTexture() != null ? value.tabIconTexture() : new byte[0]);
             },
@@ -49,8 +57,10 @@ public record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture) im
                     int    lightLevel  = buf.readVarInt();
                     float  hardness    = buf.readFloat();
                     String soundType   = buf.readString();
+                    String animMeta    = buf.readableBytes() > 0 ? buf.readString() : "";
                     entries.add(new SlotEntry(index, id, name,
-                            tex.length > 0 ? tex : null, lightLevel, hardness, soundType));
+                            tex.length > 0 ? tex : null, lightLevel, hardness, soundType,
+                            animMeta.isEmpty() ? null : animMeta));
                 }
                 byte[] tabIcon = buf.readByteArray(10_485_760);
                 if (buf.readableBytes() > 0) buf.skipBytes(buf.readableBytes());
