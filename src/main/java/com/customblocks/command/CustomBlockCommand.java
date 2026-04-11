@@ -176,9 +176,23 @@ public class CustomBlockCommand {
                                 StringArgumentType.getString(ctx, "id"),
                                 StringArgumentType.getString(ctx, "type"))))))
 
+                // ── showbrokenblocks ────────────────────────────────────────
+                .then(CommandManager.literal("showbrokenblocks")
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) GuiManager.openBrokenBlocks(p);
+                        else ctx.getSource().sendError(Text.literal("Player only."));
+                        return 1;
+                    }))
+
                 // ── settabicon ──────────────────────────────────────────────
                 .then(CommandManager.literal("settabicon")
-                    .executes(ctx -> usage(ctx.getSource(), "settabicon"))
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) GuiManager.openTabIconMenu(p);
+                        else ctx.getSource().sendError(Text.literal("Player only."));
+                        return 1;
+                    })
                     .then(CommandManager.argument("url", StringArgumentType.greedyString())
                         .executes(ctx -> cmdSetTabIcon(ctx.getSource(),
                             StringArgumentType.getString(ctx, "url").trim()))))

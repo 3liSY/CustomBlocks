@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class SlotManager {
 
-    public static final int MAX_SLOTS = 512;
+    public static final int MAX_SLOTS = 2048;
     private static final Logger LOGGER = LoggerFactory.getLogger("CustomBlocks/SlotManager");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 

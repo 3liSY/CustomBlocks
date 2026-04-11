@@ -604,6 +604,31 @@ public final class ImageProcessor {
     }
 
     /**
+     * Checks if a texture is mostly alternating magenta (#FF00FF) and black (#000000).
+     */
+    public static boolean isBrokenTexture(byte[] pngBytes) {
+        try {
+            BufferedImage img = ImageIO.read(new ByteArrayInputStream(pngBytes));
+            if (img == null) return false;
+            int w = img.getWidth(), h = img.getHeight();
+            int brokenPixels = 0;
+            int totalPixels = w * h;
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    int argb = img.getRGB(x, y);
+                    int r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
+                    if ((r == 255 && g == 0 && b == 255) || (r == 0 && g == 0 && b == 0)) {
+                        brokenPixels++;
+                    }
+                }
+            }
+            return brokenPixels > (totalPixels * 0.9);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
      * Detect AVIF format (ISO Base Media File Format with 'avif' or 'avis' brand).
      * AVIF starts with a ftyp box containing 'avif' or 'avis' as the major brand.
      */

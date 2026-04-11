@@ -493,10 +493,10 @@ public class ResourcePackGenerator {
                                        float u1, float v1, float u2, float v2) {
         JsonObject faceObj = new JsonObject();
         com.google.gson.JsonArray uv = new com.google.gson.JsonArray();
-        uv.add(Math.max(0f, Math.min(16f, u1)));
-        uv.add(Math.max(0f, Math.min(16f, v1)));
-        uv.add(Math.max(0f, Math.min(16f, u2)));
-        uv.add(Math.max(0f, Math.min(16f, v2)));
+        uv.add(0f);
+        uv.add(0f);
+        uv.add(16f);
+        uv.add(16f);
         faceObj.add("uv", uv);
         faceObj.addProperty("texture", "#" + FACE_TO_MC.get(cbFaceName));
         faceObj.addProperty("cullface", mcFaceName);

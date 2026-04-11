@@ -47,7 +47,7 @@ public class CustomBlocksMod implements ModInitializer {
     private static final Map<UUID, ConcurrentLinkedQueue<SlotUpdatePayload>> PENDING_TEXTURES = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<UUID, Integer> SEND_DELAY = new java.util.concurrent.ConcurrentHashMap<>();
     private static final int DELAY_TICKS = 60;  // 3s after join before sending textures
-    private static final int BATCH_SIZE   = 4;  // textures per tick — slow & steady, no kick risk
+    private static final int BATCH_SIZE   = 32;  // textures per tick — faster sync
 
     public static final RegistryKey<net.minecraft.item.ItemGroup> CUSTOM_BLOCKS_TAB =
             RegistryKey.of(RegistryKeys.ITEM_GROUP, Identifier.of(MOD_ID, "blocks"));
@@ -55,7 +55,7 @@ public class CustomBlocksMod implements ModInitializer {
     @Override
     public void onInitialize() {
 
-        // Register 512 slot blocks — ALWAYS the same 512, no runtime changes = no registry mismatch
+        // Register 2048 slot blocks — ALWAYS the same 2048, no runtime changes = no registry mismatch
         for (int i = 0; i < SlotManager.MAX_SLOTS; i++) {
             final int idx = i;
 
