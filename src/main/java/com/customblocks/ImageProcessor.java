@@ -201,20 +201,20 @@ public final class ImageProcessor {
         final int[][] DIRS = {{1,0},{-1,0},{0,1},{0,-1}};
         boolean[][] isBg   = new boolean[w][h];
 
-        // ── Stage 1: BFS flood-fill from corners ─────────────────────────────
-        int[][] corners = {{0,0},{w-1,0},{0,h-1},{w-1,h-1}};
-        boolean hasBgCorner = false;
-        for (int[] c : corners)
-            if (isBackground(argb.getRGB(c[0], c[1]))) { hasBgCorner = true; break; }
+        // ── Stage 1: BFS flood-fill from ALL border pixels ───────────────────
+        // Seed from every pixel on the 4 edges (not just corners) so that white
+        // outlines touching any edge are caught, not just the 4 corner pixels.
+        Queue<int[]> queue = new ArrayDeque<>();
+        for (int x = 0; x < w; x++) {
+            if (!isBg[x][0]   && isBackground(argb.getRGB(x, 0)))   { isBg[x][0]   = true; queue.add(new int[]{x, 0});   }
+            if (!isBg[x][h-1] && isBackground(argb.getRGB(x, h-1))) { isBg[x][h-1] = true; queue.add(new int[]{x, h-1}); }
+        }
+        for (int y = 1; y < h - 1; y++) {
+            if (!isBg[0][y]   && isBackground(argb.getRGB(0, y)))   { isBg[0][y]   = true; queue.add(new int[]{0, y});   }
+            if (!isBg[w-1][y] && isBackground(argb.getRGB(w-1, y))) { isBg[w-1][y] = true; queue.add(new int[]{w-1, y}); }
+        }
 
-        if (hasBgCorner) {
-            Queue<int[]> queue = new ArrayDeque<>();
-            for (int[] c : corners) {
-                if (!isBg[c[0]][c[1]] && isBackground(argb.getRGB(c[0], c[1]))) {
-                    isBg[c[0]][c[1]] = true;
-                    queue.add(c);
-                }
-            }
+        if (!queue.isEmpty()) {
             while (!queue.isEmpty()) {
                 int[] px = queue.poll();
                 int x = px[0], y = px[1];
@@ -461,9 +461,15 @@ public final class ImageProcessor {
             java.util.List<Integer> delays = new java.util.ArrayList<>();
             BufferedImage composite = new BufferedImage(fw, fh, BufferedImage.TYPE_INT_ARGB);
 
+            // Track previous frame geometry for disposal handling
+            int prevFX = 0, prevFY = 0, prevFW = fw, prevFH = fh;
+            String prevDisposal = "doNotDispose";
+
             for (int i = 0; i < numFrames; i++) {
                 BufferedImage frame = reader.read(i);
                 int delayCsecs = 10;
+                int frameX = 0, frameY = 0;
+                String disposal = "doNotDispose";
                 try {
                     IIOMetadata meta = reader.getImageMetadata(i);
                     String fmt = meta.getNativeMetadataFormatName();
@@ -471,19 +477,51 @@ public final class ImageProcessor {
                     org.w3c.dom.NodeList children = root.getChildNodes();
                     for (int j = 0; j < children.getLength(); j++) {
                         org.w3c.dom.Node child = children.item(j);
-                        if ("GraphicControlExtension".equals(child.getNodeName())) {
+                        String nodeName = child.getNodeName();
+                        if ("GraphicControlExtension".equals(nodeName)) {
                             org.w3c.dom.NamedNodeMap attrs = child.getAttributes();
                             org.w3c.dom.Node d = attrs.getNamedItem("delayTime");
                             if (d != null) delayCsecs = Integer.parseInt(d.getNodeValue());
+                            org.w3c.dom.Node dm = attrs.getNamedItem("disposalMethod");
+                            if (dm != null) disposal = dm.getNodeValue();
+                        } else if ("ImageDescriptor".equals(nodeName)) {
+                            org.w3c.dom.NamedNodeMap attrs = child.getAttributes();
+                            org.w3c.dom.Node lp = attrs.getNamedItem("imageLeftPosition");
+                            org.w3c.dom.Node tp = attrs.getNamedItem("imageTopPosition");
+                            if (lp != null) frameX = Integer.parseInt(lp.getNodeValue());
+                            if (tp != null) frameY = Integer.parseInt(tp.getNodeValue());
                         }
                     }
                 } catch (Exception ignored) {}
                 int ticks = Math.max(1, delayCsecs / 5);
                 delays.add(ticks);
+
+                // Apply previous frame's disposal method before drawing this frame
+                if ("restoreToBackgroundColor".equals(prevDisposal)) {
+                    // Clear the region the previous frame occupied
+                    Graphics2D cg = composite.createGraphics();
+                    cg.setComposite(AlphaComposite.Clear);
+                    cg.fillRect(prevFX, prevFY, prevFW, prevFH);
+                    cg.dispose();
+                } else if ("restoreToPrevious".equals(prevDisposal)) {
+                    // Full clear — safest fallback
+                    Graphics2D cg = composite.createGraphics();
+                    cg.setComposite(AlphaComposite.Clear);
+                    cg.fillRect(0, 0, fw, fh);
+                    cg.dispose();
+                }
+                // "doNotDispose" — keep composite as-is (accumulate)
+
+                // Draw this frame at its correct offset position
                 Graphics2D cg = composite.createGraphics();
-                cg.drawImage(frame, 0, 0, null);
+                cg.setComposite(AlphaComposite.SrcOver);
+                cg.drawImage(frame, frameX, frameY, null);
                 cg.dispose();
                 frames.add(copyArgb(composite));
+
+                prevFX = frameX; prevFY = frameY;
+                prevFW = frame.getWidth(); prevFH = frame.getHeight();
+                prevDisposal = disposal;
             }
             reader.dispose();
 

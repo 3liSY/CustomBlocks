@@ -88,6 +88,13 @@ public class CustomBlockCommand {
                         .suggests(BLOCK_SUGGESTIONS)
                         .executes(ctx -> cmdDelete(ctx.getSource(), StringArgumentType.getString(ctx, "id")))))
 
+                // ── bulkdelete ──────────────────────────────────────────────
+                .then(CommandManager.literal("bulkdelete")
+                    .executes(ctx -> usage(ctx.getSource(), "bulkdelete"))
+                    .then(CommandManager.argument("ids", StringArgumentType.greedyString())
+                        .executes(ctx -> cmdBulkDelete(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "ids")))))
+
                 // ── rename ──────────────────────────────────────────────────
                 .then(CommandManager.literal("rename")
                     .executes(ctx -> usage(ctx.getSource(), "rename"))
@@ -342,7 +349,45 @@ public class CustomBlockCommand {
                             StringArgumentType.getString(ctx, "color")))))
 
                 .then(CommandManager.literal("rectangle")
-                    .executes(ctx -> cmdGiveRectangle(ctx.getSource())));
+                    .executes(ctx -> cmdGiveRectangle(ctx.getSource())))
+
+                // ── setface ──────────────────────────────────────────────────
+                .then(CommandManager.literal("setface")
+                    .executes(ctx -> usage(ctx.getSource(), "setface"))
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("face", StringArgumentType.word()).suggests(FACE_SUGGESTIONS)
+                            .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
+                                .then(CommandManager.argument("url", StringArgumentType.greedyString())
+                                    .executes(ctx -> cmdSetFace(ctx.getSource(),
+                                        StringArgumentType.getString(ctx, "id"),
+                                        StringArgumentType.getString(ctx, "face"),
+                                        StringArgumentType.getString(ctx, "url").trim(),
+                                        IntegerArgumentType.getInteger(ctx, "size")))))
+                            .then(CommandManager.argument("url", StringArgumentType.greedyString())
+                                .executes(ctx -> cmdSetFace(ctx.getSource(),
+                                    StringArgumentType.getString(ctx, "id"),
+                                    StringArgumentType.getString(ctx, "face"),
+                                    StringArgumentType.getString(ctx, "url").trim(),
+                                    ImageProcessor.DEFAULT_SIZE))))))
+
+                // ── clearface ────────────────────────────────────────────────
+                .then(CommandManager.literal("clearface")
+                    .executes(ctx -> usage(ctx.getSource(), "clearface"))
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("face", StringArgumentType.word()).suggests(FACE_SUGGESTIONS)
+                            .executes(ctx -> cmdClearFace(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "id"),
+                                StringArgumentType.getString(ctx, "face"))))))
+
+                // ── clearallfaces ────────────────────────────────────────────
+                .then(CommandManager.literal("clearallfaces")
+                    .executes(ctx -> usage(ctx.getSource(), "clearallfaces"))
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .executes(ctx -> cmdClearAllFaces(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "id")))));
 
             dispatcher.register(tree);
             dispatcher.register(CommandManager.literal("cb")
@@ -446,6 +491,29 @@ public class CustomBlockCommand {
             new SlotUpdatePayload("remove", d.index, id, null, null, 0, 0, "stone"));
         src.sendMessage(Text.literal("§a[CustomBlocks] '" + id + "' deleted."));
         return 1;
+    }
+
+    private static int cmdBulkDelete(ServerCommandSource src, String idsRaw) {
+        String[] ids = idsRaw.trim().split("\\s+");
+        List<String> deleted = new ArrayList<>();
+        List<String> notFound = new ArrayList<>();
+        for (String id : ids) {
+            if (!SlotManager.hasId(id)) { notFound.add(id); continue; }
+            SlotManager.SlotData d = SlotManager.getById(id);
+            SlotManager.pushUndoDelete(id);
+            SlotManager.remove(id);
+            CustomBlocksMod.broadcastUpdate(src.getServer(),
+                new SlotUpdatePayload("remove", d.index, id, null, null, 0, 0, "stone"));
+            deleted.add(id);
+        }
+        if (!deleted.isEmpty()) {
+            SlotManager.saveAll();
+            src.sendMessage(Text.literal("§a[CustomBlocks] Deleted: " + String.join(", ", deleted)));
+        }
+        if (!notFound.isEmpty()) {
+            src.sendError(Text.literal("§c[CustomBlocks] Not found: " + String.join(", ", notFound)));
+        }
+        return deleted.isEmpty() ? 0 : 1;
     }
 
     private static int cmdRename(ServerCommandSource src, String id, String newName) {
@@ -1104,6 +1172,7 @@ public class CustomBlockCommand {
 
             server.execute(() -> {
                 int created = 0;
+                java.util.List<String> createdIds = new java.util.ArrayList<>();
                 for (int i = 0; i < toAdd.size(); i++) {
                     String id = toAdd.get(i)[0], name = toAdd.get(i)[1];
                     byte[] b = toBytes.get(i);
@@ -1115,6 +1184,7 @@ public class CustomBlockCommand {
                     CustomBlocksMod.broadcastUpdate(server,
                         new SlotUpdatePayload("add", d.index, id, name, b, d.lightLevel, d.hardness, d.soundType, null, null, d.animMeta));
                     created++;
+                    createdIds.add("§b" + id + "§7(§f" + name + "§7)" + (anim != null ? " §d[GIF]" : ""));
                 }
                 if (created > 0) SlotManager.saveAll();
                 StringBuilder msg = new StringBuilder("§a[CustomBlocks] Done! §f" + created + " created");
@@ -1122,6 +1192,10 @@ public class CustomBlockCommand {
                 if (!failed.isEmpty())  msg.append("§c, ").append(failed.size()).append(" failed");
                 src.sendMessage(Text.literal(msg.toString()));
                 src.sendMessage(Text.literal("§7Slots: " + SlotManager.usedSlots() + " / " + SlotManager.MAX_SLOTS));
+                if (!createdIds.isEmpty())
+                    src.sendMessage(Text.literal("§7Created blocks: " + String.join("§7, ", createdIds)));
+                if (!skipped.isEmpty())
+                    src.sendMessage(Text.literal("§7Skipped (already exist): §e" + String.join("§7, §e", skipped)));
                 if (!failed.isEmpty())
                     src.sendMessage(Text.literal("§cFailed: " + String.join(", ", failed)));
             });
@@ -1351,6 +1425,7 @@ public class CustomBlockCommand {
 
     private static int usage(ServerCommandSource src, String cmd) {
         src.sendError(Text.literal(switch (cmd) {
+            case "bulkdelete"    -> "§cUsage: /cb bulkdelete <id1> <id2> ...  — delete multiple blocks at once";
             case "delete"       -> "§cUsage: /cb delete <id>";
             case "rename"       -> "§cUsage: /cb rename <id> <newname>";
             case "reid"         -> "§cUsage: /cb reid <id> <newid>  — changes the block's ID (lowercase, a-z 0-9 _ -)";

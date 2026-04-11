@@ -1,8 +1,7 @@
 package com.customblocks.block;
 
 import com.customblocks.SlotManager;
-import com.customblocks.network.OpenAnimGuiPayload;
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import com.customblocks.gui.GuiManager;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.ShapeContext;
@@ -54,26 +53,9 @@ public class SlotBlock extends Block {
         if (data == null || !data.isAnimated()) return ActionResult.PASS;
 
         if (player instanceof ServerPlayerEntity sp) {
-            // Count frames from the animMeta
-            int frames = countFrames(data.animMeta);
-            ServerPlayNetworking.send(sp, new OpenAnimGuiPayload(
-                    data.customId,
-                    data.displayName,
-                    data.animMeta,
-                    frames
-            ));
+            GuiManager.openAnimGui(sp, data.customId);
         }
         return ActionResult.SUCCESS;
-    }
-
-    /** Parse frame count from animMeta JSON without full Gson dependency. */
-    private static int countFrames(String animMeta) {
-        if (animMeta == null) return 0;
-        // Quick count of "index": occurrences
-        int count = 0;
-        int idx = 0;
-        while ((idx = animMeta.indexOf("\"index\"", idx)) != -1) { count++; idx += 7; }
-        return count > 0 ? count : 1;
     }
 
     @Override

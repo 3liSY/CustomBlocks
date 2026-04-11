@@ -5,6 +5,10 @@ import com.customblocks.ImageProcessor;
 import com.customblocks.SlotManager;
 import com.customblocks.block.SlotBlock;
 import com.customblocks.network.SlotUpdatePayload;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.LoreComponent;
 import net.minecraft.inventory.SimpleInventory;
@@ -21,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class GuiManager {
 
-    public enum GuiMode { MAIN, EDITOR, FACE_EDITOR, SHAPE_EDITOR, ADMIN_GUI }
+    public enum GuiMode { MAIN, EDITOR, FACE_EDITOR, SHAPE_EDITOR, ADMIN_GUI, ANIM_GUI }
 
     public record GuiState(GuiMode mode, int page, String editingId, boolean confirmDelete,
                            int shapeBoxPage, boolean fromCommand) {
@@ -31,9 +35,13 @@ public class GuiManager {
         static GuiState faceEditor(String id, int p)       { return new GuiState(GuiMode.FACE_EDITOR,  p,    id,           false, 0, false); }
         static GuiState shapeEditor(String id, int p)      { return new GuiState(GuiMode.SHAPE_EDITOR, p,    id,           false, 0, false); }
         static GuiState adminGui()                         { return new GuiState(GuiMode.ADMIN_GUI,    0,    null,         false, 0, false); }
+        static GuiState animGui(String id)                 { return new GuiState(GuiMode.ANIM_GUI,     0,    id,           false, 0, false); }
         public GuiState withConfirmDelete()                { return new GuiState(mode, page, editingId, true,  shapeBoxPage, fromCommand); }
         public GuiState withShapeBoxPage(int bp)           { return new GuiState(mode, page, editingId, confirmDelete, bp, fromCommand); }
     }
+
+    private record AnimParams(float fps, boolean interpolate, int frameCount) {}
+    private static final Map<UUID, AnimParams> ANIM_PARAMS = new ConcurrentHashMap<>();
 
     public enum InputAction {
         CREATE_ID, CREATE_NAME, CREATE_URL,
@@ -117,6 +125,10 @@ public class GuiManager {
                 STATES.remove(player.getUuid());
                 PENDING.remove(player.getUuid());
             }
+            case ANIM_GUI -> {
+                ANIM_PARAMS.remove(player.getUuid());
+                STATES.remove(player.getUuid());
+            }
         }
     }
 
@@ -190,6 +202,7 @@ public class GuiManager {
             case FACE_EDITOR  -> handleFaceEditorClick(player, state, slot, button);
             case SHAPE_EDITOR -> handleShapeEditorClick(player, state, slot, button);
             case ADMIN_GUI    -> handleAdminGuiClick(player, state, slot, button);
+            case ANIM_GUI     -> handleAnimGuiClick(player, state, slot);
         }
     }
 
@@ -247,7 +260,8 @@ public class GuiManager {
                         if (d == null) { send(player, "§cNo free slots!"); openMain(player, rp); return; }
                         if (fa != null) SlotManager.setAnimMeta(id, fa);
                         SlotManager.pushUndoCreate(id); SlotManager.saveAll();
-                        CustomBlocksMod.broadcastUpdate(srv, new SlotUpdatePayload("add", d.index, id, name, fb, d.lightLevel, d.hardness, d.soundType));
+                        SlotManager.SlotData updated = SlotManager.getById(id);
+                        CustomBlocksMod.broadcastUpdate(srv, new SlotUpdatePayload("add", d.index, id, name, fb, d.lightLevel, d.hardness, d.soundType, null, null, updated != null ? updated.animMeta : fa));
                         send(player, "§a[GUI] Created '§f" + name + "§a'! §7(slot #" + d.index + ")");
                         openEditor(player, id, rp);
                     });
@@ -330,7 +344,7 @@ public class GuiManager {
                         SlotManager.pushUndoCreate(varId); SlotManager.saveAll();
                         SlotManager.SlotData fresh = SlotManager.getById(varId);
                         if (fresh != null) {
-                            CustomBlocksMod.broadcastUpdate(srv, new SlotUpdatePayload("add", fresh.index, varId, varName, texCopy, fresh.lightLevel, fresh.hardness, fresh.soundType));
+                            CustomBlocksMod.broadcastUpdate(srv, new SlotUpdatePayload("add", fresh.index, varId, varName, texCopy, fresh.lightLevel, fresh.hardness, fresh.soundType, null, null, fresh.animMeta));
                             for (var fe : fresh.faceTextures.entrySet())
                                 CustomBlocksMod.broadcastUpdate(srv, new SlotUpdatePayload("setface", fresh.index, varId, null, fe.getValue(), fresh.lightLevel, fresh.hardness, fresh.soundType, fe.getKey()));
                         }
@@ -411,9 +425,15 @@ public class GuiManager {
                 SlotManager.reId(blockId, newId); SlotManager.saveAll();
                 SlotManager.SlotData upd = SlotManager.getById(newId);
                 CustomBlocksMod.broadcastUpdate(player.getServer(), new SlotUpdatePayload("remove", d.index, blockId, null, null, 0, 0, "stone"));
-                CustomBlocksMod.broadcastUpdate(player.getServer(), new SlotUpdatePayload("add", upd.index, newId, upd.displayName, upd.texture, upd.lightLevel, upd.hardness, upd.soundType));
+                CustomBlocksMod.broadcastUpdate(player.getServer(), new SlotUpdatePayload("add", upd.index, newId, upd.displayName, upd.texture, upd.lightLevel, upd.hardness, upd.soundType, null, null, upd.animMeta));
                 send(player, "§a[CustomBlocks] Re-ID'd '§f" + blockId + "§a' → '§f" + newId + "§a'.");
                 openEditor(player, newId, rp); return true;
+            }
+            case ADMIN_CUSTOM_TITLE -> {
+                // Reserved for future admin GUI custom title input — gracefully cancel and reopen admin panel
+                send(player, "§7[CustomBlocks] Action cancelled.");
+                openAdminGui(player);
+                return true;
             }
         }
         return false;
@@ -520,7 +540,7 @@ public class GuiManager {
             SlotManager.SlotData d = SlotManager.getById(prev.customId);
             if (d != null) {
                 if (entry.wasDeleted()) {
-                    CustomBlocksMod.broadcastUpdate(gsrv, new SlotUpdatePayload("add", d.index, d.customId, d.displayName, d.texture, d.lightLevel, d.hardness, d.soundType));
+                    CustomBlocksMod.broadcastUpdate(gsrv, new SlotUpdatePayload("add", d.index, d.customId, d.displayName, d.texture, d.lightLevel, d.hardness, d.soundType, null, null, d.animMeta));
                     for (var fe : d.faceTextures.entrySet()) CustomBlocksMod.broadcastUpdate(gsrv, new SlotUpdatePayload("setface", d.index, d.customId, null, fe.getValue(), d.lightLevel, d.hardness, d.soundType, fe.getKey()));
                 } else {
                     if (d.texture != null) CustomBlocksMod.broadcastUpdate(gsrv, new SlotUpdatePayload("retexture", d.index, d.customId, null, d.texture, d.lightLevel, d.hardness, d.soundType));
@@ -562,7 +582,7 @@ public class GuiManager {
             SlotManager.SlotData d = SlotManager.getById(prev.customId);
             if (d != null) {
                 if (entry.wasDeleted()) {
-                    CustomBlocksMod.broadcastUpdate(gsrv, new SlotUpdatePayload("add", d.index, d.customId, d.displayName, d.texture, d.lightLevel, d.hardness, d.soundType));
+                    CustomBlocksMod.broadcastUpdate(gsrv, new SlotUpdatePayload("add", d.index, d.customId, d.displayName, d.texture, d.lightLevel, d.hardness, d.soundType, null, null, d.animMeta));
                 } else {
                     if (d.texture != null) CustomBlocksMod.broadcastUpdate(gsrv, new SlotUpdatePayload("retexture", d.index, d.customId, null, d.texture, d.lightLevel, d.hardness, d.soundType));
                     CustomBlocksMod.broadcastUpdate(gsrv, new SlotUpdatePayload("clearfaces", d.index, d.customId, null, null, d.lightLevel, d.hardness, d.soundType));
@@ -748,7 +768,7 @@ public class GuiManager {
         SlotManager.pushUndoCreate(varId); SlotManager.saveAll();
         SlotManager.SlotData fresh = SlotManager.getById(varId);
         if (fresh != null) {
-            CustomBlocksMod.broadcastUpdate(player.getServer(), new SlotUpdatePayload("add",fresh.index,varId,varName,texCopy,fresh.lightLevel,fresh.hardness,fresh.soundType));
+            CustomBlocksMod.broadcastUpdate(player.getServer(), new SlotUpdatePayload("add",fresh.index,varId,varName,texCopy,fresh.lightLevel,fresh.hardness,fresh.soundType,null,null,fresh.animMeta));
             for (var fe : fresh.faceTextures.entrySet()) CustomBlocksMod.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setface",fresh.index,varId,null,fe.getValue(),fresh.lightLevel,fresh.hardness,fresh.soundType,fe.getKey()));
             broadcastShape(player.getServer(), fresh);
             if (fresh.noCollision) CustomBlocksMod.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setcollision",fresh.index,varId,null,null,0,0,"stone",null,"false"));
@@ -1137,6 +1157,153 @@ public class GuiManager {
         for(int i=48;i<=52;i++) inv.setStack(i,glass());
         inv.setStack(53,uiGlint(Items.CHEST,"§a▶ Give 1x","§7Gives 1x §f"+d.displayName));
         return inv;
+    }
+
+    // ── Anim GUI (chest-based animation settings) ─────────────────────────────
+
+    public static void openAnimGui(ServerPlayerEntity player, String id) {
+        SlotManager.SlotData d = SlotManager.getById(id);
+        if (d == null || !d.isAnimated()) return;
+
+        // Parse current fps + interpolate from stored animMeta
+        float fps = 10f;
+        boolean interp = false;
+        int frameCount = 1;
+        try {
+            JsonObject root = JsonParser.parseString(d.animMeta).getAsJsonObject();
+            JsonObject anim = root.getAsJsonObject("animation");
+            interp = anim.has("interpolate") && anim.get("interpolate").getAsBoolean();
+            if (anim.has("frames")) {
+                JsonArray framesArr = anim.getAsJsonArray("frames");
+                frameCount = framesArr.size();
+                if (frameCount > 0) {
+                    long totalTicks = 0;
+                    for (JsonElement el : framesArr) {
+                        int t = el.isJsonObject() && el.getAsJsonObject().has("time")
+                            ? el.getAsJsonObject().get("time").getAsInt() : 1;
+                        totalTicks += t;
+                    }
+                    fps = Math.round((20f / ((float) totalTicks / frameCount)) * 10f) / 10f;
+                }
+            } else if (anim.has("frametime")) {
+                int ft = anim.get("frametime").getAsInt();
+                fps = Math.round((20f / ft) * 10f) / 10f;
+            }
+        } catch (Exception ignored) {}
+
+        final float finalFps = fps;
+        final boolean finalInterp = interp;
+        final int finalFrames = frameCount;
+        ANIM_PARAMS.put(player.getUuid(), new AnimParams(fps, interp, frameCount));
+        STATES.put(player.getUuid(), GuiState.animGui(id));
+        openScreen(player, new SimpleNamedScreenHandlerFactory(
+            (s, pi, p) -> new CbScreenHandler(s, pi, buildAnimGui(id, finalFps, finalInterp, finalFrames)),
+            Text.literal("§b§l▶ §r§fAnimation Settings §8— §b" + d.displayName)));
+    }
+
+    private static SimpleInventory buildAnimGui(String id, float fps, boolean interp, int frameCount) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+
+        SlotManager.SlotData d = SlotManager.getById(id);
+        String blockName = d != null ? d.displayName : id;
+        int ticks = Math.max(1, Math.round(20f / Math.max(0.5f, fps)));
+
+        // Row 0 – info header
+        inv.setStack(4, uiGlint(Items.PAPER,
+            "§e§l" + blockName,
+            "§7Frames: §f" + frameCount,
+            "§7Current FPS: §f" + String.format("%.1f", fps),
+            "§7" + ticks + " tick(s)/frame  §8(20 ticks = 1 sec)",
+            "§7Interpolate: " + (interp ? "§aON" : "§cOFF")));
+
+        // Row 1 – FPS adjust (slots 9-17)
+        inv.setStack(9,  ui(Items.SPECTRAL_ARROW, "§c§l<< §r§c-10 fps"));
+        inv.setStack(10, ui(Items.ARROW,           "§c§l<  §r§c-1 fps"));
+        inv.setStack(13, uiGlint(Items.CLOCK,
+            "§e" + String.format("%.1f", fps) + " fps",
+            "§7= " + ticks + " tick(s)/frame"));
+        inv.setStack(16, ui(Items.ARROW,           "§a+1 fps  §l>"));
+        inv.setStack(17, ui(Items.SPECTRAL_ARROW,  "§a+10 fps §l>>"));
+
+        // Row 2 – speed presets (slots 18-26)
+        inv.setStack(18, ui(Items.LIME_DYE,   "§a5 fps  §8— Slow"));
+        inv.setStack(20, ui(Items.YELLOW_DYE, "§e10 fps §8— Normal"));
+        inv.setStack(22, ui(Items.GOLD_INGOT, "§620 fps §8— Fast"));
+        inv.setStack(24, ui(Items.BLAZE_ROD,  "§c30 fps §8— Ultra"));
+
+        // Row 3 – interpolate toggle (slot 27)
+        inv.setStack(27, interp
+            ? uiGlint(Items.LIME_WOOL,  "§aInterpolate: ON",  "§7Smooth transition between frames", "§8Click to toggle OFF")
+            : ui(Items.RED_WOOL,        "§cInterpolate: OFF", "§7No smoothing between frames",      "§8Click to toggle ON"));
+
+        // Row 5 – apply + close
+        inv.setStack(46, uiGlint(Items.EMERALD, "§a§lAPPLY SETTINGS", "§7Saves and broadcasts to all players"));
+        inv.setStack(49, ui(Items.BARRIER,       "§c§lCLOSE",          "§7Discard changes and close"));
+
+        return inv;
+    }
+
+    private static void handleAnimGuiClick(ServerPlayerEntity player, GuiState state, int slot) {
+        String id = state.editingId();
+        AnimParams p = ANIM_PARAMS.getOrDefault(player.getUuid(), new AnimParams(10f, false, 1));
+        float fps = p.fps();
+        boolean interp = p.interpolate();
+        int frames = p.frameCount();
+
+        switch (slot) {
+            case 9  -> fps = Math.max(0.5f, fps - 10);
+            case 10 -> fps = Math.max(0.5f, fps - 1);
+            case 16 -> fps = Math.min(60f,  fps + 1);
+            case 17 -> fps = Math.min(60f,  fps + 10);
+            case 18 -> fps = 5f;
+            case 20 -> fps = 10f;
+            case 22 -> fps = 20f;
+            case 24 -> fps = 30f;
+            case 27 -> interp = !interp;
+            case 46 -> {
+                applyAnimSettings(player, id, fps, interp, frames);
+                ANIM_PARAMS.remove(player.getUuid());
+                STATES.remove(player.getUuid());
+                player.closeHandledScreen();
+                return;
+            }
+            case 49 -> {
+                ANIM_PARAMS.remove(player.getUuid());
+                STATES.remove(player.getUuid());
+                player.closeHandledScreen();
+                return;
+            }
+            default -> { return; }
+        }
+
+        // Round fps to 1 decimal
+        fps = Math.round(fps * 10f) / 10f;
+        ANIM_PARAMS.put(player.getUuid(), new AnimParams(fps, interp, frames));
+        refreshScreen(player, buildAnimGui(id, fps, interp, frames));
+    }
+
+    private static void applyAnimSettings(ServerPlayerEntity player, String id, float fps, boolean interp, int frameCount) {
+        if (!SlotManager.hasId(id)) return;
+        int tickTime = Math.max(1, Math.round(20f / Math.max(0.5f, fps)));
+        StringBuilder sb = new StringBuilder("{\"animation\":{");
+        if (interp) sb.append("\"interpolate\":true,");
+        sb.append("\"frames\":[");
+        for (int i = 0; i < frameCount; i++) {
+            if (i > 0) sb.append(",");
+            sb.append("{\"index\":").append(i).append(",\"time\":").append(tickTime).append("}");
+        }
+        sb.append("]}}");
+        String newMeta = sb.toString();
+        SlotManager.pushUndo(id, "animsettings");
+        SlotManager.setAnimMeta(id, newMeta);
+        SlotManager.saveAll();
+        SlotManager.SlotData d = SlotManager.getById(id);
+        if (d == null) return;
+        SlotUpdatePayload pkt = new SlotUpdatePayload("animsettings", d.index, id, d.displayName,
+                null, d.lightLevel, d.hardness, d.soundType, null, null, newMeta);
+        CustomBlocksMod.broadcastUpdate(player.getServer(), pkt);
+        send(player, "§a[CustomBlocks] Animation saved for '§f" + d.displayName + "§a'  §7(" + String.format("%.1f", fps) + " fps, " + (interp ? "interpolate ON" : "interpolate OFF") + ")");
     }
 
     // ── Small helpers ─────────────────────────────────────────────────────────

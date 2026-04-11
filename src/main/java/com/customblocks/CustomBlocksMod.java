@@ -263,7 +263,7 @@ public class CustomBlocksMod implements ModInitializer {
         CustomBlockCommand.register();
         SlotManager.loadAll();
 
-        LOGGER.info("[CustomBlocks] [CustomBlocks] Initialized. {} slot(s) loaded.", SlotManager.usedSlots());
+        LOGGER.info("[CustomBlocks] Initialized. {} slot(s) loaded.", SlotManager.usedSlots());
     }
 
     /** Re-send full sync + all textures to every connected player (used by /cb reload). */
