@@ -9,7 +9,10 @@ import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import com.customblocks.command.CustomBlockCommand;
 import com.customblocks.network.FullSyncPayload;
 import com.customblocks.network.SlotUpdatePayload;
+import com.customblocks.network.SyncCompletePayload;
+import com.customblocks.server.ResourcePackServer;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.itemgroup.v1.FabricItemGroup;
@@ -47,7 +50,7 @@ public class CustomBlocksMod implements ModInitializer {
     private static final Map<UUID, ConcurrentLinkedQueue<SlotUpdatePayload>> PENDING_TEXTURES = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<UUID, Integer> SEND_DELAY = new java.util.concurrent.ConcurrentHashMap<>();
     private static final int DELAY_TICKS = 60;  // 3s after join before sending textures
-    private static final int BATCH_SIZE   = 32;  // textures per tick — faster sync
+    private static final int BATCH_SIZE   = 8;    // §3: reduced from 32 → eliminates packet flooding
 
     public static final RegistryKey<net.minecraft.item.ItemGroup> CUSTOM_BLOCKS_TAB =
             RegistryKey.of(RegistryKeys.ITEM_GROUP, Identifier.of(MOD_ID, "blocks"));
@@ -62,6 +65,7 @@ public class CustomBlocksMod implements ModInitializer {
             // Dynamic luminance — reads SlotManager at runtime, no restart needed
             AbstractBlock.Settings settings = AbstractBlock.Settings.create()
                     .strength(1.5f, 6.0f)
+                    .nonOpaque()  // §5: Never opaque — renders neighbor block faces like Glass
                     .luminance(state -> {
                         SlotManager.SlotData d = SlotManager.getBySlot("slot_" + idx);
                         return d != null ? d.lightLevel : 0;
@@ -117,6 +121,7 @@ public class CustomBlocksMod implements ModInitializer {
         // Network — S2C
         PayloadTypeRegistry.playS2C().register(FullSyncPayload.ID,    FullSyncPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(SlotUpdatePayload.ID,  SlotUpdatePayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(SyncCompletePayload.ID, SyncCompletePayload.CODEC); // §1
         PayloadTypeRegistry.playS2C().register(com.customblocks.network.OpenAnimGuiPayload.ID,
                 com.customblocks.network.OpenAnimGuiPayload.CODEC);
         // Network — C2S
@@ -256,6 +261,8 @@ public class CustomBlocksMod implements ModInitializer {
                 if (afterQueue == null || afterQueue.isEmpty()) {
                     PENDING_TEXTURES.remove(uuid);
                     SEND_DELAY.remove(uuid);
+                    // §1: explicit signal — client runs exactly one reload instead of guessing
+                    ServerPlayNetworking.send(player, new SyncCompletePayload());
                 }
             }
         });
@@ -263,11 +270,18 @@ public class CustomBlocksMod implements ModInitializer {
         CustomBlockCommand.register();
         SlotManager.loadAll();
 
+        // §2: ResourcePackServer lifecycle
+        ServerLifecycleEvents.SERVER_STARTED.register(s -> ResourcePackServer.start());
+        ServerLifecycleEvents.SERVER_STOPPING.register(s -> ResourcePackServer.stop());
+
         LOGGER.info("[CustomBlocks] Initialized. {} slot(s) loaded.", SlotManager.usedSlots());
     }
 
     /** Re-send full sync + all textures to every connected player (used by /cb reload). */
     public static void broadcastFullSync(MinecraftServer server) {
+        // §2: Hybrid approach — silently regenerate `.zip` for http server during syncing
+        ResourcePackServer.regenerateZip();
+
         for (var player : server.getPlayerManager().getPlayerList()) {
             List<FullSyncPayload.SlotEntry> meta = new java.util.ArrayList<>();
             for (SlotManager.SlotData d : SlotManager.allSlots())

@@ -2,13 +2,10 @@ package com.customblocks.client;
 
 import com.customblocks.CustomBlocksMod;
 import com.customblocks.SlotManager;
+import com.customblocks.ImageProcessor;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
-import net.fabricmc.api.EnvType;
-import net.fabricmc.api.Environment;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.texture.NativeImage;
 
 import java.awt.Color;
 import java.io.*;
@@ -16,7 +13,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.Map;
 
-@Environment(EnvType.CLIENT)
 public class ResourcePackGenerator {
 
     private static final Gson   GSON        = new GsonBuilder().setPrettyPrinting().create();
@@ -34,10 +30,9 @@ public class ResourcePackGenerator {
             "west",   "west"
     );
 
-    public static void generate(MinecraftClient client) {
+    public static void generate(File runDir) {
         try {
-            File mcDir    = client.runDirectory;
-            File packRoot = new File(mcDir, "resourcepacks/customblocks_generated");
+            File packRoot = new File(runDir, "resourcepacks/customblocks_generated");
             File assets   = new File(packRoot, "assets/" + MOD_ID);
 
             new File(assets, "blockstates").mkdirs();
@@ -261,15 +256,35 @@ public class ResourcePackGenerator {
         }
     }
 
-    /** Decodes image bytes (PNG, JPEG, etc) and writes as valid PNG. */
+    /** §2: Server-side generator that creates the explicit .zip for the HTTP host */
+    public static void generateAndZip(File runDir, File outputZip) {
+        generate(runDir);
+        File packRoot = new File(runDir, "resourcepacks/customblocks_generated");
+        try (java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(new FileOutputStream(outputZip))) {
+            Path rootPath = packRoot.toPath();
+            Files.walk(rootPath).filter(path -> !Files.isDirectory(path)).forEach(path -> {
+                try {
+                    String zipEntryName = rootPath.relativize(path).toString().replace('\\', '/');
+                    zos.putNextEntry(new java.util.zip.ZipEntry(zipEntryName));
+                    Files.copy(path, zos);
+                    zos.closeEntry();
+                } catch (IOException e) {
+                    CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to zip file: " + path, e);
+                }
+            });
+            CustomBlocksMod.LOGGER.info("[CustomBlocks] Resource pack ZIP generated at {}", outputZip.getAbsolutePath());
+        } catch (IOException e) {
+            CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to create resource pack ZIP", e);
+        }
+    }
+
+    /** Writes image bytes as PNG. */
     private static void writePng(byte[] imageBytes, File dest) {
-        try (NativeImage img = NativeImage.read(new ByteArrayInputStream(imageBytes))) {
+        try {
             dest.getParentFile().mkdirs();
-            img.writeTo(dest.toPath());
+            Files.write(dest.toPath(), imageBytes);
         } catch (Exception e) {
-            try { Files.write(dest.toPath(), imageBytes); }
-            catch (Exception ignored) {}
-            CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not decode image for {}, wrote raw bytes", dest.getName());
+            CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not write image for {}", dest.getName());
         }
     }
 
