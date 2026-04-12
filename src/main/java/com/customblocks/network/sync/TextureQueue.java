@@ -23,18 +23,20 @@ public final class TextureQueue {
 
     /**
      * Tracks the latest payload per slot-action key to enable deduplication.
-     * Key = "slotIndex:action" e.g. "42:retexture"
+     * Key = "slotIndex:action:face" e.g. "42:retexture:", "42:setface:top"
+     * <p>
+     * The face component is included so that multiple per-face textures on the
+     * same slot (e.g. top, north, south) are treated as separate entries and
+     * not incorrectly collapsed into a single payload (which would silently
+     * discard all but the last face texture).
      */
     private final ConcurrentHashMap<String, SlotUpdatePayload> latest = new ConcurrentHashMap<>();
 
-    public volatile boolean hasNotifiedSyncComplete = true;
-
     /**
-     * Enqueue a payload for broadcast. If a payload with the same slot+action
+     * Enqueue a payload for broadcast. If a payload with the same slot+action+face
      * is already queued, it is replaced (deduplicated).
      */
     public void enqueue(SlotUpdatePayload payload) {
-        hasNotifiedSyncComplete = false;
         String key = dedupeKey(payload);
         SlotUpdatePayload old = latest.put(key, payload);
         if (old != null) {
@@ -82,7 +84,16 @@ public final class TextureQueue {
         latest.clear();
     }
 
+    /**
+     * Build a deduplication key that uniquely identifies a payload by its
+     * slot index, action, and (for setface/clearface) the target face name.
+     * <p>
+     * Previously the key omitted the face component, which caused all
+     * per-face payloads for the same slot to share a key. Enqueuing
+     * "top", "north", and "south" for slot 42 would collapse to only the
+     * last one enqueued — silently dropping the other faces.
+     */
     private static String dedupeKey(SlotUpdatePayload p) {
-        return p.slotIndex() + ":" + p.action();
+        return p.slotIndex() + ":" + p.action() + ":" + (p.face() != null ? p.face() : "");
     }
 }

@@ -48,6 +48,11 @@ public final class NetworkManager {
     /**
      * Send a full metadata sync to a player (on join).
      * Only sends metadata — textures are loaded lazily or via drip-feed.
+     * <p>
+     * A {@code sync_done} sentinel is enqueued last so the client knows exactly
+     * when all join textures have been queued, allowing it to fire a single
+     * resource-pack reload rather than a time-based debounce that may fire
+     * mid-burst on slow (internet) connections.
      */
     public static void sendFullSync(ServerPlayerEntity player) {
         List<FullSyncPayload.SlotEntry> entries = new ArrayList<>();
@@ -75,6 +80,13 @@ public final class NetworkManager {
                         data.soundType, faceEntry.getKey()));
             }
         }
+
+        // Sentinel: tells the client that every join texture has been queued.
+        // The client uses this to fire exactly one resource-pack reload instead
+        // of relying on a fixed debounce timer that can fire mid-burst on
+        // slower internet connections, causing cascading reloads and a disconnect.
+        queue.enqueue(new SlotUpdatePayload("sync_done", -1, "", null,
+                new byte[0], 0, 0f, "stone"));
     }
 
     /**
@@ -95,20 +107,7 @@ public final class NetworkManager {
         int perTick = CustomBlocksConfig.texturePayloadsPerTick;
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
             TextureQueue queue = PLAYER_QUEUES.get(player.getUuid());
-            if (queue == null) continue;
-
-            if (queue.isEmpty()) {
-                if (!queue.hasNotifiedSyncComplete) {
-                    queue.hasNotifiedSyncComplete = true;
-                    try {
-                        ServerPlayNetworking.send(player, new SyncCompletePayload());
-                    } catch (Exception e) {
-                        LOGGER.warn("[CustomBlocks] Failed to send SyncCompletePayload to {}: {}",
-                                player.getName().getString(), e.getMessage());
-                    }
-                }
-                continue;
-            }
+            if (queue == null || queue.isEmpty()) continue;
 
             SlotUpdatePayload[] batch = queue.drain(perTick);
             for (SlotUpdatePayload payload : batch) {
