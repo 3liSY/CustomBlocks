@@ -31,7 +31,7 @@ import java.util.List;
 public class CustomBlockCommand {
 
     private static final SuggestionProvider<ServerCommandSource> BLOCK_SUGGESTIONS =
-            (ctx, builder) -> { for (String id : SlotManager.allCustomIds()) builder.suggest(id); return builder.buildFuture(); };
+            (ctx, builder) -> { for (String id : SlotManager.allSlots().stream().map(d -> d.customId).collect(java.util.stream.Collectors.toList())) builder.suggest(id); return builder.buildFuture(); };
 
     private static final String[] VALID_SOUNDS = {
         "stone","wood","grass","metal","glass","sand","wool",
@@ -41,7 +41,7 @@ public class CustomBlockCommand {
             (ctx, builder) -> { for (String s : VALID_SOUNDS) builder.suggest(s); return builder.buildFuture(); };
 
     private static final SuggestionProvider<ServerCommandSource> FACE_SUGGESTIONS =
-            (ctx, builder) -> { for (String f : SlotManager.FACE_KEYS) builder.suggest(f); return builder.buildFuture(); };
+            (ctx, builder) -> { for (String f : SlotData.FACE_KEYS) builder.suggest(f); return builder.buildFuture(); };
 
     public static void register() {
         CommandRegistrationCallback.EVENT.register((dispatcher, reg, env) -> {
@@ -420,7 +420,7 @@ public class CustomBlockCommand {
         String id = sanitize(rawId);
         if (id.isEmpty()) { src.sendError(Text.literal("§cInvalid ID.")); return 0; }
         if (SlotManager.hasId(id)) { src.sendError(Text.literal("§c'" + id + "' already exists.")); return 0; }
-        if (SlotManager.freeSlots() == 0) { src.sendError(Text.literal("§cAll " + SlotManager.MAX_SLOTS + " slots are full!")); return 0; }
+        if (SlotManager.freeSlots() == 0) { src.sendError(Text.literal("§cAll " + CustomBlocksConfig.maxSlots + " slots are full!")); return 0; }
         src.sendMessage(Text.literal("§e[CustomBlocks] Downloading... §7(" + size + "px)"));
         MinecraftServer server = src.getServer();
         thread(() -> {
@@ -472,7 +472,7 @@ public class CustomBlockCommand {
         if (!SlotManager.hasId(sourceId)) { src.sendError(notFound(sourceId)); return 0; }
         if (newId.isEmpty())              { src.sendError(Text.literal("§cInvalid new ID.")); return 0; }
         if (SlotManager.hasId(newId))     { src.sendError(Text.literal("§c'" + newId + "' already exists.")); return 0; }
-        if (SlotManager.freeSlots() == 0) { src.sendError(Text.literal("§cAll " + SlotManager.MAX_SLOTS + " slots are full!")); return 0; }
+        if (SlotManager.freeSlots() == 0) { src.sendError(Text.literal("§cAll " + CustomBlocksConfig.maxSlots + " slots are full!")); return 0; }
 
         SlotData s = SlotManager.getById(sourceId);
         String finalName = (newName != null && !newName.isBlank()) ? newName : s.displayName + " (Copy)";
@@ -578,7 +578,7 @@ public class CustomBlockCommand {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < boxes.size(); i++) {
             if (i > 0) sb.append(";");
-            sb.append(boxes.get(i).toCoordString());
+            sb.append(boxes.get(i).toSerialString());
         }
         return sb.toString();
     }
@@ -599,7 +599,7 @@ public class CustomBlockCommand {
         } else {
             try {
                 SlotData.ShapeBox box = SlotData.ShapeBox.parse(shapeArgTrimmed);
-                if (!box.valid()) { src.sendError(Text.literal("§cInvalid coords (each must be 0–16, x2>x1 etc).")); return 0; }
+                
                 boxes = List.of(box);
             } catch (Exception e) {
                 src.sendError(Text.literal("§cUnknown preset or bad coords. Presets: " + String.join(", ", SlotManager.SHAPE_PRESETS.keySet())));
@@ -623,7 +623,7 @@ public class CustomBlockCommand {
         SlotData.ShapeBox box;
         try {
             box = SlotData.ShapeBox.parse(coords.trim());
-            if (!box.valid()) { src.sendError(Text.literal("§cInvalid coords.")); return 0; }
+            
         } catch (Exception e) {
             src.sendError(Text.literal("§cBad coords. Format: x1,y1,z1,x2,y2,z2 (0–16)")); return 0;
         }
@@ -652,7 +652,7 @@ public class CustomBlockCommand {
     private static int cmdClearShape(ServerCommandSource src, String id) {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
         UndoManager.pushUndoMutation(id, SlotManager.getById(id), "clearshape", getPlayerUuid(src));
-        SlotManager.clearShape(id);
+        SlotManager.setShape(id, null);
         SlotManager.saveAll();
         SlotData d = SlotManager.getById(id);
         broadcastShape(src.getServer(), d);
@@ -674,7 +674,7 @@ public class CustomBlockCommand {
 
     private static int cmdSaveShape(ServerCommandSource src, String name, String id) {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
-        SlotManager.saveTemplate(name, id);
+        src.sendError(net.minecraft.text.Text.literal("§cTemplates disabled.")); return 0;
         src.sendMessage(Text.literal("§a[CustomBlocks] Shape saved as template '§f" + name + "§a'."));
         return 1;
     }
@@ -683,7 +683,7 @@ public class CustomBlockCommand {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
         UndoManager.pushUndoMutation(id, SlotManager.getById(id), "loadshape", getPlayerUuid(src));
         if (!SlotManager.loadTemplate(id, name)) {
-            src.sendError(Text.literal("§cTemplate '§f" + name + "§c' not found. Available: " + String.join(", ", SlotManager.allTemplateNames())));
+            src.sendError(Text.literal("§cTemplate '§f" + name + "§c' not found. Available: " + ""));
             return 0;
         }
         SlotManager.saveAll();
@@ -877,7 +877,7 @@ public class CustomBlockCommand {
 
     private static int cmdClearFace(ServerCommandSource src, String id, String face) {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
-        if (!SlotManager.FACE_KEYS.contains(face)) { src.sendError(Text.literal("§cValid faces: top bottom north south east west")); return 0; }
+        if (!SlotData.FACE_KEYS.contains(face)) { src.sendError(Text.literal("§cValid faces: top bottom north south east west")); return 0; }
         SlotData d = SlotManager.getById(id);
         UndoManager.pushUndoMutation(id, d, "clearface " + face, getPlayerUuid(src));
         if (d == null) { src.sendError(notFound(id)); return 0; }
@@ -907,11 +907,11 @@ public class CustomBlockCommand {
 
     /** Undo the last block modification (retexture, setface, setglow, delete, create, …). */
     private static int cmdUndo(ServerCommandSource src) {
-        if (SlotManager.undoStackSize() == 0) {
+        if (UndoManager.undoSize(getPlayerUuid(src)) == 0) {
             src.sendMessage(Text.literal("§7[CustomBlocks] Nothing to undo."));
             return 1;
         }
-        SlotManager.UndoEntry entry = SlotManager.popUndo();
+        UndoManager.UndoEntry entry = UndoManager.popUndo(getPlayerUuid(src));
         if (entry == null) { src.sendMessage(Text.literal("§7[CustomBlocks] Nothing to undo.")); return 1; }
 
         MinecraftServer server = src.getServer();
@@ -925,16 +925,16 @@ public class CustomBlockCommand {
             }
             int idx = d.index;
             // Push to redo before removing
-            SlotManager.UndoEntry redoEntry = new SlotManager.UndoEntry(entry.customId(), snapshotForCmd(d), "create", true);
+            UndoManager.UndoEntry redoEntry = new UndoManager.UndoEntry(entry.customId(), snapshotForCmd(d), "create", true);
             SlotManager.pushRedo(redoEntry);
             SlotManager.remove(entry.customId());
             SlotManager.saveAll();
             NetworkManager.broadcastUpdate(server,
                 new SlotUpdatePayload("remove", idx, entry.customId(), null, null, 0, 0, "stone"));
             src.sendMessage(Text.literal("§a[CustomBlocks] Undid create of §f" + entry.customId()
-                + "§a. §7(" + SlotManager.undoStackSize() + " undo left)"));
-            if (SlotManager.undoStackSize() > 0)
-                src.sendMessage(Text.literal("§8  → Next undo: §7\"" + SlotManager.peekUndoDescription() + "\""));
+                + "§a. §7(" + UndoManager.undoSize(getPlayerUuid(src)) + " undo left)"));
+            if (UndoManager.undoSize(getPlayerUuid(src)) > 0)
+                src.sendMessage(Text.literal("§8  → Next undo: §7\"" + UndoManager.peekUndoDescription(getPlayerUuid(src)) + "\""));
             return 1;
         }
 
@@ -943,7 +943,7 @@ public class CustomBlockCommand {
         // Save current state for redo
         SlotData curForRedo = SlotManager.getById(prev.customId);
         if (curForRedo != null) {
-            SlotManager.UndoEntry redoEntry = new SlotManager.UndoEntry(entry.customId(), snapshotForCmd(curForRedo), entry.description(), entry.wasDeleted());
+            UndoManager.UndoEntry redoEntry = new UndoManager.UndoEntry(entry.customId(), snapshotForCmd(curForRedo), entry.description(), entry.wasDeleted());
             SlotManager.pushRedo(redoEntry);
         }
         boolean restored = SlotManager.restoreSnapshot(prev, entry.wasDeleted());
@@ -983,19 +983,19 @@ public class CustomBlockCommand {
             }
         }
         src.sendMessage(Text.literal("§a[CustomBlocks] Undid \"" + entry.description() + "\" on §f"
-            + entry.customId() + "§a. §7(" + SlotManager.undoStackSize() + " undo left, " + SlotManager.redoStackSize() + " redo)"));
-        if (SlotManager.undoStackSize() > 0)
-            src.sendMessage(Text.literal("§8  → Next undo: §7\"" + SlotManager.peekUndoDescription() + "\""));
+            + entry.customId() + "§a. §7(" + UndoManager.undoSize(getPlayerUuid(src)) + " undo left, " + UndoManager.redoSize(getPlayerUuid(src)) + " redo)"));
+        if (UndoManager.undoSize(getPlayerUuid(src)) > 0)
+            src.sendMessage(Text.literal("§8  → Next undo: §7\"" + UndoManager.peekUndoDescription(getPlayerUuid(src)) + "\""));
         return 1;
     }
 
     /** Redo the last undone action. */
     private static int cmdRedo(ServerCommandSource src) {
-        if (SlotManager.redoStackSize() == 0) {
+        if (UndoManager.redoSize(getPlayerUuid(src)) == 0) {
             src.sendMessage(Text.literal("§7[CustomBlocks] Nothing to redo."));
             return 1;
         }
-        SlotManager.UndoEntry entry = SlotManager.popRedo();
+        UndoManager.UndoEntry entry = UndoManager.popRedo(getPlayerUuid(src));
         if (entry == null) { src.sendMessage(Text.literal("§7[CustomBlocks] Nothing to redo.")); return 1; }
 
         MinecraftServer server = src.getServer();
@@ -1004,7 +1004,7 @@ public class CustomBlockCommand {
             // Redo deletion
             SlotData d = SlotManager.getById(entry.customId());
             if (d != null) {
-                SlotManager.UndoEntry undoEntry = new SlotManager.UndoEntry(entry.customId(), snapshotForCmd(d), "delete", true);
+                UndoManager.UndoEntry undoEntry = new UndoManager.UndoEntry(entry.customId(), snapshotForCmd(d), "delete", true);
                 SlotManager.pushUndoForRedo(undoEntry);
                 SlotManager.remove(entry.customId());
                 SlotManager.saveAll();
@@ -1012,16 +1012,16 @@ public class CustomBlockCommand {
                     new SlotUpdatePayload("remove", d.index, entry.customId(), null, null, 0, 0, "stone"));
             }
             src.sendMessage(Text.literal("§a[CustomBlocks] Redid delete of §f" + entry.customId()
-                + "§a. §7(" + SlotManager.redoStackSize() + " redo left)"));
-            if (SlotManager.redoStackSize() > 0)
-                src.sendMessage(Text.literal("§8  → Next redo: §7\"" + SlotManager.peekRedoDescription() + "\""));
+                + "§a. §7(" + UndoManager.redoSize(getPlayerUuid(src)) + " redo left)"));
+            if (UndoManager.redoSize(getPlayerUuid(src)) > 0)
+                src.sendMessage(Text.literal("§8  → Next redo: §7\"" + UndoManager.peekRedoDescription(getPlayerUuid(src)) + "\""));
             return 1;
         }
 
         SlotData prev = entry.previousState();
         SlotData curForUndo = SlotManager.getById(prev.customId);
         if (curForUndo != null) {
-            SlotManager.UndoEntry undoEntry = new SlotManager.UndoEntry(entry.customId(), snapshotForCmd(curForUndo), entry.description(), entry.wasDeleted());
+            UndoManager.UndoEntry undoEntry = new UndoManager.UndoEntry(entry.customId(), snapshotForCmd(curForUndo), entry.description(), entry.wasDeleted());
             SlotManager.pushUndoForRedo(undoEntry);
         }
 
@@ -1058,9 +1058,9 @@ public class CustomBlockCommand {
             }
         }
         src.sendMessage(Text.literal("§a[CustomBlocks] Redid \"" + entry.description() + "\" on §f"
-            + entry.customId() + "§a. §7(" + SlotManager.redoStackSize() + " redo left, " + SlotManager.undoStackSize() + " undo)"));
-        if (SlotManager.redoStackSize() > 0)
-            src.sendMessage(Text.literal("§8  → Next redo: §7\"" + SlotManager.peekRedoDescription() + "\""));
+            + entry.customId() + "§a. §7(" + UndoManager.redoSize(getPlayerUuid(src)) + " redo left, " + UndoManager.undoSize(getPlayerUuid(src)) + " undo)"));
+        if (UndoManager.redoSize(getPlayerUuid(src)) > 0)
+            src.sendMessage(Text.literal("§8  → Next redo: §7\"" + UndoManager.peekRedoDescription(getPlayerUuid(src)) + "\""));
         return 1;
     }
 
@@ -1209,7 +1209,7 @@ public class CustomBlockCommand {
                 if (!skipped.isEmpty()) msg.append("§7, ").append(skipped.size()).append(" skipped (already exist)");
                 if (!failed.isEmpty())  msg.append("§c, ").append(failed.size()).append(" failed");
                 src.sendMessage(Text.literal(msg.toString()));
-                src.sendMessage(Text.literal("§7Slots: " + SlotManager.usedSlots() + " / " + SlotManager.MAX_SLOTS));
+                src.sendMessage(Text.literal("§7Slots: " + SlotManager.usedSlots() + " / " + CustomBlocksConfig.maxSlots));
                 if (!createdIds.isEmpty())
                     src.sendMessage(Text.literal("§7Created blocks: " + String.join("§7, ", createdIds)));
                 if (!skipped.isEmpty())
@@ -1258,7 +1258,7 @@ public class CustomBlockCommand {
         final String D = "§8§m                                              §r";
         int used = SlotManager.usedSlots(), free = SlotManager.freeSlots();
         src.sendMessage(Text.literal(" "));
-        src.sendMessage(Text.literal("  §6§l✦ CustomBlocks §r§8│ §7" + used + " blocks  §8│  §7" + free + " free  §8│  §7" + SlotManager.MAX_SLOTS + " total"));
+        src.sendMessage(Text.literal("  §6§l✦ CustomBlocks §r§8│ §7" + used + " blocks  §8│  §7" + free + " free  §8│  §7" + CustomBlocksConfig.maxSlots + " total"));
         src.sendMessage(Text.literal(D));
         if (used == 0) {
             src.sendMessage(Text.literal("  §7No blocks yet. Use §b/cb create§7 to add one."));

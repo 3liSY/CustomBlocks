@@ -254,7 +254,7 @@ public class CustomBlocksScreen extends Screen {
             px+PAD+gridW()-55, py+PAD+3, cDim());
 
         // Slot usage bar
-        int used=SlotManager.usedSlots(), max=SlotManager.MAX_SLOTS;
+        int used=SlotManager.usedSlots(), max=com.customblocks.CustomBlocksConfig.maxSlots;
         float pct=used/(float)max;
         int barX=px+PAD, barY=py+ph-8, barW=gridW()-2;
         ctx.fill(barX,barY,barX+barW,barY+4, darkTheme?0xFF_1A1A2E:0xFF_AAAACC);
@@ -596,7 +596,7 @@ public class CustomBlocksScreen extends Screen {
         if (url.isEmpty())  { status("Paste a URL!",C_RED); return; }
         if (name.contains("_")) { status("Name cannot contain underscores — use spaces.",C_RED); return; }
         if (SlotManager.hasId(id)) { status("'"+id+"' already exists!",C_RED); return; }
-        if (SlotManager.freeSlots()==0) { status("All "+SlotManager.MAX_SLOTS+" slots full!",C_RED); return; }
+        if (SlotManager.freeSlots()==0) { status("All "+com.customblocks.CustomBlocksConfig.maxSlots+" slots full!",C_RED); return; }
         closePanel();
         status("Downloading...",C_YELLOW);
         // name uses _ as word separator in the command (server replaces _ back to spaces)

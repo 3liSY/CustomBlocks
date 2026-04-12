@@ -55,7 +55,7 @@ public class ResourcePackGenerator {
             meta.add("pack", pack);
             writeJson(meta, new File(packRoot, "pack.mcmeta"));
 
-            for (int i = 0; i < SlotManager.MAX_SLOTS; i++) {
+            for (int i = 0; i < com.customblocks.CustomBlocksConfig.maxSlots; i++) {
                 String slotKey  = "slot_" + i;
                 String modelRef = MOD_ID + ":block/" + slotKey;
                 SlotData data = SlotManager.getBySlot(slotKey);
@@ -122,7 +122,7 @@ public class ResourcePackGenerator {
                     JsonObject tex = new JsonObject();
                     tex.addProperty("particle", MOD_ID + ":block/" + slotKey);
                     // Build texture refs: per-face overrides or default
-                    for (String face : SlotManager.FACE_KEYS) {
+                    for (String face : SlotData.FACE_KEYS) {
                         String mcFace = FACE_TO_MC.get(face);
                         String texRef = data.faceTextures.containsKey(face)
                                 ? MOD_ID + ":block/" + slotKey + "_" + face
@@ -168,7 +168,7 @@ public class ResourcePackGenerator {
                     bm.addProperty("parent", "minecraft:block/cube");
                     JsonObject tex = new JsonObject();
                     tex.addProperty("particle", MOD_ID + ":block/" + slotKey);
-                    for (String face : SlotManager.FACE_KEYS) {
+                    for (String face : SlotData.FACE_KEYS) {
                         String mcFace = FACE_TO_MC.get(face);
                         if (data.faceTextures.containsKey(face)) {
                             tex.addProperty(mcFace, MOD_ID + ":block/" + slotKey + "_" + face);
