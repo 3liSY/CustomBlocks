@@ -4,7 +4,8 @@ import com.customblocks.client.gui.AnimBlockScreen;
 import com.customblocks.network.AnimSettingsPayload;
 import com.customblocks.network.OpenAnimGuiPayload;
 import com.customblocks.CustomBlocksMod;
-import com.customblocks.SlotManager;
+import com.customblocks.core.SlotData;
+import com.customblocks.core.SlotManager;
 import com.customblocks.block.SlotBlock;
 import com.customblocks.client.gui.CustomBlocksScreen;
 import com.customblocks.client.texture.TextureCache;
@@ -152,10 +153,10 @@ public class CustomBlocksClient implements ClientModInitializer {
                     }
                     case "setshape" -> {
                         if (payload.shapeData() != null) {
-                            java.util.List<SlotManager.ShapeBox> boxes = new java.util.ArrayList<>();
+                            java.util.List<SlotData.ShapeBox> boxes = new java.util.ArrayList<>();
                             if (!payload.shapeData().equals("full")) {
                                 for (String part : payload.shapeData().split(";")) {
-                                    try { boxes.add(SlotManager.ShapeBox.parse(part)); } catch (Exception ignored) {}
+                                    try { boxes.add(SlotData.ShapeBox.parse(part)); } catch (Exception ignored) {}
                                 }
                             }
                             SlotManager.setShape(payload.customId(), boxes.isEmpty() ? null : boxes);
@@ -210,7 +211,7 @@ public class CustomBlocksClient implements ClientModInitializer {
             if (!(client.crosshairTarget instanceof BlockHitResult bhr)) return;
             var state = client.world.getBlockState(bhr.getBlockPos());
             if (!(state.getBlock() instanceof SlotBlock sb)) return;
-            SlotManager.SlotData data = SlotManager.getBySlot(sb.getSlotKey());
+            SlotData data = SlotManager.getBySlot(sb.getSlotKey());
             if (data == null) return;
             String name = data.displayName;
             int cx = ctx.getScaledWindowWidth() / 2;

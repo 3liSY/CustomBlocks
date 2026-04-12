@@ -1,7 +1,8 @@
 package com.customblocks.client.gui;
 
 import com.customblocks.CustomBlocksMod;
-import com.customblocks.SlotManager;
+import com.customblocks.core.SlotData;
+import com.customblocks.core.SlotManager;
 import com.customblocks.client.texture.TextureCache;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -58,7 +59,7 @@ public class CustomBlocksScreen extends Screen {
     private String search = "";
     private int sortMode = 0;
     private boolean sortAsc = true;
-    private final List<SlotManager.SlotData> filtered = new ArrayList<>();
+    private final List<SlotData> filtered = new ArrayList<>();
     private boolean bulkDeleteMode = false;
     private final List<String> bulkSelected = new ArrayList<>();
 
@@ -294,7 +295,7 @@ public class CustomBlocksScreen extends Screen {
             int cy  = gy+row*(CELL+GAP)-scroll;
             if (cy+CELL<gy || cy>gh) continue;
 
-            SlotManager.SlotData data = filtered.get(i);
+            SlotData data = filtered.get(i);
             boolean sel = bulkDeleteMode
                 ? bulkSelected.contains(data.customId)
                 : data.customId.equals(selectedId);
@@ -362,7 +363,7 @@ public class CustomBlocksScreen extends Screen {
         int ry = py+PAD;
         int rw = RIGHT_W-PAD-4;
 
-        SlotManager.SlotData data = selectedId!=null ? SlotManager.getById(selectedId) : null;
+        SlotData data = selectedId!=null ? SlotManager.getById(selectedId) : null;
 
         // Header
         ctx.fill(rx-2, ry, rx+rw+2, ry+14, darkTheme?0xFF_0E0E28:0xFF_B0B0D8);
@@ -523,7 +524,7 @@ public class CustomBlocksScreen extends Screen {
                 setFocused(fldCreateId);
             }
             case RENAME -> {
-                SlotManager.SlotData d=SlotManager.getById(selectedId);
+                SlotData d=SlotManager.getById(selectedId);
                 fldRenameNew.setText(d!=null?d.displayName:"");
                 addDrawableChild(fldRenameNew); addDrawableChild(btnRenameOk); addDrawableChild(btnRenameCancel);
                 setFocused(fldRenameNew);
@@ -702,7 +703,7 @@ public class CustomBlocksScreen extends Screen {
 
     private void adjustGlow(int d) {
         if (selectedId==null) return;
-        SlotManager.SlotData data=SlotManager.getById(selectedId);
+        SlotData data=SlotManager.getById(selectedId);
         if (data==null) return;
         send("customblock setglow "+selectedId+" "+Math.max(0,Math.min(15,data.lightLevel+d)));
     }
@@ -717,14 +718,14 @@ public class CustomBlocksScreen extends Screen {
     private void rebuildFiltered() {
         filtered.clear();
         String q=search.toLowerCase();
-        for (SlotManager.SlotData d : SlotManager.allSlots()) {
+        for (SlotData d : SlotManager.allSlots()) {
             if (d.customId.equals("tab_icon")) continue; // never show tab_icon in grid
             if (q.isEmpty()||d.customId.contains(q)||d.displayName.toLowerCase().contains(q))
                 filtered.add(d);
         }
-        Comparator<SlotManager.SlotData> cmp = switch(sortMode) {
+        Comparator<SlotData> cmp = switch(sortMode) {
             case 1 -> Comparator.comparingInt(d -> d.index);
-            case 2 -> Comparator.comparingInt((SlotManager.SlotData d)->d.lightLevel).reversed();
+            case 2 -> Comparator.comparingInt((SlotData d)->d.lightLevel).reversed();
             case 3 -> Comparator.comparing(d -> d.soundType);
             default -> Comparator.comparing(d -> d.displayName.toLowerCase());
         };

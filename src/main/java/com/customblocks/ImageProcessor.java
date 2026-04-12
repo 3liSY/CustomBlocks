@@ -554,17 +554,55 @@ public final class ImageProcessor {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    private static double[] rgbToLab(int argb) {
+        int r = (argb >> 16) & 0xFF;
+        int g = (argb >> 8) & 0xFF;
+        int b = argb & 0xFF;
+
+        double rF = r / 255.0;
+        double gF = g / 255.0;
+        double bF = b / 255.0;
+
+        rF = (rF > 0.04045) ? Math.pow((rF + 0.055) / 1.055, 2.4) : (rF / 12.92);
+        gF = (gF > 0.04045) ? Math.pow((gF + 0.055) / 1.055, 2.4) : (gF / 12.92);
+        bF = (bF > 0.04045) ? Math.pow((bF + 0.055) / 1.055, 2.4) : (bF / 12.92);
+
+        rF *= 100.0; gF *= 100.0; bF *= 100.0;
+
+        double x = rF * 0.4124 + gF * 0.3576 + bF * 0.1805;
+        double y = rF * 0.2126 + gF * 0.7152 + bF * 0.0722;
+        double z = rF * 0.0193 + gF * 0.1192 + bF * 0.9505;
+
+        // D65 reference
+        x /= 95.047; y /= 100.000; z /= 108.883;
+
+        x = (x > 0.008856) ? Math.cbrt(x) : (7.787 * x) + (16.0 / 116.0);
+        y = (y > 0.008856) ? Math.cbrt(y) : (7.787 * y) + (16.0 / 116.0);
+        z = (z > 0.008856) ? Math.cbrt(z) : (7.787 * z) + (16.0 / 116.0);
+
+        double L = (116.0 * y) - 16.0;
+        double a = 500.0 * (x - y);
+        double b_star = 200.0 * (y - z);
+
+        return new double[]{L, a, b_star};
+    }
+
+    private static double deltaE(double[] lab1, double[] lab2) {
+        return Math.sqrt(Math.pow(lab1[0] - lab2[0], 2) + Math.pow(lab1[1] - lab2[1], 2) + Math.pow(lab1[2] - lab2[2], 2));
+    }
+
+    private static final double[] LAB_WHITE = rgbToLab(0xFFFFFFFF);
+
     /**
      * Returns true if this pixel should be treated as background during flood-fill.
-     * A pixel is background if it is semi-transparent OR near-white (with WHITE_TOLERANCE).
+     * Uses configurable CIE-Lab Delta E distance from pure white.
      */
     private static boolean isBackground(int argb) {
         int a = (argb >> 24) & 0xFF;
         if (a < OPAQUE_THRESHOLD) return true;
-        int r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
-        return r >= (255 - WHITE_TOLERANCE)
-            && g >= (255 - WHITE_TOLERANCE)
-            && b >= (255 - WHITE_TOLERANCE);
+        if (CustomBlocksConfig.bgRemovalTolerance <= 0) return false;
+        double distance = deltaE(rgbToLab(argb), LAB_WHITE);
+        return distance <= CustomBlocksConfig.bgRemovalTolerance;
     }
 
     /**
@@ -573,11 +611,11 @@ public final class ImageProcessor {
      */
     private static boolean isFringe(int argb) {
         int a = (argb >> 24) & 0xFF;
-        if (a < OPAQUE_THRESHOLD) return true;  // semi-transparent is always fringe
-        int r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
-        return r >= (255 - FRINGE_TOLERANCE)
-            && g >= (255 - FRINGE_TOLERANCE)
-            && b >= (255 - FRINGE_TOLERANCE);
+        if (a < OPAQUE_THRESHOLD) return true;
+        if (CustomBlocksConfig.bgRemovalTolerance <= 0) return false;
+        double distance = deltaE(rgbToLab(argb), LAB_WHITE);
+        // Fringe uses a slighter wider tolerance, e.g. + 15
+        return distance <= (CustomBlocksConfig.bgRemovalTolerance + 15);
     }
 
     /**

@@ -1,7 +1,9 @@
 package com.customblocks.item;
 
 import com.customblocks.CustomBlocksMod;
-import com.customblocks.SlotManager;
+import com.customblocks.CustomBlocksConfig;
+import com.customblocks.core.SlotData;
+import com.customblocks.core.SlotManager;
 import com.customblocks.block.SlotBlock;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.player.PlayerEntity;
@@ -60,13 +62,13 @@ public class ColorSquareItem extends Item {
         BlockState state = world.getBlockState(pos);
         if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
 
-        if (player != null && !player.hasPermissionLevel(2)) {
+        if (player != null && !player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
             player.sendMessage(
-                Text.literal("§c[CustomBlocks] You need OP (level 2) to use colour squares."), true);
+                Text.literal("§c[CustomBlocks] You need OP to use colour squares."), true);
             return ActionResult.FAIL;
         }
 
-        SlotManager.SlotData current = SlotManager.getBySlot(sb.getSlotKey());
+        SlotData current = SlotManager.getBySlot(sb.getSlotKey());
         if (current == null) return ActionResult.PASS;
 
         // ── Segment scan ──────────────────────────────────────────────────────
@@ -106,7 +108,7 @@ public class ColorSquareItem extends Item {
         }
 
         // Target block must already exist
-        SlotManager.SlotData target = SlotManager.getById(targetId);
+        SlotData target = SlotManager.getById(targetId);
         if (target == null) {
             if (player != null)
                 player.sendMessage(Text.literal(

@@ -8,7 +8,12 @@ import net.minecraft.util.Identifier;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Server → Client on join. Metadata + animMeta per slot (textures come via SlotUpdatePayload). */
+/**
+ * Server → Client on join. Metadata + animMeta per slot.
+ * <p>
+ * Textures are NOT included — they are drip-fed via {@link SlotUpdatePayload} after the sync.
+ * This keeps the join payload small (< 100KB even with 2048 slots).
+ */
 public record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture) implements CustomPayload {
 
     public static final Id<FullSyncPayload> ID =
@@ -22,7 +27,7 @@ public record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture) im
             int    lightLevel,
             float  hardness,
             String soundType,
-            String animMeta    // NEW: null if not animated
+            String animMeta
     ) {
         /** Legacy constructor without animMeta. */
         public SlotEntry(int index, String customId, String displayName, byte[] texture,

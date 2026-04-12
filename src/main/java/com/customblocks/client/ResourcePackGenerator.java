@@ -1,7 +1,8 @@
 package com.customblocks.client;
 
 import com.customblocks.CustomBlocksMod;
-import com.customblocks.SlotManager;
+import com.customblocks.core.SlotData;
+import com.customblocks.core.SlotManager;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
@@ -57,7 +58,7 @@ public class ResourcePackGenerator {
             for (int i = 0; i < SlotManager.MAX_SLOTS; i++) {
                 String slotKey  = "slot_" + i;
                 String modelRef = MOD_ID + ":block/" + slotKey;
-                SlotManager.SlotData data = SlotManager.getBySlot(slotKey);
+                SlotData data = SlotManager.getBySlot(slotKey);
 
                 // ── Default (all-faces) texture ────────────────────────────────
                 File texDest = new File(assets, "textures/block/" + slotKey + ".png");
@@ -130,7 +131,7 @@ public class ResourcePackGenerator {
                     }
                     bm.add("textures", tex);
                     com.google.gson.JsonArray elements = new com.google.gson.JsonArray();
-                    for (SlotManager.ShapeBox box : data.shapeBoxes) {
+                    for (SlotData.ShapeBox box : data.shapeBoxes) {
                         JsonObject el = new JsonObject();
                         com.google.gson.JsonArray from = new com.google.gson.JsonArray();
                         from.add(box.x1()); from.add(box.y1()); from.add(box.z1());

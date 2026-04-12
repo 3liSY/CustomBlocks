@@ -1,8 +1,12 @@
 package com.customblocks.item;
 
 import com.customblocks.CustomBlocksMod;
-import com.customblocks.SlotManager;
+import com.customblocks.CustomBlocksConfig;
+import com.customblocks.core.SlotData;
+import com.customblocks.core.SlotManager;
+import com.customblocks.core.UndoManager;
 import com.customblocks.block.SlotBlock;
+import com.customblocks.network.NetworkManager;
 import com.customblocks.network.SlotUpdatePayload;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.player.PlayerEntity;
@@ -65,13 +69,13 @@ public class ColorTriangleItem extends Item {
         BlockState state = world.getBlockState(pos);
         if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
 
-        if (player != null && !player.hasPermissionLevel(2)) {
+        if (player != null && !player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
             player.sendMessage(
-                Text.literal("§c[CustomBlocks] You need OP (level 2) to use colour triangles."), true);
+                Text.literal("§c[CustomBlocks] You need OP to use colour triangles."), true);
             return ActionResult.FAIL;
         }
 
-        SlotManager.SlotData source = SlotManager.getBySlot(sb.getSlotKey());
+        SlotData source = SlotManager.getBySlot(sb.getSlotKey());
         if (source == null) return ActionResult.PASS;
 
         if (source.texture == null || source.texture.length == 0) {
@@ -95,7 +99,7 @@ public class ColorTriangleItem extends Item {
         }
 
         // Variant already exists — just hand it over
-        SlotManager.SlotData existing = SlotManager.getById(newId);
+        SlotData existing = SlotManager.getById(newId);
         if (existing != null) {
             if (player != null) {
                 player.getInventory().insertStack(
@@ -117,7 +121,7 @@ public class ColorTriangleItem extends Item {
 
         // ── Process texture in background thread ──────────────────────────────
         MinecraftServer     server = world.getServer();
-        SlotManager.SlotData finalSrc = source;
+        SlotData finalSrc = source;
         PlayerEntity         fp      = player;
         int fR = targetR, fG = targetG, fB = targetB;
 
@@ -132,7 +136,7 @@ public class ColorTriangleItem extends Item {
                             fp.sendMessage(Text.literal("§c[CustomBlocks] No free slots!"), true);
                         return;
                     }
-                    SlotManager.SlotData newD = SlotManager.assign(newId, newName, newTexture);
+                    SlotData newD = SlotManager.assign(newId, newName, newTexture);
                     if (newD == null) {
                         if (fp != null)
                             fp.sendMessage(Text.literal("§c[CustomBlocks] Failed to allocate slot."), true);
@@ -142,10 +146,11 @@ public class ColorTriangleItem extends Item {
                     SlotManager.setLightLevel(newId, finalSrc.lightLevel);
                     SlotManager.setHardness(newId, finalSrc.hardness);
                     SlotManager.setSoundType(newId, finalSrc.soundType);
+                    UndoManager.pushUndoCreate(newId, fp != null ? fp.getUuid() : null);
                     SlotManager.saveAll();
 
                     // Broadcast the new block to all players
-                    CustomBlocksMod.broadcastUpdate(server,
+                    NetworkManager.broadcastUpdate(server,
                         new SlotUpdatePayload("add", newD.index, newId, newName, newTexture,
                             finalSrc.lightLevel, finalSrc.hardness, finalSrc.soundType));
 

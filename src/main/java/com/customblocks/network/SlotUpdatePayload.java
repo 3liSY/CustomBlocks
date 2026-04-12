@@ -5,6 +5,12 @@ import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.packet.CustomPayload;
 import net.minecraft.util.Identifier;
 
+/**
+ * Server → Client update for a single slot.
+ * <p>
+ * Actions: add, retexture, remove, rename, setprop, setface, clearface,
+ * clearfaces, setshape, setcollision, tabicon, animsettings
+ */
 public record SlotUpdatePayload(
         String action,
         int    slotIndex,
@@ -16,7 +22,7 @@ public record SlotUpdatePayload(
         String soundType,
         String face,
         String shapeData,
-        String animMeta    // animation mcmeta JSON; null = not animated
+        String animMeta
 ) implements CustomPayload {
 
     /** No face, no shapeData, no animMeta. */

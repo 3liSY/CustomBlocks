@@ -1,9 +1,13 @@
 package com.customblocks.item;
 
 import com.customblocks.CustomBlocksMod;
+import com.customblocks.CustomBlocksConfig;
 import com.customblocks.ImageProcessor;
-import com.customblocks.SlotManager;
+import com.customblocks.core.SlotData;
+import com.customblocks.core.SlotManager;
+import com.customblocks.core.UndoManager;
 import com.customblocks.block.SlotBlock;
+import com.customblocks.network.NetworkManager;
 import com.customblocks.network.SlotUpdatePayload;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.player.PlayerEntity;
@@ -16,7 +20,6 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 import net.minecraft.world.World;
 
 import java.util.Map;
@@ -38,12 +41,13 @@ public class RectangleToolItem extends Item {
     // ── Pending face-edit sessions ────────────────────────────────────────────
 
     public static final Map<UUID, PendingSession> PENDING = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> SESSION_TIMESTAMPS = new ConcurrentHashMap<>();
 
     public record PendingSession(
             BlockPos pos,
             String   face,
             String   slotId,
-            int      size       // pixel size for the face texture (from shift-click = 256, normal = DEFAULT)
+            int      size
     ) {}
 
     public RectangleToolItem(Settings settings) { super(settings); }
@@ -68,12 +72,12 @@ public class RectangleToolItem extends Item {
         BlockState state = world.getBlockState(pos);
         if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
 
-        if (player != null && !player.hasPermissionLevel(2)) {
-            player.sendMessage(Text.literal("§c[CustomBlocks] You need OP (level 2) to use the Rainbow Rectangle."), true);
+        if (player != null && !player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
+            player.sendMessage(Text.literal("§c[CustomBlocks] You need OP to use the Rainbow Rectangle."), true);
             return ActionResult.FAIL;
         }
 
-        SlotManager.SlotData data = SlotManager.getBySlot(sb.getSlotKey());
+        SlotData data = SlotManager.getBySlot(sb.getSlotKey());
         if (data == null) return ActionResult.PASS;
 
         String face = switch (ctx.getSide()) {
@@ -85,13 +89,13 @@ public class RectangleToolItem extends Item {
             case WEST  -> "west";
         };
 
-        // Shift-click = high quality (256px), normal click = default (128px)
         int size = (player != null && player.isSneaking())
                 ? ImageProcessor.MAX_SIZE
                 : ImageProcessor.DEFAULT_SIZE;
 
         UUID uuid = player.getUuid();
         PENDING.put(uuid, new PendingSession(pos, face, data.customId, size));
+        SESSION_TIMESTAMPS.put(uuid, System.currentTimeMillis());
 
         player.sendMessage(Text.literal(
             "§6[CustomBlocks] §eClicked §f" + face.toUpperCase() + " §eof §f" + data.displayName + "§e."), false);
@@ -109,6 +113,7 @@ public class RectangleToolItem extends Item {
     public static boolean handleChatInput(ServerPlayerEntity player, String message) {
         UUID uuid = player.getUuid();
         PendingSession session = PENDING.remove(uuid);
+        SESSION_TIMESTAMPS.remove(uuid);
         if (session == null) return false;
 
         String trimmed = message.trim();
@@ -138,7 +143,6 @@ public class RectangleToolItem extends Item {
             try {
                 byte[] raw = ImageProcessor.download(url);
 
-                // Detect animated GIF
                 ImageProcessor.GifResult gifResult =
                     ImageProcessor.isAnimatedGif(raw) ? ImageProcessor.processGif(raw, size) : null;
 
@@ -160,7 +164,7 @@ public class RectangleToolItem extends Item {
                 final String finalAnim  = faceAnim;
 
                 server.execute(() -> {
-                    SlotManager.SlotData original = SlotManager.getById(baseId);
+                    SlotData original = SlotManager.getById(baseId);
                     if (original == null) {
                         player.sendMessage(Text.literal(
                             "§c[CustomBlocks] Block '" + baseId + "' was deleted."), false);
@@ -172,19 +176,16 @@ public class RectangleToolItem extends Item {
                         return;
                     }
 
-                    // Generate new variant ID
                     String variantId = generateVariantId(baseId, face);
                     String variantName = original.displayName + " (" + cap(face) + ")";
 
-                    // Dupe original → new slot
                     byte[] texCopy = original.texture != null ? original.texture.clone() : null;
-                    SlotManager.SlotData newBlock = SlotManager.assign(variantId, variantName, texCopy);
+                    SlotData newBlock = SlotManager.assign(variantId, variantName, texCopy);
                     if (newBlock == null) {
                         player.sendMessage(Text.literal("§c[CustomBlocks] Could not create variant — no free slots."), false);
                         return;
                     }
 
-                    // Copy all properties from original
                     SlotManager.setLightLevel(variantId, original.lightLevel);
                     SlotManager.setHardness(variantId, original.hardness);
                     SlotManager.setSoundType(variantId, original.soundType);
@@ -192,14 +193,12 @@ public class RectangleToolItem extends Item {
                     for (var e : original.faceTextures.entrySet())
                         SlotManager.setFaceTexture(variantId, e.getKey(), e.getValue().clone());
 
-                    // Apply the new face override
                     SlotManager.setFaceTexture(variantId, face, finalBytes);
                     if (finalAnim != null) SlotManager.setAnimMeta(variantId, finalAnim);
 
-                    SlotManager.pushUndoCreate(variantId);
+                    UndoManager.pushUndoCreate(variantId, player.getUuid());
                     SlotManager.saveAll();
 
-                    // Swap the clicked block in the world to the new variant
                     ServerWorld world = player.getServerWorld();
                     BlockState current = world.getBlockState(session.pos());
                     if (current.getBlock() instanceof SlotBlock) {
@@ -207,19 +206,16 @@ public class RectangleToolItem extends Item {
                             CustomBlocksMod.SLOT_BLOCKS[newBlock.index].getDefaultState());
                     }
 
-                    // Give player 1 of the new block
                     player.getInventory().insertStack(
                         (CustomBlocksMod.safeSlotItem(newBlock.index) != null ? new ItemStack(CustomBlocksMod.safeSlotItem(newBlock.index), 1) : ItemStack.EMPTY));
 
-                    // Broadcast add + face to all clients
-                    SlotManager.SlotData fresh = SlotManager.getById(variantId);
+                    SlotData fresh = SlotManager.getById(variantId);
                     if (fresh != null) {
-                        CustomBlocksMod.broadcastUpdate(server,
+                        NetworkManager.broadcastUpdate(server,
                             new SlotUpdatePayload("add", fresh.index, variantId, variantName,
                                 texCopy, fresh.lightLevel, fresh.hardness, fresh.soundType));
-                        // Re-send all faces including the new one
                         for (var fe : fresh.faceTextures.entrySet())
-                            CustomBlocksMod.broadcastUpdate(server,
+                            NetworkManager.broadcastUpdate(server,
                                 new SlotUpdatePayload("setface", fresh.index, variantId, null,
                                     fe.getValue(), fresh.lightLevel, fresh.hardness, fresh.soundType,
                                     fe.getKey()));
@@ -241,9 +237,27 @@ public class RectangleToolItem extends Item {
         return true;
     }
 
+    // ── Session cleanup (called from server tick) ─────────────────────────────
+
+    public static void tickSessionCleanup() {
+        long timeout = CustomBlocksConfig.sessionTimeoutSeconds * 1000L;
+        long now = System.currentTimeMillis();
+        SESSION_TIMESTAMPS.entrySet().removeIf(entry -> {
+            if (now - entry.getValue() > timeout) {
+                PENDING.remove(entry.getKey());
+                return true;
+            }
+            return false;
+        });
+    }
+
+    public static void onPlayerDisconnect(UUID uuid) {
+        PENDING.remove(uuid);
+        SESSION_TIMESTAMPS.remove(uuid);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /** Auto-generate a free variant ID like baseId_face, baseId_face_2, … */
     private static String generateVariantId(String baseId, String face) {
         String candidate = baseId + "_" + face;
         if (!SlotManager.hasId(candidate)) return candidate;
