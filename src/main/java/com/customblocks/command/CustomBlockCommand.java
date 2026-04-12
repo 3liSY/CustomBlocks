@@ -536,7 +536,8 @@ public class CustomBlockCommand {
 
     private static int cmdRename(ServerCommandSource src, String id, String newName) {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
-        SlotData d = SlotManager.getById(id);n        UndoManager.pushUndoMutation(id, d, "rename", getPlayerUuid(src));
+        SlotData d = SlotManager.getById(id);
+        UndoManager.pushUndoMutation(id, d, "rename", getPlayerUuid(src));
         SlotManager.rename(id, newName);
         SlotManager.saveAll();
         NetworkManager.broadcastUpdate(src.getServer(),
@@ -555,7 +556,8 @@ public class CustomBlockCommand {
             src.sendError(Text.literal("§c[CustomBlocks] ID must be lowercase letters, numbers, _ or - only."));
             return 0;
         }
-        SlotData d = SlotManager.getById(oldId);n        UndoManager.pushUndoMutation(oldId, d, "reid", getPlayerUuid(src));
+        SlotData d = SlotManager.getById(oldId);
+        UndoManager.pushUndoMutation(oldId, d, "reid", getPlayerUuid(src));
         SlotManager.reId(oldId, newId);
         SlotManager.saveAll();
         // Broadcast a full re-add with the new ID so clients update their mapping
@@ -731,7 +733,8 @@ public class CustomBlockCommand {
                 final byte[] fb = bytes;
                 final String fa = animMeta;
                 server.execute(() -> {
-                    SlotData d = SlotManager.getById(id);n        UndoManager.pushUndoMutation(id, d, "retexture", getPlayerUuid(src));
+                    SlotData d = SlotManager.getById(id);
+        UndoManager.pushUndoMutation(id, d, "retexture", getPlayerUuid(src));
                     if (d == null) { src.sendError(notFound(id)); return; }
                     SlotManager.updateTexture(id, fb);
                     if (fa != null) SlotManager.setAnimMeta(id, fa);
@@ -771,7 +774,8 @@ public class CustomBlockCommand {
 
     private static int cmdSetGlow(ServerCommandSource src, String id, int level) {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
-        SlotData d = SlotManager.getById(id);n        UndoManager.pushUndoMutation(id, d, "setglow " + level, getPlayerUuid(src));
+        SlotData d = SlotManager.getById(id);
+        UndoManager.pushUndoMutation(id, d, "setglow " + level, getPlayerUuid(src));
         SlotManager.setLightLevel(id, level);
         SlotManager.saveAll();
         NetworkManager.broadcastUpdate(src.getServer(),
@@ -783,7 +787,8 @@ public class CustomBlockCommand {
 
     private static int cmdSetHardness(ServerCommandSource src, String id, float val) {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
-        SlotData d = SlotManager.getById(id);n        UndoManager.pushUndoMutation(id, d, "sethardness", getPlayerUuid(src));
+        SlotData d = SlotManager.getById(id);
+        UndoManager.pushUndoMutation(id, d, "sethardness", getPlayerUuid(src));
         SlotManager.setHardness(id, val);
         SlotManager.saveAll();
         String label = val < 0 ? "Unbreakable" : val == 0 ? "Instant break" : String.valueOf(val);
@@ -798,7 +803,8 @@ public class CustomBlockCommand {
         boolean ok = false;
         for (String v : VALID_SOUNDS) if (v.equals(type)) { ok = true; break; }
         if (!ok) { src.sendError(Text.literal("§cValid: stone wood grass metal glass sand wool gravel snow dirt coral bamboo nether_brick ice honey bone slime")); return 0; }
-        SlotData d = SlotManager.getById(id);n        UndoManager.pushUndoMutation(id, d, "setsound", getPlayerUuid(src));
+        SlotData d = SlotManager.getById(id);
+        UndoManager.pushUndoMutation(id, d, "setsound", getPlayerUuid(src));
         SlotManager.setSoundType(id, type);
         SlotManager.saveAll();
         NetworkManager.broadcastUpdate(src.getServer(),
@@ -851,7 +857,8 @@ public class CustomBlockCommand {
                 bytes = ImageProcessor.resizeTo(bytes, size);
                 final byte[] fb = bytes;
                 server.execute(() -> {
-                    SlotData d = SlotManager.getById(id);n        UndoManager.pushUndoMutation(id, d, "setface " + face, getPlayerUuid(src));
+                    SlotData d = SlotManager.getById(id);
+        UndoManager.pushUndoMutation(id, d, "setface " + face, getPlayerUuid(src));
                     if (d == null) { src.sendError(Text.literal("§c[CustomBlocks] '" + id + "' was deleted.")); return; }
                     SlotManager.setFaceTexture(id, face, fb);
                     SlotManager.saveAll();
@@ -871,7 +878,8 @@ public class CustomBlockCommand {
     private static int cmdClearFace(ServerCommandSource src, String id, String face) {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
         if (!SlotManager.FACE_KEYS.contains(face)) { src.sendError(Text.literal("§cValid faces: top bottom north south east west")); return 0; }
-        SlotData d = SlotManager.getById(id);n        UndoManager.pushUndoMutation(id, d, "clearface " + face, getPlayerUuid(src));
+        SlotData d = SlotManager.getById(id);
+        UndoManager.pushUndoMutation(id, d, "clearface " + face, getPlayerUuid(src));
         if (d == null) { src.sendError(notFound(id)); return 0; }
         SlotManager.clearFaceTexture(id, face);
         SlotManager.saveAll();
@@ -885,7 +893,8 @@ public class CustomBlockCommand {
 
     private static int cmdClearAllFaces(ServerCommandSource src, String id) {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
-        SlotData d = SlotManager.getById(id);n        UndoManager.pushUndoMutation(id, d, "clearallfaces", getPlayerUuid(src));
+        SlotData d = SlotManager.getById(id);
+        UndoManager.pushUndoMutation(id, d, "clearallfaces", getPlayerUuid(src));
         if (d == null) { src.sendError(notFound(id)); return 0; }
         SlotManager.clearAllFaces(id);
         SlotManager.saveAll();
