@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "customblocks",
+  "version": "1.0.0",
+  "name": "PicBlocks",
+  "description": "Paint any image onto blocks — URL, GIF, per-face. No coding needed.",
+  "authors": [ "3liSY" ],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main":   [ "com.customblocks.CustomBlocksMod" ],
+    "client": [ "com.customblocks.client.CustomBlocksClient" ]
+  },
+  "mixins": [],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "fabric-api":   "*",
+    "minecraft":    "~1.21.1"
+  }
+}
