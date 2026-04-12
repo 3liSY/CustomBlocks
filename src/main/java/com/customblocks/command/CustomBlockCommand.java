@@ -1,6 +1,7 @@
 package com.customblocks.command;
 
 import com.customblocks.CustomBlocksMod;
+import com.customblocks.CustomBlocksConfig;
 import com.customblocks.gui.GuiManager;
 import com.customblocks.ImageProcessor;
 import com.customblocks.core.SlotData;
@@ -639,9 +640,7 @@ public class CustomBlockCommand {
     private static int cmdRemoveShape(ServerCommandSource src, String id, int index) {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
         UndoManager.pushUndoMutation(id, SlotManager.getById(id), "removeshape", getPlayerUuid(src));
-        if (!SlotManager.removeBox(id, index)) {
-            src.sendError(Text.literal("§cBox #" + index + " not found.")); return 0;
-        }
+        SlotManager.removeBox(id, index);
         SlotManager.saveAll();
         SlotData d = SlotManager.getById(id);
         broadcastShape(src.getServer(), d);
@@ -682,10 +681,7 @@ public class CustomBlockCommand {
     private static int cmdLoadShape(ServerCommandSource src, String id, String name) {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
         UndoManager.pushUndoMutation(id, SlotManager.getById(id), "loadshape", getPlayerUuid(src));
-        if (!SlotManager.loadTemplate(id, name)) {
-            src.sendError(Text.literal("§cTemplate '§f" + name + "§c' not found. Available: " + ""));
-            return 0;
-        }
+        src.sendError(net.minecraft.text.Text.literal("§cTemplates disabled.")); return 0;
         SlotManager.saveAll();
         SlotData d = SlotManager.getById(id);
         broadcastShape(src.getServer(), d);
@@ -926,7 +922,7 @@ public class CustomBlockCommand {
             int idx = d.index;
             // Push to redo before removing
             UndoManager.UndoEntry redoEntry = new UndoManager.UndoEntry(entry.customId(), snapshotForCmd(d), "create", true);
-            SlotManager.pushRedo(redoEntry);
+            UndoManager.pushRedo(redoEntry);
             SlotManager.remove(entry.customId());
             SlotManager.saveAll();
             NetworkManager.broadcastUpdate(server,
@@ -944,7 +940,7 @@ public class CustomBlockCommand {
         SlotData curForRedo = SlotManager.getById(prev.customId);
         if (curForRedo != null) {
             UndoManager.UndoEntry redoEntry = new UndoManager.UndoEntry(entry.customId(), snapshotForCmd(curForRedo), entry.description(), entry.wasDeleted());
-            SlotManager.pushRedo(redoEntry);
+            UndoManager.pushRedo(redoEntry);
         }
         boolean restored = SlotManager.restoreSnapshot(prev, entry.wasDeleted());
         if (!restored) {
@@ -1005,7 +1001,7 @@ public class CustomBlockCommand {
             SlotData d = SlotManager.getById(entry.customId());
             if (d != null) {
                 UndoManager.UndoEntry undoEntry = new UndoManager.UndoEntry(entry.customId(), snapshotForCmd(d), "delete", true);
-                SlotManager.pushUndoForRedo(undoEntry);
+                UndoManager.pushUndoForRedo(undoEntry);
                 SlotManager.remove(entry.customId());
                 SlotManager.saveAll();
                 NetworkManager.broadcastUpdate(server,
@@ -1022,7 +1018,7 @@ public class CustomBlockCommand {
         SlotData curForUndo = SlotManager.getById(prev.customId);
         if (curForUndo != null) {
             UndoManager.UndoEntry undoEntry = new UndoManager.UndoEntry(entry.customId(), snapshotForCmd(curForUndo), entry.description(), entry.wasDeleted());
-            SlotManager.pushUndoForRedo(undoEntry);
+            UndoManager.pushUndoForRedo(undoEntry);
         }
 
         boolean restored = SlotManager.restoreSnapshot(prev, entry.wasDeleted());
