@@ -27,11 +27,14 @@ public final class TextureQueue {
      */
     private final ConcurrentHashMap<String, SlotUpdatePayload> latest = new ConcurrentHashMap<>();
 
+    public volatile boolean hasNotifiedSyncComplete = true;
+
     /**
      * Enqueue a payload for broadcast. If a payload with the same slot+action
      * is already queued, it is replaced (deduplicated).
      */
     public void enqueue(SlotUpdatePayload payload) {
+        hasNotifiedSyncComplete = false;
         String key = dedupeKey(payload);
         SlotUpdatePayload old = latest.put(key, payload);
         if (old != null) {

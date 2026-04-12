@@ -95,7 +95,20 @@ public final class NetworkManager {
         int perTick = CustomBlocksConfig.texturePayloadsPerTick;
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
             TextureQueue queue = PLAYER_QUEUES.get(player.getUuid());
-            if (queue == null || queue.isEmpty()) continue;
+            if (queue == null) continue;
+
+            if (queue.isEmpty()) {
+                if (!queue.hasNotifiedSyncComplete) {
+                    queue.hasNotifiedSyncComplete = true;
+                    try {
+                        ServerPlayNetworking.send(player, new SyncCompletePayload());
+                    } catch (Exception e) {
+                        LOGGER.warn("[CustomBlocks] Failed to send SyncCompletePayload to {}: {}",
+                                player.getName().getString(), e.getMessage());
+                    }
+                }
+                continue;
+            }
 
             SlotUpdatePayload[] batch = queue.drain(perTick);
             for (SlotUpdatePayload payload : batch) {

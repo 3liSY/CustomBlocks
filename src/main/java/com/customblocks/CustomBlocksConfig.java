@@ -53,13 +53,20 @@ public final class CustomBlocksConfig {
 
     // ── Network ──────────────────────────────────────────────────────────────
     /** Number of texture payloads to drip-feed per server tick. */
-    public static volatile int texturePayloadsPerTick = 3;
+    public static volatile int texturePayloadsPerTick = 8;
+    /** Internal HTTP server port for resource pack hosting (0 = disabled/auto). */
+    public static volatile int resourcePackPort = 8080;
     /** Debounce time for live-edit resource pack reloads (ms). */
     public static volatile long reloadDebounceMs = 2000;
     /** Debounce time for initial join burst (ms). */
     public static volatile long joinDebounceMs = 4000;
 
     // ── Public API ───────────────────────────────────────────────────────────
+
+    public static void setResourcePackPort(int port) {
+        resourcePackPort = port;
+        save();
+    }
 
     /** Load configuration from disk, creating defaults if missing. */
     public static void load() {
@@ -85,6 +92,7 @@ public final class CustomBlocksConfig {
             permissionLevelAdmin  = getInt(root, "permissionLevelAdmin", permissionLevelAdmin);
             permissionLevelUse    = getInt(root, "permissionLevelUse", permissionLevelUse);
             texturePayloadsPerTick= getInt(root, "texturePayloadsPerTick", texturePayloadsPerTick);
+            resourcePackPort      = getInt(root, "resourcePackPort", resourcePackPort);
             reloadDebounceMs      = getLong(root, "reloadDebounceMs", reloadDebounceMs);
             joinDebounceMs        = getLong(root, "joinDebounceMs", joinDebounceMs);
 
@@ -128,6 +136,7 @@ public final class CustomBlocksConfig {
             root.addProperty("permissionLevelAdmin", permissionLevelAdmin);
             root.addProperty("permissionLevelUse", permissionLevelUse);
             root.addProperty("texturePayloadsPerTick", texturePayloadsPerTick);
+            root.addProperty("resourcePackPort", resourcePackPort);
             root.addProperty("reloadDebounceMs", reloadDebounceMs);
             root.addProperty("joinDebounceMs", joinDebounceMs);
             Files.writeString(file, GSON.toJson(root), StandardCharsets.UTF_8);

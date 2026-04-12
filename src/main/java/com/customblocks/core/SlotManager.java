@@ -1,6 +1,7 @@
 package com.customblocks.core;
 
 import com.customblocks.CustomBlocksConfig;
+import com.customblocks.network.ResourcePackServer;
 import com.google.gson.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -266,6 +267,7 @@ public final class SlotManager {
 
             root.add("slots", arr);
             Files.writeString(file, GSON.toJson(root), StandardCharsets.UTF_8);
+            ResourcePackServer.updatePack();
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] Failed to save slot data", e);
         }

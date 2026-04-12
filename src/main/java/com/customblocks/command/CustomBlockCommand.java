@@ -69,23 +69,6 @@ public class CustomBlockCommand {
                                     StringArgumentType.getString(ctx, "url").trim(),
                                     ImageProcessor.DEFAULT_SIZE))))))
 
-                .then(CommandManager.literal("createurl")
-                    .then(CommandManager.argument("id", StringArgumentType.word())
-                        .then(CommandManager.argument("name", StringArgumentType.word())
-                            .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
-                                .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                                    .executes(ctx -> cmdCreate(ctx.getSource(),
-                                        StringArgumentType.getString(ctx, "id"),
-                                        StringArgumentType.getString(ctx, "name").replace("_", " "),
-                                        StringArgumentType.getString(ctx, "url").trim(),
-                                        IntegerArgumentType.getInteger(ctx, "size")))))
-                            .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                                .executes(ctx -> cmdCreate(ctx.getSource(),
-                                    StringArgumentType.getString(ctx, "id"),
-                                    StringArgumentType.getString(ctx, "name").replace("_", " "),
-                                    StringArgumentType.getString(ctx, "url").trim(),
-                                    ImageProcessor.DEFAULT_SIZE))))))
-
                 // ── delete ──────────────────────────────────────────────────
                 .then(CommandManager.literal("delete")
                     .executes(ctx -> usage(ctx.getSource(), "delete"))
@@ -218,10 +201,6 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("redo")
                     .executes(ctx -> cmdRedo(ctx.getSource())))
 
-                // ── admingui ─────────────────────────────────────────────────
-                .then(CommandManager.literal("admingui")
-                    .executes(ctx -> cmdAdminGui(ctx.getSource())))
-
                 // (givesquare/givetriangle/giverectangle removed — use /cb square, /cb triangle, /cb rectangle)
 
                 // ── dupe / duplicate ────────────────────────────────────────
@@ -281,6 +260,45 @@ public class CustomBlockCommand {
                 // ── reload ───────────────────────────────────────────────────
                 .then(CommandManager.literal("reload")
                     .executes(ctx -> cmdReload(ctx.getSource())))
+
+                // ── resourcepack ─────────────────────────────────────────────
+                .then(CommandManager.literal("resourcepack")
+                    .then(CommandManager.literal("setport")
+                        .executes(ctx -> {
+                            ServerPlayerEntity p = ctx.getSource().getPlayer();
+                            if (p != null) GuiManager.openPortConfigMenu(p);
+                            else ctx.getSource().sendError(Text.literal("Player only."));
+                            return 1;
+                        })
+                        .then(CommandManager.argument("port", IntegerArgumentType.integer(0, 65535))
+                            .executes(ctx -> {
+                                int port = IntegerArgumentType.getInteger(ctx, "port");
+                                CustomBlocksConfig.resourcePackPort = port;
+                                CustomBlocksConfig.save();
+                                com.customblocks.network.ResourcePackServer.start();
+                                ctx.getSource().sendMessage(Text.literal("§a[CustomBlocks] Server port set to " + port));
+                                return 1;
+                            })))
+                    .then(CommandManager.literal("push")
+                        .executes(ctx -> {
+                            String hash = com.customblocks.network.ResourcePackServer.getHash();
+                            if (hash == null) {
+                                ctx.getSource().sendError(Text.literal("§cPack not built yet."));
+                                return 0;
+                            }
+                            int port = CustomBlocksConfig.resourcePackPort;
+                            String serverIp = ctx.getSource().getServer().getServerIp();
+                            if (serverIp == null || serverIp.isEmpty()) serverIp = "127.0.0.1";
+                            String url = "http://" + serverIp + ":" + port + "/pack.zip";
+                            
+                            for (ServerPlayerEntity p : ctx.getSource().getServer().getPlayerManager().getPlayerList()) {
+                                p.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.common.ResourcePackSendS2CPacket(
+                                    java.util.UUID.randomUUID(), url, hash, true, java.util.Optional.of(Text.literal("Custom Blocks Texture Sync"))
+                                ));
+                            }
+                            ctx.getSource().sendMessage(Text.literal("§a[CustomBlocks] Pushed resource pack to all players!"));
+                            return 1;
+                        })))
 
                 // ── setshape ─────────────────────────────────────────────────
                 .then(CommandManager.literal("setshape")
@@ -1061,15 +1079,6 @@ public class CustomBlockCommand {
                 d.shapeBoxes != null ? new java.util.ArrayList<>(d.shapeBoxes) : null, d.noCollision);
     }
 
-    private static int cmdAdminGui(ServerCommandSource src) {
-        try {
-            net.minecraft.server.network.ServerPlayerEntity player = src.getPlayerOrThrow();
-            com.customblocks.gui.GuiManager.openAdminGui(player);
-        } catch (Exception ex) {
-            src.sendError(Text.literal("§cRun as a player."));
-        }
-        return 1;
-    }
 
     /** Resize the existing stored texture (and all face overrides) of a block. */
     private static int cmdResize(ServerCommandSource src, String id, int size) {

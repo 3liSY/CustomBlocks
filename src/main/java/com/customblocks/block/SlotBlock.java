@@ -27,7 +27,7 @@ public class SlotBlock extends Block {
     private final int slotIndex;
 
     public SlotBlock(int slotIndex, Settings settings) {
-        super(settings);
+        super(settings.nonOpaque());
         this.slotIndex = slotIndex;
     }
 

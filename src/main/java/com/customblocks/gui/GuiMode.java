@@ -12,5 +12,6 @@ public enum GuiMode {
     SHAPE_EDITOR,
     ADMIN_GUI,
     ANIM_GUI,
-    TAB_ICON_MENU
+    TAB_ICON_MENU,
+    FIND_PORT_GUI
 }

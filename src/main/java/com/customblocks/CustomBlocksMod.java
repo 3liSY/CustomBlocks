@@ -11,7 +11,9 @@ import com.customblocks.item.ColorTriangleItem;
 import com.customblocks.item.RectangleToolItem;
 import com.customblocks.network.FullSyncPayload;
 import com.customblocks.network.NetworkManager;
+import com.customblocks.network.ResourcePackServer;
 import com.customblocks.network.SlotUpdatePayload;
+import com.customblocks.network.SyncCompletePayload;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
@@ -59,6 +61,9 @@ public class CustomBlocksMod implements ModInitializer {
         // ── Load config first ────────────────────────────────────────────────
         CustomBlocksConfig.load();
         int maxSlots = CustomBlocksConfig.maxSlots;
+
+        // ── Start HTTP Server ────────────────────────────────────────────────
+        ResourcePackServer.start();
 
         SLOT_BLOCKS = new SlotBlock[maxSlots];
         SLOT_ITEMS  = new SlotBlock.SlotItem[maxSlots];
@@ -118,6 +123,7 @@ public class CustomBlocksMod implements ModInitializer {
         // ── Network payloads ─────────────────────────────────────────────────
         PayloadTypeRegistry.playS2C().register(FullSyncPayload.ID, FullSyncPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(SlotUpdatePayload.ID, SlotUpdatePayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(SyncCompletePayload.ID, SyncCompletePayload.CODEC);
         PayloadTypeRegistry.playS2C().register(
                 com.customblocks.network.OpenAnimGuiPayload.ID,
                 com.customblocks.network.OpenAnimGuiPayload.CODEC);
@@ -212,6 +218,10 @@ public class CustomBlocksMod implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             NetworkManager.onServerTick(server);
             RectangleToolItem.tickSessionCleanup();
+        });
+
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
+            ResourcePackServer.stop();
         });
 
         // ── Commands & Data ──────────────────────────────────────────────────

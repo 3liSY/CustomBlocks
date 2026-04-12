@@ -59,6 +59,10 @@ public record GuiState(
         return new GuiState(GuiMode.TAB_ICON_MENU, null, 0, false, 0, false);
     }
 
+    public static GuiState findPortGui() {
+        return new GuiState(GuiMode.FIND_PORT_GUI, null, 0, false, 0, false);
+    }
+
     // ── Mutation (returns new instance) ──────────────────────────────────────
 
     public GuiState withConfirmDelete(boolean confirm) {
