@@ -672,21 +672,13 @@ public class CustomBlockCommand {
     }
 
     private static int cmdSaveShape(ServerCommandSource src, String name, String id) {
-        if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
-        src.sendError(net.minecraft.text.Text.literal("§cTemplates disabled.")); return 0;
-        src.sendMessage(Text.literal("§a[CustomBlocks] Shape saved as template '§f" + name + "§a'."));
-        return 1;
+        src.sendError(net.minecraft.text.Text.literal("§cTemplates disabled."));
+        return 0;
     }
 
     private static int cmdLoadShape(ServerCommandSource src, String id, String name) {
-        if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
-        UndoManager.pushUndoMutation(id, SlotManager.getById(id), "loadshape", getPlayerUuid(src));
-        src.sendError(net.minecraft.text.Text.literal("§cTemplates disabled.")); return 0;
-        SlotManager.saveAll();
-        SlotData d = SlotManager.getById(id);
-        broadcastShape(src.getServer(), d);
-        src.sendMessage(Text.literal("§a[CustomBlocks] Applied shape template '§f" + name + "§a' to '§f" + id + "§a'."));
-        return 1;
+        src.sendError(net.minecraft.text.Text.literal("§cTemplates disabled."));
+        return 0;
     }
 
     private static int cmdShapeEditor(ServerCommandSource src, String id) {
