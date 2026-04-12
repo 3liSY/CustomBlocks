@@ -74,21 +74,8 @@ public class SlotBlock extends Block {
 
     @Override
     public VoxelShape getCullingShape(BlockState state, BlockView world, BlockPos pos) {
-        // Return empty culling shape so neighboring blocks never cull their faces
-        // when they touch a CustomBlock that isn't a full opaque cube.
-        return VoxelShapes.empty();
-    }
-
-    /** Never treated as an opaque solid — prevents face-culling of neighbors. */
-    @Override
-    protected boolean isSolidBlock(BlockState state, BlockView world, BlockPos pos) {
-        return false;
-    }
-
-    /** Mark as non-opaque so the engine renders neighbor faces (like Glass). */
-    @Override
-    public boolean isOpaque(BlockState state) {
-        return false;
+        VoxelShape s = SlotManager.buildVoxelShape(getSlotKey());
+        return s != null ? s : VoxelShapes.fullCube();
     }
 
     @Override

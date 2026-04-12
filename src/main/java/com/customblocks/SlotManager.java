@@ -9,8 +9,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-// §3: needed for isBroken texture check cached in SlotData constructor
-import com.customblocks.ImageProcessor;
 
 public class SlotManager {
 
@@ -199,8 +197,6 @@ public class SlotManager {
         public       List<ShapeBox> shapeBoxes;
         /** If true, no collision (can walk through). */
         public       boolean noCollision;
-        /** §3: Cached broken-texture flag — set once on upload, O(1) reads afterward. */
-        public       boolean isBroken;
 
         public SlotData(int index, String customId, String displayName, byte[] texture,
                         int lightLevel, float hardness, String soundType,
@@ -219,9 +215,6 @@ public class SlotManager {
             this.shapeBoxes  = (shapeBoxes != null && !shapeBoxes.isEmpty())
                     ? new ArrayList<>(shapeBoxes) : null;
             this.noCollision = noCollision;
-            // §3: Cache isBroken once so GuiManager can query it in O(1)
-            this.isBroken    = (texture != null && texture.length > 0)
-                    && ImageProcessor.isBrokenTexture(texture);
         }
 
         // Legacy constructors (no shape)

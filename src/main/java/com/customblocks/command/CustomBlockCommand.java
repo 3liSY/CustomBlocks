@@ -64,6 +64,23 @@ public class CustomBlockCommand {
                                     StringArgumentType.getString(ctx, "url").trim(),
                                     ImageProcessor.DEFAULT_SIZE))))))
 
+                .then(CommandManager.literal("createurl")
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .then(CommandManager.argument("name", StringArgumentType.word())
+                            .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
+                                .then(CommandManager.argument("url", StringArgumentType.greedyString())
+                                    .executes(ctx -> cmdCreate(ctx.getSource(),
+                                        StringArgumentType.getString(ctx, "id"),
+                                        StringArgumentType.getString(ctx, "name").replace("_", " "),
+                                        StringArgumentType.getString(ctx, "url").trim(),
+                                        IntegerArgumentType.getInteger(ctx, "size")))))
+                            .then(CommandManager.argument("url", StringArgumentType.greedyString())
+                                .executes(ctx -> cmdCreate(ctx.getSource(),
+                                    StringArgumentType.getString(ctx, "id"),
+                                    StringArgumentType.getString(ctx, "name").replace("_", " "),
+                                    StringArgumentType.getString(ctx, "url").trim(),
+                                    ImageProcessor.DEFAULT_SIZE))))))
+
                 // ── delete ──────────────────────────────────────────────────
                 .then(CommandManager.literal("delete")
                     .executes(ctx -> usage(ctx.getSource(), "delete"))
@@ -168,22 +185,7 @@ public class CustomBlockCommand {
                         return 1;
                     }))
 
-                // ── Resource Pack Engine (§2) ────────────────────────────────
-                .then(CommandManager.literal("resourcepack")
-                    .then(CommandManager.literal("setport")
-                        .then(CommandManager.argument("port", IntegerArgumentType.integer(1024, 65535))
-                            .executes(ctx -> cmdRpSetPort(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "port")))))
-                    .then(CommandManager.literal("push")
-                        .executes(ctx -> cmdRpPush(ctx.getSource()))))
-                .then(CommandManager.literal("rp")
-                    .then(CommandManager.literal("setport")
-                        .then(CommandManager.argument("port", IntegerArgumentType.integer(1024, 65535))
-                            .executes(ctx -> cmdRpSetPort(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "port")))))
-                    .then(CommandManager.literal("push")
-                        .executes(ctx -> cmdRpPush(ctx.getSource()))))
-
                 // ── settabicon ──────────────────────────────────────────────
-
                 .then(CommandManager.literal("settabicon")
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
@@ -211,6 +213,9 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("redo")
                     .executes(ctx -> cmdRedo(ctx.getSource())))
 
+                // ── admingui ─────────────────────────────────────────────────
+                .then(CommandManager.literal("admingui")
+                    .executes(ctx -> cmdAdminGui(ctx.getSource())))
 
                 // (givesquare/givetriangle/giverectangle removed — use /cb square, /cb triangle, /cb rectangle)
 
@@ -254,9 +259,7 @@ public class CustomBlockCommand {
                     .executes(ctx -> cmdList(ctx.getSource())))
 
                 .then(CommandManager.literal("help")
-                    .executes(ctx -> cmdHelpGui(ctx.getSource())))
-                .then(CommandManager.literal("helpgui")
-                    .executes(ctx -> cmdHelpGui(ctx.getSource())))
+                    .executes(ctx -> cmdHelp(ctx.getSource())))
 
                 // ── editor — works with or without ID ──────────────────────
                 .then(CommandManager.literal("editor")
@@ -1066,6 +1069,15 @@ public class CustomBlockCommand {
                 d.shapeBoxes != null ? new java.util.ArrayList<>(d.shapeBoxes) : null, d.noCollision);
     }
 
+    private static int cmdAdminGui(ServerCommandSource src) {
+        try {
+            net.minecraft.server.network.ServerPlayerEntity player = src.getPlayerOrThrow();
+            com.customblocks.gui.GuiManager.openAdminGui(player);
+        } catch (Exception ex) {
+            src.sendError(Text.literal("§cRun as a player."));
+        }
+        return 1;
+    }
 
     /** Resize the existing stored texture (and all face overrides) of a block. */
     private static int cmdResize(ServerCommandSource src, String id, int size) {
@@ -1270,13 +1282,71 @@ public class CustomBlockCommand {
         return 1;
     }
 
-    private static int cmdHelpGui(ServerCommandSource src) {
-        try {
-            ServerPlayerEntity player = src.getPlayerOrThrow();
-            GuiManager.openHelpGui(player);
-        } catch (Exception ex) {
-            src.sendError(Text.literal("§cMust run as a player to view the GUI."));
-        }
+    private static int cmdHelp(ServerCommandSource src) {
+        final String D = "§8§m                                              §r";
+        final String H = "§e§l";   // heading colour
+        final String C = "§b";     // command colour
+        final String G = "§7";     // grey description
+        final String A = "§f";     // arg colour
+
+        src.sendMessage(Text.literal(" "));
+        src.sendMessage(Text.literal("  §6§l✦ CustomBlocks  §r§8│ §7/cb or /customblock  §8│ §71.0"));
+        src.sendMessage(Text.literal(D));
+
+        src.sendMessage(Text.literal(H + "  Blocks"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "create " + A + "<id> <name> [size] <url>  " + G + "— new block (size 16-256, default 128)"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "retexture " + A + "<id> [size] <url>       " + G + "— swap texture"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "resize " + A + "<id> <16-256>             " + G + "— rescale stored texture"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "rename " + A + "<id> <name>               " + G + "— rename a block"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "dupe " + A + "<id> <newId> [name]         " + G + "— copy a block + all settings"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "delete " + A + "<id>                      " + G + "— permanently remove"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "give " + A + "<id> [amount] [player]      " + G + "— add to inventory"));
+        src.sendMessage(Text.literal(D));
+
+        src.sendMessage(Text.literal(H + "  Per-Face Textures"));
+        src.sendMessage(Text.literal(G + "  §6Rainbow Rectangle §7— right-click any face of a block to paint it"));
+        src.sendMessage(Text.literal(G + "  §8Shift+click §7= 256px quality  |  Normal click §7= 128px"));
+        src.sendMessage(Text.literal(G + "  §8Creates a NEW variant block — original stays unchanged"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "editor " + A + "<id>                     " + G + "— open face editor GUI for a block"));
+        src.sendMessage(Text.literal(D));
+
+        src.sendMessage(Text.literal(H + "  Properties"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "setglow " + A + "<id> §3<0-15>            " + G + "— light emission  §8(0=off, 15=max like beacon)"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "sethardness " + A + "<id> §3<-1 to 50>    " + G + "— break speed  §8(-1=unbreakable, 0=instant)"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "setsound " + A + "<id> §3<sound>          " + G + "— §8stone wood metal glass grass sand wool"));
+        src.sendMessage(Text.literal(G + "  " + G + "§8                              gravel snow dirt coral bamboo nether_brick ice honey bone slime"));
+        src.sendMessage(Text.literal(D));
+
+        src.sendMessage(Text.literal(H + "  Tools"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "rectangle                     " + G + "— §6Rainbow Rectangle §8face-paint wand"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "square " + A + "§3<black|yellow|green>    " + G + "— color-swap tool"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "triangle " + A + "§3<black|yellow|green>  " + G + "— color triangle tool"));
+        src.sendMessage(Text.literal(D));
+
+        src.sendMessage(Text.literal(H + "  Shapes"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "setshape " + A + "<id> <preset|coords>    " + G + "— set shape  §8(full slab thin carpet pillar small micro pane trapdoor fence stairs cross)"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "addshape " + A + "<id> <x1,y1,z1,x2,y2,z2>" + G + "— add a box to the shape"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "removeshape " + A + "<id> <index>          " + G + "— remove a box by index (0-based)"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "clearshape " + A + "<id>                  " + G + "— reset to full cube"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "setcollision " + A + "<id> <on|off>        " + G + "— toggle walkthrough"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "saveshape " + A + "<name> <id>            " + G + "— save shape as template"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "loadshape " + A + "<id> <name>            " + G + "— apply saved template"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "shapeeditor " + A + "<id>                 " + G + "— open shape editor GUI"));
+        src.sendMessage(Text.literal(D));
+
+        src.sendMessage(Text.literal(H + "  Utilities"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "undo                          " + G + "— undo last change  §8(up to 20 steps, shows next)"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "redo                          " + G + "— redo the last undone change"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "admingui                      " + G + "— open server-wide admin control panel"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "settabicon " + A + "<url>               " + G + "— set the creative tab icon"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "importfolder                  " + G + "— bulk-import from config/customblocks/import/"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "export                        " + G + "— export block list to JSON"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "list                          " + G + "— show all blocks"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "gui                           " + G + "— open chest GUI"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "reload                        " + G + "— reload all blocks & sync to all players"));
+        src.sendMessage(Text.literal(D));
+        src.sendMessage(Text.literal("  §8Press §7B §8to open the overlay HUD · No restart needed!"));
+        src.sendMessage(Text.literal(" "));
         return 1;
     }
 
@@ -1362,34 +1432,6 @@ public class CustomBlockCommand {
         } catch (Exception ex) {
             src.sendError(Text.literal("§cRun as a player."));
         }
-        return 1;
-    }
-
-    // ── Resource Pack Engine (§2) ─────────────────────────────────────────────
-
-    private static int cmdRpSetPort(ServerCommandSource src, int port) {
-        com.customblocks.server.ResourcePackServer.saveConfig(port);
-        com.customblocks.server.ResourcePackServer.stop();
-        com.customblocks.server.ResourcePackServer.start();
-        src.sendMessage(Text.literal("§a[CustomBlocks] HTTP Resource Pack Server port set to " + port + " and restarted."));
-        return 1;
-    }
-
-    private static int cmdRpPush(ServerCommandSource src) {
-        MinecraftServer server = src.getServer();
-        String ip = server.getServerIp();
-        if (ip == null || ip.isEmpty()) ip = "127.0.0.1";
-        else if (ip.equals("0.0.0.0")) ip = "localhost"; // Local fallback for dedicated server binds
-
-        String url = "http://" + ip + ":" + com.customblocks.server.ResourcePackServer.getPort() + "/customblocks.zip";
-        
-        byte[] hash = com.customblocks.server.ResourcePackServer.getCurrentHash();
-        
-        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
-             player.sendResourcePackUrl(url, hash, Text.literal("CustomBlocks Server-Hosted Pack"), false);
-        }
-        
-        src.sendMessage(Text.literal("§a[CustomBlocks] Pushed Resource Pack prompt (" + url + ") to " + server.getPlayerManager().getPlayerList().size() + " players."));
         return 1;
     }
 

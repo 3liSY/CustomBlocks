@@ -3,7 +3,6 @@ package com.customblocks.client;
 import com.customblocks.client.gui.AnimBlockScreen;
 import com.customblocks.network.AnimSettingsPayload;
 import com.customblocks.network.OpenAnimGuiPayload;
-import com.customblocks.network.SyncCompletePayload;
 import com.customblocks.CustomBlocksMod;
 import com.customblocks.SlotManager;
 import com.customblocks.block.SlotBlock;
@@ -56,7 +55,7 @@ public class CustomBlocksClient implements ClientModInitializer {
 
         ClientLifecycleEvents.CLIENT_STARTED.register(client -> {
             SlotManager.loadFromClientDir(client.runDirectory);
-            ResourcePackGenerator.generate(client.runDirectory);
+            ResourcePackGenerator.generate(client);
             injectPackIfNeeded(client);
         });
 
@@ -78,8 +77,7 @@ public class CustomBlocksClient implements ClientModInitializer {
             }
         });
 
-        // §1 — FullSyncPayload: receive metadata, wait passively for SyncCompletePayload.
-        //       Server sends SyncCompletePayload when queue hits 0 (no more 4000ms guessing).
+        // ── FullSyncPayload — initial join ────────────────────────────────
         ClientPlayNetworking.registerGlobalReceiver(FullSyncPayload.ID, (payload, context) -> {
             MinecraftClient client = context.client();
             client.execute(() -> {
@@ -95,17 +93,10 @@ public class CustomBlocksClient implements ClientModInitializer {
                 }
                 if (payload.tabIconTexture() != null)
                     SlotManager.setTabIconTexture(payload.tabIconTexture());
-                // §1: Do NOT schedule reload here — wait for explicit SyncCompletePayload.
+                // Schedule one deferred reload after the burst settles (4s debounce for join)
+                scheduleGenerateAndReload(client, 4000L);
             });
         });
-
-        // §1 — SyncCompletePayload: explicit completion signal from server.
-        //       Triggers exactly ONE guaranteed reloadResources() with no Netty blocking.
-        ClientPlayNetworking.registerGlobalReceiver(SyncCompletePayload.ID, (payload, context) -> {
-            MinecraftClient client = context.client();
-            client.execute(() -> scheduleGenerateAndReload(client, 200L));
-        });
-
 
         // ── SlotUpdatePayload ─────────────────────────────────────────────
         ClientPlayNetworking.registerGlobalReceiver(SlotUpdatePayload.ID, (payload, context) -> {
@@ -274,7 +265,7 @@ public class CustomBlocksClient implements ClientModInitializer {
                     try { Thread.sleep(Math.max(50, remaining)); } catch (InterruptedException ignored) { break; }
                 }
                 SlotManager.saveToClientDir(client.runDirectory);
-                ResourcePackGenerator.generate(client.runDirectory);
+                ResourcePackGenerator.generate(client);
                 client.execute(() -> {
                     injectPackIfNeeded(client);
                     joinBurst = false;  // join burst is definitely over by now
