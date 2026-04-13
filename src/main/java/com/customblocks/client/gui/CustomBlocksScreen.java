@@ -416,6 +416,7 @@ public class CustomBlocksScreen extends Screen {
         // Properties overlay
         if (activePanel==Panel.PROPERTIES) {
             int bx = rx-2;
+            int bw = rw + 4;
             int propY = py+PAD+14 + 290;
             ctx.fill(bx, propY-18, bx+rw+4, propY+110, darkTheme?0xEE_0D0D22:0xEE_CCCCEE);
             ctx.drawBorder(bx, propY-18, rw+4, 128, cBorderHi());
