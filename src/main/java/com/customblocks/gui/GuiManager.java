@@ -97,10 +97,13 @@ public class GuiManager {
 
     public static boolean isReopeningScreen(UUID uuid) { return REOPENING_SCREENS.contains(uuid); }
 
+    private static final java.util.Set<UUID> RESTORING = new java.util.HashSet<>();
+
     /**
      * Push current state to back-stack before navigating away.
      */
     private static void pushBackStack(UUID uuid) {
+        if (RESTORING.contains(uuid)) return;
         GuiState current = STATES.get(uuid);
         if (current != null) {
             BACK_STACK.computeIfAbsent(uuid, k -> new ArrayDeque<>()).push(current);
@@ -116,37 +119,13 @@ public class GuiManager {
         GuiState state = STATES.get(uuid);
         if (state == null) return;
 
-        switch (state.mode()) {
-            case MAIN -> {
-                Deque<GuiState> stack = BACK_STACK.get(uuid);
-                if (stack != null && !stack.isEmpty()) {
-                    GuiState prev = stack.pop();
-                    restoreState(player, prev);
-                } else {
-                    // At root — fully close
-                    STATES.remove(uuid);
-                    PENDING.remove(uuid);
-                }
-            }
-            case PICKER, PICKER_BROKEN, TAB_ICON_MENU -> {
-                openMain(player, 0);
-            }
-            case EDITOR -> {
-                if (state.fromCommand()) {
-                    STATES.remove(uuid);
-                } else {
-                    openEditorPicker(player, state.page());
-                }
-            }
-            case FACE_EDITOR -> openEditor(player, state.editingId(), state.page(), false);
-            case SHAPE_EDITOR -> openEditor(player, state.editingId(), state.page(), false);
-            case ADMIN_GUI -> {
-                STATES.remove(uuid);
-            }
-            case ANIM_GUI -> {
-                ANIM_PARAMS.remove(uuid);
-                STATES.remove(uuid);
-            }
+        Deque<GuiState> stack = BACK_STACK.get(uuid);
+        if (stack != null && !stack.isEmpty()) {
+            GuiState prev = stack.pop();
+            restoreState(player, prev);
+        } else {
+            // At root - fully close
+            STATES.remove(uuid);
         }
     }
 
@@ -163,7 +142,8 @@ public class GuiManager {
     // ── Public API ────────────────────────────────────────────────────────────
 
     public static void openToolsGui(ServerPlayerEntity player) {
-        STATES.put(player.getUuid(), GuiState.main(0));
+        pushBackStack(player.getUuid());
+        STATES.put(player.getUuid(), GuiState.tools());
         openScreen(player, new SimpleNamedScreenHandlerFactory((syncId, playerInv, p) -> new CbScreenHandler(syncId, playerInv, buildToolsGui(player)), Text.literal("§d§lTools & Cosmetics")));
     }
 
@@ -223,23 +203,41 @@ public class GuiManager {
             Text.literal("§5§l⬡ §r§fShape Editor §8— §5" + d.displayName + " §7(ESC = back)")));
     }
 
-    public static void openAdminGui(ServerPlayerEntity player) {
+    public static void openMaintenanceMenu(ServerPlayerEntity player) {
         pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.adminGui());
+        STATES.put(player.getUuid(), GuiState.maintenance());
         openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildAdminGui(player, 0)),
-            Text.literal("§4§l⚙ §r§cAdmin Control Panel §7— All Servers")));
+            (s, pi, p) -> new CbScreenHandler(s, pi, buildMaintenanceMenu()),
+            Text.literal("§b§l✦ §r§fServer Maintenance §7(ESC = back)")));
     }
 
-    public static void openTabIconMenu(ServerPlayerEntity player) {
-        SimpleInventory inv = new SimpleInventory(27);
-        for(int i=0;i<27;i++) inv.setStack(i, glass());
-        inv.setStack(11, uiGlint(Items.PAINTING, "§eType in Chat", "§7Provide a URL or Custom Block ID"));
-        inv.setStack(15, uiGlint(Items.CHEST, "§bPick from Menu", "§7Select an existing block visually"));
+
+    public static void openHelpGui(ServerPlayerEntity player) {
         pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.tabIconMenu());
-        // Do not add PENDING until they click the button! (Fixes ghosting where just opening the menu flags them)
-        openScreen(player, new SimpleNamedScreenHandlerFactory((s, pi, p) -> new CbScreenHandler(s, pi, inv), Text.literal("§e§l🎨 Choose Tab Icon")));
+        STATES.put(player.getUuid(), GuiState.help());
+        openScreen(player, new SimpleNamedScreenHandlerFactory(
+            (s, pi, p) -> new CbScreenHandler(s, pi, buildHelpGui()),
+            Text.literal("§a§l✦ §r§fHelp & Info §7(ESC = back)")));
+    }
+
+    public static void openPropertiesGui(ServerPlayerEntity player, String id, int returnPage) {
+        SlotData d = SlotManager.getById(id);
+        if (d == null) { openMain(player, returnPage); return; }
+        pushBackStack(player.getUuid());
+        STATES.put(player.getUuid(), GuiState.properties(id, returnPage));
+        openScreen(player, new SimpleNamedScreenHandlerFactory(
+            (s, pi, p) -> new CbScreenHandler(s, pi, buildPropertiesGui(d)),
+            Text.literal("§6§l⚙ §r§fProperties §8— §6" + d.displayName + " §7(ESC = back)")));
+    }
+
+    public static void openSoundMenu(ServerPlayerEntity player, String id, int returnPage) {
+        SlotData d = SlotManager.getById(id);
+        if (d == null) { openMain(player, returnPage); return; }
+        pushBackStack(player.getUuid());
+        STATES.put(player.getUuid(), GuiState.sound(id, returnPage));
+        openScreen(player, new SimpleNamedScreenHandlerFactory(
+            (s, pi, p) -> new CbScreenHandler(s, pi, buildSoundMenu(d)),
+            Text.literal("§e§l♫ §r§fBlock Sounds §8— §e" + d.displayName + " §7(ESC = back)")));
     }
 
     public static void openTabIconPicker(ServerPlayerEntity player, int page) {
@@ -289,15 +287,27 @@ public class GuiManager {
     }
 
     private static void restoreState(ServerPlayerEntity player, GuiState state) {
-        STATES.put(player.getUuid(), state);
-        switch (state.mode()) {
-            case MAIN -> openMain(player, state.page());
-            case PICKER -> openEditorPicker(player, state.page());
-            case EDITOR -> openEditor(player, state.editingId(), state.page(), state.fromCommand());
-            case FACE_EDITOR -> openFaceEditor(player, state.editingId(), state.page());
-            case SHAPE_EDITOR -> openShapeEditor(player, state.editingId(), state.page());
-            case ADMIN_GUI -> openAdminGui(player);
-            default -> openMain(player, 0);
+        RESTORING.add(player.getUuid());
+        try {
+            switch (state.mode()) {
+                case MAIN -> openMain(player, state.page());
+                case PICKER -> openEditorPicker(player, state.page());
+                case EDITOR -> openEditor(player, state.editingId(), state.page(), state.fromCommand());
+                case FACE_EDITOR -> openFaceEditor(player, state.editingId(), state.page());
+                case SHAPE_EDITOR -> openShapeEditor(player, state.editingId(), state.page());
+                case MAINTENANCE_MENU -> openMaintenanceMenu(player);
+                case HELP_MENU -> openHelpGui(player);
+                case TOOLS_GUI -> openToolsGui(player);
+                case PICKER_BROKEN -> openBrokenBlocks(player, state.page());
+                case PROPERTIES_MENU -> openPropertiesGui(player, state.editingId(), state.page());
+                case SOUND_MENU -> openSoundMenu(player, state.editingId(), state.page());
+                case TAB_ICON_MENU -> openTabIconPicker(player, state.page());
+                case FIND_PORT_GUI -> openPortConfigMenu(player);
+                case ANIM_GUI -> openAnimGui(player, state.editingId());
+                default -> openMain(player, 0);
+            }
+        } finally {
+            RESTORING.remove(player.getUuid());
         }
     }
 
@@ -307,20 +317,7 @@ public class GuiManager {
         GuiState state = STATES.get(player.getUuid());
         if (state == null) return;
         switch (state.mode()) {
-            case MAIN         -> {
-                if (player.currentScreenHandler != null && player.currentScreenHandler.getClass().getName().contains("CbScreenHandler")) {
-                    net.minecraft.screen.ScreenHandler h = player.currentScreenHandler;
-                    if (!h.getSlot(45).getStack().isEmpty() && h.getSlot(45).getStack().getItem() == net.minecraft.item.Items.RED_CONCRETE && 
-                        !h.getSlot(20).getStack().isEmpty() && h.getSlot(20).getStack().getItem() == net.minecraft.item.Items.BLAZE_ROD) {
-                        if (slot == 45) { openMain(player, 0); return; }
-                        if (slot == 24) { openTabIconMenu(player); return; }
-                        if (slot == 20) { PENDING.put(player.getUuid(), new PendingInput(InputAction.REID_TEXT, "__givesquare__", null, null, null, state.page())); closeForPrompt(player); send(player, "§6[GUI] §eType color: §fblack §7| §fyellow §7| §fgreen§e:"); return; }
-                        if (slot == 21) { PENDING.put(player.getUuid(), new PendingInput(InputAction.REID_TEXT, "__givetriangle__", null, null, null, state.page())); closeForPrompt(player); send(player, "§6[GUI] §eType color: §fblack §7| §fyellow §7| §fgreen§e:"); return; }
-                        return;
-                    }
-                }
-                handleMainClick(player, state, slot);
-            }
+            case MAIN         -> handleMainClick(player, state, slot);
             case PICKER       -> handlePickerClick(player, state, slot, false);
             case PICKER_BROKEN-> handlePickerClick(player, state, slot, true);
             case TAB_ICON_MENU-> handleTabIconMenuClick(player, state, slot);
@@ -328,7 +325,11 @@ public class GuiManager {
             case EDITOR       -> handleEditorClick(player, state, slot, button);
             case FACE_EDITOR  -> handleFaceEditorClick(player, state, slot, button);
             case SHAPE_EDITOR -> handleShapeEditorClick(player, state, slot, button);
-            case ADMIN_GUI    -> handleAdminGuiClick(player, state, slot, button);
+            case MAINTENANCE_MENU -> handleMaintenanceClick(player, state, slot);
+            case HELP_MENU      -> handleHelpClick(player, state, slot);
+            case TOOLS_GUI      -> handleToolsClick(player, state, slot);
+            case PROPERTIES_MENU-> handlePropertiesClick(player, state, slot);
+            case SOUND_MENU     -> handleSoundClick(player, state, slot);
             case ANIM_GUI     -> handleAnimGuiClick(player, state, slot);
         }
     }
@@ -570,7 +571,7 @@ public class GuiManager {
             }
             case ADMIN_CUSTOM_TITLE -> {
                 send(player, "§7[CustomBlocks] Action cancelled.");
-                openAdminGui(player);
+                openMain(player, 0);
                 return true;
             }
         }
@@ -588,6 +589,32 @@ public class GuiManager {
         if (slot == 14) { com.customblocks.CustomBlocksConfig.setResourcePackPort(25565); send(player, "§aPort set to 25565. Please restart server for changes to take effect."); openMain(player, 0); }
         if (slot == 16) { com.customblocks.CustomBlocksConfig.setResourcePackPort(24454); send(player, "§aPort set to 24454. Please restart server for changes to take effect."); openMain(player, 0); }
         if (slot == 22) { openMain(player, 0); }
+    }
+
+    private static void handleToolsClick(ServerPlayerEntity player, GuiState state, int slot) {
+        switch (slot) {
+            case 20 -> { // Rainbow Rectangle Wand
+                try {
+                    net.minecraft.item.Item item = net.minecraft.registry.Registries.ITEM.get(net.minecraft.util.Identifier.of(com.customblocks.CustomBlocksMod.MOD_ID, "rainbow_rectangle"));
+                    if (item != null && item != net.minecraft.item.Items.AIR) {
+                        player.getInventory().insertStack(new net.minecraft.item.ItemStack(item));
+                        send(player, "§6[CustomBlocks] §eGiven §6Rainbow Rectangle§e!");
+                    }
+                } catch (Exception e) { send(player, "§cCould not give rectangle wand."); }
+            }
+            case 21 -> { // Color Square - prompt for color
+                PENDING.put(player.getUuid(), new PendingInput(InputAction.REID_TEXT, "__givesquare__", null, null, null, state.page()));
+                closeForPrompt(player);
+                send(player, "§6[GUI] §eType color: §fblack §7| §fyellow §7| §fgreen§e:");
+            }
+            case 22 -> { // Color Triangle - prompt for color
+                PENDING.put(player.getUuid(), new PendingInput(InputAction.REID_TEXT, "__givetriangle__", null, null, null, state.page()));
+                closeForPrompt(player);
+                send(player, "§6[GUI] §eType color: §fblack §7| §fyellow §7| §fgreen§e:");
+            }
+            case 24 -> openTabIconPicker(player, 0); // Tab Icon
+            case 45 -> openMain(player, 0);     // Back
+        }
     }
 
     private static void handleTabIconMenuClick(ServerPlayerEntity player, GuiState state, int slot) {
@@ -619,48 +646,30 @@ public class GuiManager {
         }
     }
 
+    
     private static void handleMainClick(ServerPlayerEntity player, GuiState state, int slot) {
-        int page = state.page();
         UUID uuid = player.getUuid();
-        if (slot < 45) {
-            java.util.List<SlotData> blocks = sortedBlocks();
-            int maxBlocks = 23;
-            if (slot % 2 == 0) {
-                int objIdx = (page * maxBlocks) + (slot / 2);
-                if (objIdx < blocks.size()) {
-                    openEditor(player, blocks.get(objIdx).customId, 0);
-                }
-            }
-            return;
-        }
-        
         switch (slot) {
-            case 45 -> { if (page > 0) openMain(player, page - 1); }
-            case 46 -> { PENDING.put(uuid, new PendingInput(InputAction.CREATE_ID, null, null, null, null, page)); closeForPrompt(player); send(player, "§6[GUI] §eType a block §fID §e(a-z 0-9 _ only) or §ccancel§e:"); }
-            case 47 -> { openToolsGui(player); }
-            case 48 -> {
+            case 10 -> openEditorPicker(player, 0); 
+            case 12 -> openToolsGui(player); 
+            case 14 -> openMaintenanceMenu(player); 
+            case 16 -> openHelpGui(player); 
+            case 21 -> {
                 int undoSz = UndoManager.undoSize(uuid);
-                if (undoSz == 0) { send(player, "§7Nothing to undo."); refreshScreen(player, buildMain(player, page)); return; }
+                if (undoSz == 0) { send(player, "§7Nothing to undo."); refreshScreen(player, buildMain(player, state.page())); return; }
                 UndoManager.UndoEntry entry = UndoManager.popUndo(uuid);
-                if (entry == null) { refreshScreen(player, buildMain(player, page)); return; }
+                if (entry == null) { refreshScreen(player, buildMain(player, state.page())); return; }
                 applyUndoEntry(player, entry);
-                refreshScreen(player, buildMain(player, page));
+                refreshScreen(player, buildMain(player, state.page()));
             }
-            case 50 -> {
+            case 22 -> { PENDING.put(uuid, new PendingInput(InputAction.CREATE_ID, null, null, null, null, state.page())); closeForPrompt(player); send(player, "§6[GUI] §eType a block §fID §e(a-z 0-9 _ only) or §ccancel§e:"); }
+            case 23 -> {
                 int redoSz = UndoManager.redoSize(uuid);
-                if (redoSz == 0) { send(player, "§7Nothing to redo."); refreshScreen(player, buildMain(player, page)); return; }
+                if (redoSz == 0) { send(player, "§7Nothing to redo."); refreshScreen(player, buildMain(player, state.page())); return; }
                 UndoManager.UndoEntry entry = UndoManager.popRedo(uuid);
-                if (entry == null) { refreshScreen(player, buildMain(player, page)); return; }
+                if (entry == null) { refreshScreen(player, buildMain(player, state.page())); return; }
                 applyRedoEntry(player, entry);
-                refreshScreen(player, buildMain(player, page));
-            }
-            case 51 -> openAdminGui(player);
-            case 52 -> openBrokenBlocks(player, 0);
-            case 53 -> {
-                java.util.List<SlotData> blocks = sortedBlocks();
-                int maxBlocks = 23;
-                int maxPage = blocks.isEmpty() ? 0 : Math.max(0, (blocks.size()-1)/maxBlocks);
-                if (page < maxPage) openMain(player, page + 1);
+                refreshScreen(player, buildMain(player, state.page()));
             }
         }
     }
@@ -744,10 +753,22 @@ public class GuiManager {
         switch (slot) {
             case 0  -> openEditorPicker(player, rp);
             case 2  -> { player.getInventory().insertStack(CustomBlocksMod.safeSlotItem(d.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(d.index),1):ItemStack.EMPTY); send(player,"§a[GUI] Given 1x §f"+d.displayName); openEditor(player,id,rp); }
-            case 3  -> { PENDING.put(uuid,new PendingInput(InputAction.RENAME_TEXT,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new name for '§f"+id+"§e' (or §ccancel§e):"); }
-            case 4  -> { PENDING.put(uuid,new PendingInput(InputAction.REID_TEXT,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new ID for '§f"+id+"§e' (a-z 0-9 _ -) (or §ccancel§e):"); }
-            case 6  -> { PENDING.put(uuid,new PendingInput(InputAction.CREATE_ID,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new ID to duplicate '§f"+id+"§e' into (or §ccancel§e):"); }
-            case 8  -> {
+            case 6  -> {
+                UndoManager.pushUndoMutation(id, d, "setcollision", uuid); SlotManager.setCollision(id,!d.noCollision); SlotManager.saveAll();
+                SlotData upd = SlotManager.getById(id);
+                NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setcollision",upd.index,id,null,null,0,0,"stone",null,upd.noCollision?"false":"true"));
+                send(player,"§a[GUI] Collision: §f"+(upd.noCollision?"§cOFF":"§aON")); refreshEditorInPlace(player, id, rp);
+            }
+            case 8  -> { PENDING.put(uuid,new PendingInput(InputAction.RETEXTURE_URL,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §ePaste image URL for ALL faces of '§f"+id+"§e' (or §ccancel§e):"); }
+            case 10 -> openFaceEditor(player, id, rp);
+            case 12 -> openShapeEditor(player, id, rp);
+            case 14 -> openPropertiesGui(player, id, rp);
+            case 16 -> openSoundMenu(player, id, rp);
+            case 22 -> { if (d.isAnimated()) openAnimGui(player, id); }
+            case 28 -> { PENDING.put(uuid,new PendingInput(InputAction.RENAME_TEXT,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new name for '§f"+id+"§e' (or §ccancel§e):"); }
+            case 29 -> { PENDING.put(uuid,new PendingInput(InputAction.REID_TEXT,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new ID for '§f"+id+"§e' (a-z 0-9 _ -) (or §ccancel§e):"); }
+            case 30 -> { PENDING.put(uuid,new PendingInput(InputAction.CREATE_ID,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new ID to duplicate '§f"+id+"§e' into (or §ccancel§e):"); }
+            case 34 -> {
                 if (state.confirmDelete()) {
                     UndoManager.pushUndoDeletion(id, d.deepCopy(), uuid); SlotManager.remove(id); SlotManager.saveAll();
                     NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("remove", d.index, id, null, null, 0, 0, "stone"));
@@ -760,43 +781,6 @@ public class GuiManager {
                     REOPENING_SCREENS.remove(uuid);
                 }
             }
-            case 9  -> { PENDING.put(uuid,new PendingInput(InputAction.RETEXTURE_URL,id,null,null,null,rp)); player.closeHandledScreen(); send(player,"§6[GUI] §ePaste image URL for ALL faces of '§f"+id+"§e' (or §ccancel§e):"); }
-            case 10, 11, 12, 13, 14, 15, 16 -> openFaceEditor(player, id, rp);
-            case 17 -> { UndoManager.pushUndoMutation(id, d, "clearallfaces", uuid); SlotManager.clearAllFaces(id); SlotManager.saveAll(); broadcastClearAllFaces(player,d); send(player,"§a[GUI] All face overrides cleared."); openEditor(player,id,rp); }
-            case 19 -> clearFace(player,d,"top");
-            case 20 -> clearFace(player,d,"north");
-            case 21 -> clearFace(player,d,"south");
-            case 22 -> clearFace(player,d,"east");
-            case 23 -> clearFace(player,d,"west");
-            case 24 -> clearFace(player,d,"bottom");
-            case 27 -> { UndoManager.pushUndoMutation(id, d, "setglow", uuid); SlotManager.setLightLevel(id,Math.max(0,d.lightLevel-1)); syncProp(player,d); refreshEditorInPlace(player, id, rp); }
-            case 29 -> { UndoManager.pushUndoMutation(id, d, "setglow", uuid); SlotManager.setLightLevel(id,Math.min(15,d.lightLevel+1)); syncProp(player,d); refreshEditorInPlace(player, id, rp); }
-            case 30 -> { UndoManager.pushUndoMutation(id, d, "sethardness", uuid); SlotManager.setHardness(id,prevHardness(d.hardness)); syncProp(player,d); refreshEditorInPlace(player, id, rp); }
-            case 32 -> { UndoManager.pushUndoMutation(id, d, "sethardness", uuid); SlotManager.setHardness(id,nextHardness(d.hardness)); syncProp(player,d); refreshEditorInPlace(player, id, rp); }
-            case 34 -> openShapeEditor(player,id,rp);
-            case 35 -> {
-                UndoManager.pushUndoMutation(id, d, "setcollision", uuid); SlotManager.setCollision(id,!d.noCollision); SlotManager.saveAll();
-                SlotData upd = SlotManager.getById(id);
-                NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setcollision",upd.index,id,null,null,0,0,"stone",null,upd.noCollision?"false":"true"));
-                send(player,"§a[GUI] Collision: §f"+(upd.noCollision?"§cOFF":"§aON")); refreshEditorInPlace(player, id, rp);
-            }
-            case 36->{ setSoundQuiet(player,d,"stone",uuid); refreshEditorInPlace(player,id,rp); }
-            case 37->{ setSoundQuiet(player,d,"wood",uuid);  refreshEditorInPlace(player,id,rp); }
-            case 38->{ setSoundQuiet(player,d,"grass",uuid); refreshEditorInPlace(player,id,rp); }
-            case 39->{ setSoundQuiet(player,d,"metal",uuid); refreshEditorInPlace(player,id,rp); }
-            case 40->{ setSoundQuiet(player,d,"glass",uuid); refreshEditorInPlace(player,id,rp); }
-            case 41->{ setSoundQuiet(player,d,"sand",uuid);  refreshEditorInPlace(player,id,rp); }
-            case 42->{ setSoundQuiet(player,d,"gravel",uuid);refreshEditorInPlace(player,id,rp); }
-            case 43->{ setSoundQuiet(player,d,"wool",uuid);  refreshEditorInPlace(player,id,rp); }
-            case 44->{ setSoundQuiet(player,d,"snow",uuid);  refreshEditorInPlace(player,id,rp); }
-            case 45->{ setSoundQuiet(player,d,"dirt",uuid);  refreshEditorInPlace(player,id,rp); }
-            case 46->{ setSoundQuiet(player,d,"coral",uuid); refreshEditorInPlace(player,id,rp); }
-            case 47->{ setSoundQuiet(player,d,"bamboo",uuid);refreshEditorInPlace(player,id,rp); }
-            case 48->{ setSoundQuiet(player,d,"nether_brick",uuid); refreshEditorInPlace(player,id,rp); }
-            case 49->{ setSoundQuiet(player,d,"ice",uuid);   refreshEditorInPlace(player,id,rp); }
-            case 50->{ setSoundQuiet(player,d,"honey",uuid); refreshEditorInPlace(player,id,rp); }
-            case 51->{ setSoundQuiet(player,d,"bone",uuid);  refreshEditorInPlace(player,id,rp); }
-            case 52->{ setSoundQuiet(player,d,"slime",uuid); refreshEditorInPlace(player,id,rp); }
         }
     }
 
@@ -841,44 +825,52 @@ public class GuiManager {
         if (slot==53) { int maxPg=Math.max(0,(boxes.size()-1)/9); if(boxPage<maxPg) reopenShapeEditor(player,id,rp,boxPage+1); }
     }
 
-    private static void handleAdminGuiClick(ServerPlayerEntity player, GuiState state, int slot, int button) {
+    private static void handleMaintenanceClick(ServerPlayerEntity player, GuiState state, int slot) {
+        if(slot == 0) { openMain(player, 0); return; }
+        if(slot == 10) openTabIconPicker(player, 0);
+        else if(slot == 12) openBrokenBlocks(player, 0);
+        else if(slot == 14) openPortConfigMenu(player);
+        else if(slot == 16) { player.closeHandledScreen(); player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb export"); }
+    }
+
+    private static void handleHelpClick(ServerPlayerEntity player, GuiState state, int slot) {
+        if(slot == 0) openMain(player, 0);
+    }
+
+    private static void handlePropertiesClick(ServerPlayerEntity player, GuiState state, int slot) {
+        if(slot == 0) { openEditor(player, state.editingId(), state.page()); return; }
+        String id = state.editingId(); int rp = state.page();
+        SlotData d = SlotManager.getById(id);
+        if(d == null) { openMain(player, rp); return; }
         UUID uuid = player.getUuid();
-        switch (slot) {
-            case 0 -> openMain(player, 0);
-            case 10 -> { PENDING.put(uuid, new PendingInput(InputAction.CREATE_ID, null, null, null, null, 0)); closeForPrompt(player); send(player, "§6[Admin] §eType new block §fID§e (or §ccancel§e):"); }
-            case 11 -> openEditorPicker(player, 0);
-            case 12 -> { PENDING.put(uuid, new PendingInput(InputAction.CREATE_ID, "__delete__", null, null, null, 0)); closeForPrompt(player); send(player, "§6[Admin] §eType block ID to §cdelete §e(or §ccancel§e):"); }
-            case 13 -> { player.closeHandledScreen(); player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb reload"); }
-            case 14 -> { player.closeHandledScreen(); player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb list"); }
-            case 15 -> { player.closeHandledScreen(); player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb export"); }
-            case 16 -> { player.closeHandledScreen(); player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb importfolder"); }
-            case 19 -> {
-                int undoSz = UndoManager.undoSize(uuid);
-                if (undoSz == 0) { send(player, "§7Nothing to undo."); refreshScreen(player, buildAdminGui(player, 0)); return; }
-                UndoManager.UndoEntry entry = UndoManager.popUndo(uuid);
-                if (entry != null) {
-                    applyUndoEntry(player, entry);
-                    if (UndoManager.undoSize(uuid) > 0) send(player, "§8  → Next: §7\"" + UndoManager.peekUndoDescription(uuid) + "\"");
-                }
-                refreshScreen(player, buildAdminGui(player, 0));
+        switch(slot) {
+            case 10 -> { UndoManager.pushUndoMutation(id, d, "setglow", uuid); SlotManager.setLightLevel(id,Math.max(0,d.lightLevel-1)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
+            case 12 -> { UndoManager.pushUndoMutation(id, d, "setglow", uuid); SlotManager.setLightLevel(id,Math.min(15,d.lightLevel+1)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
+            case 14 -> { UndoManager.pushUndoMutation(id, d, "sethardness", uuid); SlotManager.setHardness(id,prevHardness(d.hardness)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
+            case 16 -> { UndoManager.pushUndoMutation(id, d, "sethardness", uuid); SlotManager.setHardness(id,nextHardness(d.hardness)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
+            case 22 -> {
+                UndoManager.pushUndoMutation(id, d, "setcollision", uuid); SlotManager.setCollision(id,!d.noCollision); SlotManager.saveAll();
+                SlotData upd = SlotManager.getById(id);
+                NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setcollision",upd.index,id,null,null,0,0,"stone",null,upd.noCollision?"false":"true"));
+                send(player,"§a[GUI] Collision: §f"+(upd.noCollision?"§cOFF":"§aON")); refreshScreen(player, buildPropertiesGui(upd));
             }
-            case 20 -> {
-                int redoSz = UndoManager.redoSize(uuid);
-                if (redoSz == 0) { send(player, "§7Nothing to redo."); refreshScreen(player, buildAdminGui(player, 0)); return; }
-                UndoManager.UndoEntry entry = UndoManager.popRedo(uuid);
-                if (entry != null) {
-                    applyRedoEntry(player, entry);
-                    if (UndoManager.redoSize(uuid) > 0) send(player, "§8  → Next: §7\"" + UndoManager.peekRedoDescription(uuid) + "\"");
-                }
-                refreshScreen(player, buildAdminGui(player, 0));
-            }
-            default -> {
-                if (slot >= 27 && slot <= 53) {
-                    List<SlotData> blocks = sortedBlocks();
-                    int idx = slot - 27;
-                    if (idx < blocks.size()) openEditor(player, blocks.get(idx).customId, 0);
-                }
-            }
+        }
+    }
+
+    private static void handleSoundClick(ServerPlayerEntity player, GuiState state, int slot) {
+        if(slot == 0) { openEditor(player, state.editingId(), state.page()); return; }
+        String id = state.editingId(); int rp = state.page();
+        SlotData d = SlotManager.getById(id);
+        if(d == null) { openMain(player, rp); return; }
+        UUID uuid = player.getUuid();
+        switch(slot) {
+            case 10->{ setSoundQuiet(player,d,"stone",uuid); refreshScreen(player, buildSoundMenu(SlotManager.getById(id))); }
+            case 11->{ setSoundQuiet(player,d,"wood",uuid);  refreshScreen(player, buildSoundMenu(SlotManager.getById(id))); }
+            case 12->{ setSoundQuiet(player,d,"grass",uuid); refreshScreen(player, buildSoundMenu(SlotManager.getById(id))); }
+            case 13->{ setSoundQuiet(player,d,"metal",uuid); refreshScreen(player, buildSoundMenu(SlotManager.getById(id))); }
+            case 14->{ setSoundQuiet(player,d,"glass",uuid); refreshScreen(player, buildSoundMenu(SlotManager.getById(id))); }
+            case 15->{ setSoundQuiet(player,d,"sand",uuid);  refreshScreen(player, buildSoundMenu(SlotManager.getById(id))); }
+            case 16->{ setSoundQuiet(player,d,"gravel",uuid);refreshScreen(player, buildSoundMenu(SlotManager.getById(id))); }
         }
     }
 
@@ -1065,93 +1057,125 @@ public class GuiManager {
     }
 
     private static SimpleInventory buildMain(ServerPlayerEntity player, int page) {
-        SimpleInventory inv = new SimpleInventory(54);
+        SimpleInventory inv = new SimpleInventory(27);
         UUID uuid = player.getUuid();
         int undoSz = UndoManager.undoSize(uuid);
         int redoSz = UndoManager.redoSize(uuid);
+        int blockCount = sortedBlocks().size();
+        int brokenCount = brokenBlocks().size();
         
-        java.util.List<SlotData> blocks = sortedBlocks();
-        int maxBlocks = 23;
-        int maxPage = blocks.isEmpty() ? 0 : Math.max(0, (blocks.size()-1)/maxBlocks);
-        int start = page * maxBlocks;
+        for(int i = 0; i < 27; i++) inv.setStack(i, ui(Items.BLACK_STAINED_GLASS_PANE, "§r"));
         
-        for (int i=0; i<45; i++) {
-            if (i % 2 == 0) {
-                int idx = start + (i/2);
-                if (idx < blocks.size()) {
-                    SlotData d = blocks.get(idx);
-                    net.minecraft.item.ItemStack s = CustomBlocksMod.safeSlotItem(d.index) != null ? new net.minecraft.item.ItemStack(CustomBlocksMod.safeSlotItem(d.index)) : net.minecraft.item.ItemStack.EMPTY;
-                    s.set(net.minecraft.component.DataComponentTypes.CUSTOM_NAME, net.minecraft.text.Text.literal("§f§l" + d.displayName).styled(st -> st.withItalic(false)));
-                    s.set(net.minecraft.component.DataComponentTypes.LORE, new net.minecraft.component.type.LoreComponent(java.util.List.of(
-                        lore("§7ID: §b" + d.customId),
-                        lore("§7Shape: §5" + d.shapeLabel() + "  §7Light: §e" + d.lightLevel),
-                        lore("§eClick to Edit")
-                    )));
-                    inv.setStack(i, s);
-                } else {
-                    inv.setStack(i, glass());
-                }
-            } else {
-                inv.setStack(i, ui(Items.BLUE_STAINED_GLASS_PANE, "§r"));
-            }
-        }
+        inv.setStack(0, ui(Items.BLUE_STAINED_GLASS_PANE, "§r"));
+        inv.setStack(4, uiGlint(Items.DIAMOND, "§b§lCustomBlocks", "§7Total blocks: §f"+blockCount,
+            brokenCount > 0 ? "§cBroken: §f"+brokenCount : "§aAll textures OK",
+            "§8Type /cb help for commands"));
+        inv.setStack(8, ui(Items.BLUE_STAINED_GLASS_PANE, "§r"));
+        inv.setStack(18, ui(Items.BLUE_STAINED_GLASS_PANE, "§r"));
+        inv.setStack(26, ui(Items.BLUE_STAINED_GLASS_PANE, "§r"));
         
-        inv.setStack(45, page > 0 ? customHead(MHF_LEFT, "§e◀ Previous Page") : ui(Items.GRAY_STAINED_GLASS_PANE, "§8◀ First Page"));
-        inv.setStack(46, uiGlint(Items.LIME_CONCRETE, "§a§l➕ Create New Block"));
-        inv.setStack(47, uiGlint(Items.BRUSH, "§d§l🎨 Cosmetics & Tools"));
-        inv.setStack(48, undoSz > 0 ? uiGlint(Items.GOLDEN_PICKAXE, "§6§l↩ UNDO §e("+undoSz+")") : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Undo (Empty)"));
-        inv.setStack(49, ui(Items.COMPASS, "§7Main Menu", "§ePage " + (page+1) + " / " + (maxPage+1)));
-        inv.setStack(50, redoSz > 0 ? uiGlint(Items.DIAMOND_PICKAXE, "§b§l↪ REDO §3("+redoSz+")") : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Redo (Empty)"));
-        inv.setStack(51, uiGlint(Items.COMMAND_BLOCK, "§4§l⚙ Admin Control Panel"));
-        inv.setStack(52, uiGlint(Items.ANVIL, "§6§l🔍 Broken Blocks cache"));
-        inv.setStack(53, page < maxPage ? customHead(MHF_RIGHT, "§eNext Page ▶") : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Last Page ▶"));
+        inv.setStack(10, uiGlint(Items.CRAFTING_TABLE, "§e§lBlock Manager", "§7List, Edit, or Create Custom Blocks", "§8"+blockCount+" block(s) registered"));
+        inv.setStack(12, uiGlint(Items.BRUSH, "§d§lCosmetics & Magic Items", "§7Access Wands, Colors, etc."));
+        inv.setStack(14, uiGlint(Items.STRUCTURE_VOID, "§b§lServer Maintenance", "§7Manage broken textures, resource pack, etc.", brokenCount > 0 ? "§c"+brokenCount+" broken texture(s)" : "§aAll OK"));
+        inv.setStack(16, uiGlint(Items.BOOK, "§a§lHelp & Info", "§7Read Interactive Help Guide"));
+        
+        inv.setStack(21, undoSz > 0 ? uiGlint(Items.GOLDEN_PICKAXE, "§6§l↩ UNDO §e("+undoSz+")", "§7Click to undo last action") : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Undo (Empty)", ""));
+        inv.setStack(22, uiGlint(Items.EMERALD, "§a§l+ Create New Block", "§7Click to create a new custom block", "§8Type an ID in chat"));
+        inv.setStack(23, redoSz > 0 ? uiGlint(Items.DIAMOND_PICKAXE, "§b§l↪ REDO §3("+redoSz+")", "§7Click to redo last undone action") : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Redo (Empty)", ""));
+
         return inv;
     }
 
-    private static SimpleInventory buildAdminGui(ServerPlayerEntity player, int blockPage) {
-        SimpleInventory inv = new SimpleInventory(54);
-        List<SlotData> blocks = sortedBlocks();
-        UUID uuid = player.getUuid();
-        int undoSz = UndoManager.undoSize(uuid);
-        int redoSz = UndoManager.redoSize(uuid);
-        int maxSlots = SlotManager.maxSlots();
-
+    private static SimpleInventory buildMaintenanceMenu() {
+        SimpleInventory inv = new SimpleInventory(27);
+        for(int i = 0; i < 27; i++) inv.setStack(i, glass());
         inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Main Menu", "§8(or press ESC)"));
-        inv.setStack(1, glass()); inv.setStack(2, glass());
-        inv.setStack(3, ui(Items.BEACON, "§4§l⚙ Admin Control Panel",
-            "§7Server-wide CustomBlocks control",
-            "§8Blocks: §f" + SlotManager.usedSlots() + " §7/ §f" + maxSlots,
-            "§8Undo: §e" + undoSz + " §7| Redo: §b" + redoSz));
-        inv.setStack(4, glass()); inv.setStack(5, glass()); inv.setStack(6, glass()); inv.setStack(7, glass()); inv.setStack(8, glass());
-        inv.setStack(9, ui(Items.PURPLE_STAINED_GLASS_PANE, "§5§l── Quick Commands ──", "§7Click any to run"));
-        inv.setStack(10, uiGlint(Items.LIME_CONCRETE, "§a§l➕ Create Block", "§7Type ID/name/URL in chat"));
-        inv.setStack(11, uiGlint(Items.CHEST, "§b§l📂 Browse All Blocks", "§7Open the block picker"));
-        inv.setStack(12, ui(Items.TNT, "§c§l❌ Delete Block", "§7Type block ID in chat"));
-        inv.setStack(13, uiGlint(Items.NETHER_STAR, "§f§l🔄 Reload", "§7/cb reload"));
-        inv.setStack(14, uiGlint(Items.BOOK, "§b/cb list", "§7List all blocks in chat"));
-        inv.setStack(15, uiGlint(Items.PAPER, "§f§l📤 Export", "§7/cb export"));
-        inv.setStack(16, uiGlint(Items.HOPPER, "§f§l📥 Import Folder", "§7/cb importfolder"));
-        inv.setStack(17, glass());
-        inv.setStack(18, ui(Items.ORANGE_STAINED_GLASS_PANE, "§6§l── Undo / Redo ──", "§eUndo: §f" + undoSz + " actions", "§3Redo: §f" + redoSz + " actions"));
-        inv.setStack(19, undoSz > 0
-            ? uiGlint(Items.GOLDEN_PICKAXE, "§6§l↩ UNDO  §e(" + undoSz + " left)", "§eNext: §f\"" + UndoManager.peekUndoDescription(uuid) + "\"")
-            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Undo §7(empty)", ""));
-        inv.setStack(20, redoSz > 0
-            ? uiGlint(Items.DIAMOND_PICKAXE, "§b§l↪ REDO  §3(" + redoSz + " left)", "§3Next: §f\"" + UndoManager.peekRedoDescription(uuid) + "\"")
-            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Redo §7(empty)", ""));
-        for (int i = 21; i <= 26; i++) inv.setStack(i, glass());
-        inv.setStack(27, ui(Items.LIME_STAINED_GLASS_PANE, "§a§l── All Blocks (click to edit) ──", "§7" + blocks.size() + " blocks total"));
-        for (int i = 0; i < Math.min(26, blocks.size()); i++) {
-            SlotData d = blocks.get(i);
-            ItemStack s = CustomBlocksMod.safeSlotItem(d.index) != null ? new ItemStack(CustomBlocksMod.safeSlotItem(d.index)) : ItemStack.EMPTY;
-            s.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§f§l" + d.displayName).styled(st -> st.withItalic(false)));
-            s.set(DataComponentTypes.LORE, new LoreComponent(List.of(
-                lore("§7ID: §b" + d.customId),
-                lore("§7Shape: §5" + d.shapeLabel() + "  §7Light: §e" + d.lightLevel),
-                lore("§8Click to open editor"))));
-            inv.setStack(28 + i, s);
-        }
-        for (int i = 28 + Math.min(26, blocks.size()); i <= 53; i++) inv.setStack(i, glass());
+        
+        inv.setStack(10, uiGlint(Items.PAINTING, "§a§lTab Icon Settings", "§7Change dynamic creative tab icon"));
+        inv.setStack(12, uiGlint(Items.ANVIL, "§c§lBroken Blocks Cache", "§7Find and fix broken textures"));
+        inv.setStack(14, uiGlint(Items.REDSTONE_TORCH, "§6§lResource Pack Host Config", "§7Change embedded web server port"));
+        inv.setStack(16, uiGlint(Items.PAPER, "§f§lExport Data", "§7Export JSON block structure data"));
+
+        return inv;
+    }
+
+    private static SimpleInventory buildHelpGui() {
+        SimpleInventory inv = new SimpleInventory(27);
+        for(int i = 0; i < 27; i++) inv.setStack(i, glass());
+        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Main Menu", "§8(or press ESC)"));
+        
+        inv.setStack(10, uiGlint(Items.BOOK, "§e§lGUI Navigation", 
+            "§7ESC — go back one screen",
+            "§7Click items to interact",
+            "§7Main Menu → Sub-menus → Editors"));
+        inv.setStack(11, ui(Items.WRITABLE_BOOK, "§a§lBasic Commands",
+            "§7/cb gui §8— Open main menu",
+            "§7/cb create <id> §8— Create block",
+            "§7/cb list §8— List all blocks",
+            "§7/cb help §8— Full command list"));
+        inv.setStack(12, ui(Items.PAINTING, "§b§lTexture Tips",
+            "§7Accepts PNG, JPG, GIF, WebP URLs",
+            "§7Auto-converts to square PNG",
+            "§7GIF → animated block textures!",
+            "§7Discord CDN URLs work great"));
+        inv.setStack(14, ui(Items.CLOCK, "§d§lAnimation Workflow",
+            "§71. Upload a GIF as texture",
+            "§72. Open block editor → Animation",
+            "§73. Adjust FPS and interpolation",
+            "§8Supports APNG and animated WebP too"));
+        inv.setStack(15, ui(Items.ENDER_PEARL, "§5§lShape System",
+            "§712 built-in presets",
+            "§7Custom hitboxes (up to 16)",
+            "§8Left-click preset = new variant",
+            "§8Right-click preset = apply to block"));
+        inv.setStack(16, ui(Items.GOLDEN_PICKAXE, "§6§lUndo / Redo",
+            "§7All changes are undoable",
+            "§7Available from Main Menu",
+            "§8Undo stack persists per-player"));
+        return inv;
+    }
+
+    private static SimpleInventory buildPropertiesGui(SlotData d) {
+        SimpleInventory inv = new SimpleInventory(27);
+        for(int i=0;i<27;i++) inv.setStack(i, glass());
+        inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Editor","§8(or press ESC)"));
+        
+        ItemStack disp = CustomBlocksMod.safeSlotItem(d.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(d.index)):ItemStack.EMPTY;
+        disp.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§6§l"+d.displayName).styled(s->s.withItalic(false)));
+        disp.set(DataComponentTypes.LORE, new LoreComponent(List.of(
+            lore("§7Light: §e"+d.lightLevel),
+            lore("§7Hardness: §f"+hardnessLabel(d.hardness)),
+            lore("§7Collision: "+(d.noCollision?"§cOFF":"§aON"))
+        )));
+        inv.setStack(4, disp);
+        
+        inv.setStack(10, ui(Items.RED_DYE,"§c◀ Light -1","§7Now: §e"+d.lightLevel));
+        inv.setStack(11, uiGlint(Items.GLOWSTONE_DUST,"§e✦ Light: §f"+d.lightLevel,"§70=off • 7=torch • 14=sea lantern • 15=max"));
+        inv.setStack(12, ui(Items.YELLOW_DYE,"§a▶ Light +1","§7Now: §e"+d.lightLevel));
+        
+        inv.setStack(14, ui(Items.RED_DYE,"§c◀ Hardness -","§7Now: §f"+hardnessLabel(d.hardness)));
+        inv.setStack(15, ui(Items.IRON_PICKAXE,"§b⚙ Hardness: §f"+hardnessLabel(d.hardness),"§7-1=Unbreakable • 0=Instant • 1.5=Default"));
+        inv.setStack(16, ui(Items.LIME_DYE,"§a▶ Hardness +","§7Now: §f"+hardnessLabel(d.hardness)));
+
+        inv.setStack(22, d.noCollision
+            ? uiGlint(Items.BARRIER,"§c⊘ Collision: §lOFF","§7Block has NO hitbox","§8Click to ENABLE collision")
+            : uiGlint(Items.SLIME_BLOCK,"§a✔ Collision: §lON","§7Block has normal collision","§8Click to DISABLE collision"));
+        
+        return inv;
+    }
+
+    private static SimpleInventory buildSoundMenu(SlotData d) {
+        SimpleInventory inv = new SimpleInventory(27);
+        for(int i=0;i<27;i++) inv.setStack(i, glass());
+        inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Editor","§8(or press ESC)"));
+        
+        inv.setStack(10,soundItem(d,"stone",Items.STONE,"§fStone"));
+        inv.setStack(11,soundItem(d,"wood",Items.OAK_LOG,"§fWood"));
+        inv.setStack(12,soundItem(d,"grass",Items.GRASS_BLOCK,"§fGrass"));
+        inv.setStack(13,soundItem(d,"metal",Items.IRON_BLOCK,"§fMetal"));
+        inv.setStack(14,soundItem(d,"glass",Items.GLASS,"§fGlass"));
+        inv.setStack(15,soundItem(d,"sand",Items.SAND,"§fSand"));
+        inv.setStack(16,soundItem(d,"gravel",Items.GRAVEL,"§fGravel"));
         return inv;
     }
 
@@ -1190,67 +1214,45 @@ public class GuiManager {
     }
 
     private static SimpleInventory buildEditor(SlotData d, boolean confirmDelete) {
-        SimpleInventory inv = new SimpleInventory(54);
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Block List","§8(or press ESC)"));
-        ItemStack disp = CustomBlocksMod.safeSlotItem(d.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(d.index)):ItemStack.EMPTY;
-        disp.set(DataComponentTypes.CUSTOM_NAME,Text.literal("§e§l"+d.displayName).styled(s->s.withItalic(false)));
-        disp.set(DataComponentTypes.LORE,new LoreComponent(List.of(lore("§7ID: §b"+d.customId),lore("§7Shape: §5"+d.shapeLabel()),lore("§7Collision: "+(d.noCollision?"§cOFF":"§aON")),lore("§7Light: §e"+d.lightLevel+"  §7Hard: §f"+hardnessLabel(d.hardness)),lore("§7Sound: §f"+d.soundType),lore("§8Slot #"+d.index))));
-        inv.setStack(1, disp);
+        SimpleInventory inv = new SimpleInventory(36);
+        for(int i = 0; i < 36; i++) inv.setStack(i, glass());
+
+        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Block List", "§8(or press ESC)"));
         inv.setStack(2, uiGlint(Items.CHEST,"§a▶ Give 1x","§7Gives 1x §f"+d.displayName+" §7to you"));
-        inv.setStack(3, uiGlint(Items.NAME_TAG,"§e✎ Rename","§7Current: §f"+d.displayName,"§8Click → type in chat"));
-        inv.setStack(4, uiGlint(Items.COMMAND_BLOCK,"§b⇄ Re-ID","§7Current: §b"+d.customId,"§8Click → type in chat"));
-        inv.setStack(5, glass());
-        inv.setStack(6, uiGlint(Items.COMPARATOR,"§e⧉ Duplicate","§7Creates a copy of this block","§8Click → type new ID"));
-        inv.setStack(7, glass());
-        inv.setStack(8, confirmDelete
-            ? uiGlint(Items.BARRIER, "§4§l⚠ CLICK AGAIN TO CONFIRM DELETE","§cThis will permanently delete: §f"+d.customId,"§c(Use Undo in main menu to restore)")
-            : ui(Items.TNT, "§c§l⚠ Delete This Block","§7First click arms.  Second click deletes.","§8Undo available in main menu."));
-        inv.setStack(9,  uiGlint(Items.PAINTING,"§b⬛ Retexture All Faces","§7Replace texture on all faces","§8Click → paste URL"));
-        inv.setStack(10, uiGlint(Items.ITEM_FRAME,"§d⬡ Open Full Face Editor","§7Per-face textures + variant creation","§8Supports 6 independent face textures"));
-        inv.setStack(11, faceBtn(d,Items.WHITE_CONCRETE,"top","§f▲ TOP"));
-        inv.setStack(12, faceBtn(d,Items.CYAN_CONCRETE,"north","§b▶ NORTH"));
-        inv.setStack(13, faceBtn(d,Items.BLUE_CONCRETE,"south","§9▶ SOUTH"));
-        inv.setStack(14, faceBtn(d,Items.PURPLE_CONCRETE,"east","§5▶ EAST"));
-        inv.setStack(15, faceBtn(d,Items.MAGENTA_CONCRETE,"west","§d▶ WEST"));
-        inv.setStack(16, faceBtn(d,Items.LIGHT_GRAY_CONCRETE,"bottom","§7▼ BOTTOM"));
-        inv.setStack(17, ui(Items.ORANGE_CONCRETE,"§6⊘ Clear ALL Face Overrides","§7Resets all faces to default texture"));
-        inv.setStack(18, ui(Items.CYAN_STAINED_GLASS_PANE,"§7── Clear Individual Faces ──","§8Click any face button to remove its override"));
-        inv.setStack(19, clearFaceBtn(d,Items.WHITE_STAINED_GLASS_PANE,"top","§f✕ Clear TOP"));
-        inv.setStack(20, clearFaceBtn(d,Items.CYAN_STAINED_GLASS_PANE,"north","§b✕ Clear NORTH"));
-        inv.setStack(21, clearFaceBtn(d,Items.BLUE_STAINED_GLASS_PANE,"south","§9✕ Clear SOUTH"));
-        inv.setStack(22, clearFaceBtn(d,Items.PURPLE_STAINED_GLASS_PANE,"east","§5✕ Clear EAST"));
-        inv.setStack(23, clearFaceBtn(d,Items.MAGENTA_STAINED_GLASS_PANE,"west","§d✕ Clear WEST"));
-        inv.setStack(24, clearFaceBtn(d,Items.LIGHT_GRAY_STAINED_GLASS_PANE,"bottom","§7✕ Clear BOTTOM"));
-        inv.setStack(25, glass()); inv.setStack(26, glass());
-        inv.setStack(27, ui(Items.RED_DYE,"§c◀ Light -1","§7Now: §e"+d.lightLevel));
-        inv.setStack(28, uiGlint(Items.GLOWSTONE_DUST,"§e✦ Light: §f"+d.lightLevel,"§70=off • 7=torch • 14=sea lantern • 15=max"));
-        inv.setStack(29, ui(Items.YELLOW_DYE,"§a▶ Light +1","§7Now: §e"+d.lightLevel));
-        inv.setStack(30, ui(Items.RED_DYE,"§c◀ Hardness -","§7Now: §f"+hardnessLabel(d.hardness)));
-        inv.setStack(31, ui(Items.IRON_PICKAXE,"§b⚙ Hardness: §f"+hardnessLabel(d.hardness),"§7-1=Unbreakable • 0=Instant • 1.5=Default"));
-        inv.setStack(32, ui(Items.LIME_DYE,"§a▶ Hardness +","§7Now: §f"+hardnessLabel(d.hardness)));
-        inv.setStack(33, glass());
-        inv.setStack(34, uiGlint(Items.ENDER_PEARL,"§5⬡ Shape Editor","§7Current: §b"+d.shapeLabel(),"§8Left-click preset=new block • Right-click=modify"));
-        inv.setStack(35, d.noCollision
+        
+        ItemStack disp = CustomBlocksMod.safeSlotItem(d.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(d.index)):ItemStack.EMPTY;
+        disp.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§e§l"+d.displayName).styled(s->s.withItalic(false)));
+        disp.set(DataComponentTypes.LORE, new LoreComponent(List.of(
+            lore("§7ID: §b"+d.customId),
+            lore("§7Shape: §5"+d.shapeLabel()),
+            lore("§7Light: §e"+d.lightLevel+"  §7Hard: §f"+hardnessLabel(d.hardness)),
+            lore("§7Sound: §f"+d.soundType),
+            lore("§7Collision: "+(d.noCollision?"§cOFF":"§aON")),
+            lore("§8Slot #"+d.index)
+        )));
+        inv.setStack(4, disp);
+        inv.setStack(6, d.noCollision
             ? uiGlint(Items.BARRIER,"§c⊘ Collision: §lOFF","§7Block has NO hitbox","§8Click to ENABLE collision")
             : uiGlint(Items.SLIME_BLOCK,"§a✔ Collision: §lON","§7Block has normal collision","§8Click to DISABLE collision"));
-        inv.setStack(36,soundItem(d,"stone",Items.STONE,"§fStone"));
-        inv.setStack(37,soundItem(d,"wood",Items.OAK_LOG,"§fWood"));
-        inv.setStack(38,soundItem(d,"grass",Items.GRASS_BLOCK,"§fGrass"));
-        inv.setStack(39,soundItem(d,"metal",Items.IRON_BLOCK,"§fMetal"));
-        inv.setStack(40,soundItem(d,"glass",Items.GLASS,"§fGlass"));
-        inv.setStack(41,soundItem(d,"sand",Items.SAND,"§fSand"));
-        inv.setStack(42,soundItem(d,"gravel",Items.GRAVEL,"§fGravel"));
-        inv.setStack(43,soundItem(d,"wool",Items.WHITE_WOOL,"§fWool"));
-        inv.setStack(44,soundItem(d,"snow",Items.SNOW_BLOCK,"§fSnow"));
-        inv.setStack(45,soundItem(d,"dirt",Items.DIRT,"§fDirt"));
-        inv.setStack(46,soundItem(d,"coral",Items.TUBE_CORAL_BLOCK,"§fCoral"));
-        inv.setStack(47,soundItem(d,"bamboo",Items.BAMBOO,"§fBamboo"));
-        inv.setStack(48,soundItem(d,"nether_brick",Items.NETHER_BRICKS,"§fNether Brick"));
-        inv.setStack(49,soundItem(d,"ice",Items.ICE,"§fIce"));
-        inv.setStack(50,soundItem(d,"honey",Items.HONEY_BLOCK,"§fHoney"));
-        inv.setStack(51,soundItem(d,"bone",Items.BONE_BLOCK,"§fBone"));
-        inv.setStack(52,soundItem(d,"slime",Items.SLIME_BLOCK,"§fSlime"));
-        inv.setStack(53, glass());
+        inv.setStack(8, uiGlint(Items.MAP,"§b⬛ Retexture All Faces","§7Replace texture on ALL faces","§8Click → paste URL in chat"));
+        
+        inv.setStack(10, uiGlint(Items.PAINTING, "§b⬛ Texture Editing", "§7Per-face textures & variants","§8Open full face editor"));
+        inv.setStack(12, uiGlint(Items.ENDER_PEARL, "§5⬡ Shape Editing", "§7Current: §b"+d.shapeLabel(),"§8Presets, custom boxes, collision"));
+        inv.setStack(14, uiGlint(Items.REDSTONE, "§6⚙ Properties", "§7Light: §e"+d.lightLevel+"  §7Hard: §f"+hardnessLabel(d.hardness),"§8Adjust glow & hardness"));
+        inv.setStack(16, uiGlint(Items.NOTE_BLOCK, "§e♫ Sounds", "§7Current: §f"+d.soundType,"§8Change block break/place sounds"));
+        
+        inv.setStack(22, d.isAnimated()
+            ? uiGlint(Items.CLOCK, "§b⟳ Animation Settings", "§7This block is animated","§8Click to configure FPS/interpolation")
+            : ui(Items.GRAY_DYE, "§7⟳ Animation", "§8Not animated","§7Use an animated texture (GIF) to enable"));
+        
+        inv.setStack(28, uiGlint(Items.NAME_TAG,"§e✎ Rename","§7Current: §f"+d.displayName,"§8Click → type in chat"));
+        inv.setStack(29, uiGlint(Items.COMMAND_BLOCK,"§b⇄ Re-ID","§7Current: §b"+d.customId,"§8Click → type in chat"));
+        inv.setStack(30, uiGlint(Items.COMPARATOR,"§e⧉ Duplicate","§7Creates a copy of this block","§8Click → type new ID"));
+        
+        inv.setStack(34, confirmDelete
+            ? uiGlint(Items.BARRIER, "§4§l⚠ CLICK AGAIN TO CONFIRM DELETE","§cThis will permanently delete: §f"+d.customId,"§c(Use Undo in main menu to restore)")
+            : ui(Items.TNT, "§c§l⚠ Delete This Block","§7First click arms.  Second click deletes.","§8Undo available in main menu."));
+
         return inv;
     }
 

@@ -47,8 +47,24 @@ public record GuiState(
         return new GuiState(GuiMode.SHAPE_EDITOR, editingId, returnPage, false, 0, false);
     }
 
-    public static GuiState adminGui() {
-        return new GuiState(GuiMode.ADMIN_GUI, null, 0, false, 0, false);
+    public static GuiState maintenance() {
+        return new GuiState(GuiMode.MAINTENANCE_MENU, null, 0, false, 0, false);
+    }
+
+    public static GuiState help() {
+        return new GuiState(GuiMode.HELP_MENU, null, 0, false, 0, false);
+    }
+
+    public static GuiState tools() {
+        return new GuiState(GuiMode.TOOLS_GUI, null, 0, false, 0, false);
+    }
+
+    public static GuiState properties(String editingId, int returnPage) {
+        return new GuiState(GuiMode.PROPERTIES_MENU, editingId, returnPage, false, 0, false);
+    }
+
+    public static GuiState sound(String editingId, int returnPage) {
+        return new GuiState(GuiMode.SOUND_MENU, editingId, returnPage, false, 0, false);
     }
 
     public static GuiState animGui(String editingId) {

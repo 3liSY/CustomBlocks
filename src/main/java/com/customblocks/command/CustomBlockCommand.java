@@ -50,7 +50,7 @@ public class CustomBlockCommand {
     public static void register() {
         CommandRegistrationCallback.EVENT.register((dispatcher, reg, env) -> {
             var tree = CommandManager.literal("customblock")
-                .requires(src -> PermissionHelper.hasAdmin(src))
+                .requires(src -> PermissionHelper.canUse(src))
 
                 // ── create / createurl ──────────────────────────────────────
                 .then(CommandManager.literal("create")
@@ -176,11 +176,10 @@ public class CustomBlockCommand {
                         return 1;
                     }))
 
-                // ── settabicon ──────────────────────────────────────────────
                 .then(CommandManager.literal("settabicon")
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
-                        if (p != null) GuiManager.openTabIconMenu(p);
+                        if (p != null) GuiManager.openTabIconPicker(p, 0);
                         else ctx.getSource().sendError(Text.literal("Player only."));
                         return 1;
                     })
@@ -248,6 +247,36 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("help")
                     .executes(ctx -> cmdHelp(ctx.getSource())))
 
+                // ── new graphical interfaces ─────────────────────────────────
+                .then(CommandManager.literal("listgui")
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) GuiManager.openEditorPicker(p, 0);
+                        else ctx.getSource().sendError(Text.literal("Player only."));
+                        return 1;
+                    }))
+
+                .then(CommandManager.literal("helpgui")
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) GuiManager.openHelpGui(p);
+                        else ctx.getSource().sendError(Text.literal("Player only."));
+                        return 1;
+                    }))
+
+                .then(CommandManager.literal("magicitems")
+                    .executes(ctx -> {
+                        cmdGiveTriangleInternal(ctx.getSource(), "green");
+                        cmdGiveTriangleInternal(ctx.getSource(), "yellow");
+                        cmdGiveTriangleInternal(ctx.getSource(), "black");
+                        cmdGiveSquareInternal(ctx.getSource(), "green");
+                        cmdGiveSquareInternal(ctx.getSource(), "yellow");
+                        cmdGiveSquareInternal(ctx.getSource(), "black");
+                        cmdGiveRectangleInternal(ctx.getSource());
+                        ctx.getSource().sendMessage(Text.literal("§a[CustomBlocks] Granted all magic items!"));
+                        return 1;
+                    }))
+
                 // ── editor — works with or without ID ──────────────────────
                 .then(CommandManager.literal("editor")
                     .executes(ctx -> cmdEditorPicker(ctx.getSource()))
@@ -266,6 +295,12 @@ public class CustomBlockCommand {
 
                 // ── resourcepack ─────────────────────────────────────────────
                 .then(CommandManager.literal("resourcepack")
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) GuiManager.openPortConfigMenu(p);
+                        else ctx.getSource().sendError(Text.literal("Player only."));
+                        return 1;
+                    })
                     .then(CommandManager.literal("setport")
                         .executes(ctx -> {
                             ServerPlayerEntity p = ctx.getSource().getPlayer();
@@ -431,7 +466,7 @@ public class CustomBlockCommand {
 
             dispatcher.register(tree);
             dispatcher.register(CommandManager.literal("cb")
-                .requires(src -> PermissionHelper.hasAdmin(src))
+                .requires(src -> PermissionHelper.canUse(src))
                 .redirect(dispatcher.getRoot().getChild("customblock")));
         });
     }
@@ -1266,6 +1301,13 @@ public class CustomBlockCommand {
             src.sendMessage(Text.literal(" "));
             return 1;
         }
+
+        try {
+            ServerPlayerEntity p = src.getPlayerOrThrow();
+            p.sendMessage(Text.literal("  §a[CustomBlocks] Click here to open the blocks GUI!").styled(s -> s.withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.RUN_COMMAND, "/cb listgui")).withFormatting(net.minecraft.util.Formatting.UNDERLINE)));
+            p.sendMessage(Text.literal("  §7...or see the chat breakdown below:"));
+        } catch(Exception ignored) {}
+
         java.util.List<SlotData> sorted = new java.util.ArrayList<>(SlotManager.allSlots());
         sorted.removeIf(d -> "tab_icon".equals(d.customId));
         sorted.sort(java.util.Comparator.comparingInt(d -> d.index));
@@ -1341,7 +1383,6 @@ public class CustomBlockCommand {
         src.sendMessage(Text.literal(H + "  Utilities"));
         src.sendMessage(Text.literal(G + "  /cb " + C + "undo                          " + G + "— undo last change  §8(up to 20 steps, shows next)"));
         src.sendMessage(Text.literal(G + "  /cb " + C + "redo                          " + G + "— redo the last undone change"));
-        src.sendMessage(Text.literal(G + "  /cb " + C + "admingui                      " + G + "— open server-wide admin control panel"));
         src.sendMessage(Text.literal(G + "  /cb " + C + "settabicon " + A + "<url>               " + G + "— set the creative tab icon"));
         src.sendMessage(Text.literal(G + "  /cb " + C + "importfolder                  " + G + "— bulk-import from config/customblocks/import/"));
         src.sendMessage(Text.literal(G + "  /cb " + C + "export                        " + G + "— export block list to JSON"));
@@ -1369,7 +1410,7 @@ public class CustomBlockCommand {
         try {
             src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(item, 1));
             src.sendMessage(Text.literal("§a[CustomBlocks] Given " + Character.toUpperCase(c.charAt(0)) + c.substring(1) + " Square!"));
-        } catch (Exception ex) { src.sendError(Text.literal("§cRun as a player.")); return 0; }
+        } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); return 0; }
         return 1;
     }
 
@@ -1384,7 +1425,7 @@ public class CustomBlockCommand {
         try {
             src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(item, 1));
             src.sendMessage(Text.literal("§a[CustomBlocks] Given " + Character.toUpperCase(c.charAt(0)) + c.substring(1) + " Triangle!"));
-        } catch (Exception ex) { src.sendError(Text.literal("§cRun as a player.")); return 0; }
+        } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); return 0; }
         return 1;
     }
 
@@ -1397,7 +1438,7 @@ public class CustomBlockCommand {
         try {
             src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(rectItem, 1));
             src.sendMessage(Text.literal("§6[CustomBlocks] §eGiven §6Rainbow Rectangle§e! §7Right-click any block face and paste an image URL."));
-        } catch (Exception ex) { src.sendError(Text.literal("§cRun as a player.")); return 0; }
+        } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); return 0; }
         return 1;
     }
 
@@ -1412,9 +1453,7 @@ public class CustomBlockCommand {
         try {
             ServerPlayerEntity player = src.getPlayerOrThrow();
             GuiManager.openEditorPicker(player);
-        } catch (Exception ex) {
-            src.sendError(Text.literal("§cRun as a player."));
-        }
+        } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); }
         return 1;
     }
 
@@ -1422,9 +1461,7 @@ public class CustomBlockCommand {
         try {
             ServerPlayerEntity player = src.getPlayerOrThrow();
             GuiManager.openMain(player, 0);
-        } catch (Exception ex) {
-            src.sendError(Text.literal("§cRun as a player."));
-        }
+        } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); }
         return 1;
     }
 
@@ -1433,9 +1470,7 @@ public class CustomBlockCommand {
         try {
             ServerPlayerEntity player = src.getPlayerOrThrow();
             GuiManager.openEditor(player, id, 0, true);  // fromCommand = true → 1-press ESC exits
-        } catch (Exception ex) {
-            src.sendError(Text.literal("§cRun as a player."));
-        }
+        } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); }
         return 1;
     }
 

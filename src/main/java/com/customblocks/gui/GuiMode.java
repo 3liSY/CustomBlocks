@@ -10,7 +10,11 @@ public enum GuiMode {
     EDITOR,
     FACE_EDITOR,
     SHAPE_EDITOR,
-    ADMIN_GUI,
+    MAINTENANCE_MENU,
+    HELP_MENU,
+    TOOLS_GUI,
+    PROPERTIES_MENU,
+    SOUND_MENU,
     ANIM_GUI,
     TAB_ICON_MENU,
     FIND_PORT_GUI

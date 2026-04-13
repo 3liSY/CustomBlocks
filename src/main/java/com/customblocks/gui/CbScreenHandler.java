@@ -25,7 +25,8 @@ public class CbScreenHandler extends GenericContainerScreenHandler {
     private boolean disposed = false;
 
     public CbScreenHandler(int syncId, PlayerInventory playerInventory, Inventory inventory) {
-        super(ScreenHandlerType.GENERIC_9X6, syncId, playerInventory, inventory, 6);
+        super(inventory.size() <= 27 ? ScreenHandlerType.GENERIC_9X3 : ScreenHandlerType.GENERIC_9X6,
+              syncId, playerInventory, inventory, inventory.size() <= 27 ? 3 : 6);
         this.inventory = inventory;
     }
 
@@ -44,7 +45,7 @@ public class CbScreenHandler extends GenericContainerScreenHandler {
 
     @Override
     public void onSlotClick(int slotIndex, int button, SlotActionType actionType, PlayerEntity player) {
-        if (slotIndex >= 0 && slotIndex < 54 && player instanceof ServerPlayerEntity sp) {
+        if (slotIndex >= 0 && slotIndex < inventory.size() && player instanceof ServerPlayerEntity sp) {
             GuiManager.handleClick(sp, slotIndex, button);
         }
         this.syncState();
