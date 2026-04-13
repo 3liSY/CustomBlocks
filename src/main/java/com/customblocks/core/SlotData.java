@@ -25,6 +25,7 @@ public final class SlotData {
     public final List<ShapeBox> shapeBoxes;           // null = full cube
     public final boolean noCollision;
     public final transient boolean isBroken;
+    public final transient String displayNameLower;
 
     // ── Shape box record ─────────────────────────────────────────────────────
     public record ShapeBox(float x1, float y1, float z1, float x2, float y2, float z2) {
@@ -76,8 +77,9 @@ public final class SlotData {
         // Deep-copy shape boxes
         this.shapeBoxes = shapeBoxes != null ? List.copyOf(shapeBoxes) : null;
         
-        // Caching broken texture status
+        // Caching broken texture status and lowercase name
         this.isBroken = this.texture != null && com.customblocks.ImageProcessor.isBrokenTexture(this.texture);
+        this.displayNameLower = this.displayName != null ? this.displayName.toLowerCase() : "";
     }
 
     /** Minimal constructor for fresh assignment. */

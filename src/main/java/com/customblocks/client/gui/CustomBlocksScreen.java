@@ -63,6 +63,9 @@ public class CustomBlocksScreen extends Screen {
     private boolean bulkDeleteMode = false;
     private final List<String> bulkSelected = new ArrayList<>();
 
+    private String previewBlockId = null;
+    private ItemStack previewStack = null;
+
     private String statusMsg = "";
     private int statusColor = C_GREEN;
     private long statusUntil = 0;
@@ -99,9 +102,8 @@ public class CustomBlocksScreen extends Screen {
 
     // ── PROPERTIES panel ──────────────────────────────────────────────────────
     private ButtonWidget btnGlowM, btnGlowP;
-    private ButtonWidget btnH0, btnHSoft, btnHNorm, btnHHard, btnHMax;
-    private ButtonWidget btnSStone, btnSWood, btnSMetal, btnSGlass,
-                         btnSGrass, btnSSand, btnSWool;
+    private ButtonWidget btnHardnessCycle;
+    private ButtonWidget btnSoundCycle;
     private ButtonWidget btnPropClose;
 
     // ── URL LIST panel ────────────────────────────────────────────────────────
@@ -139,13 +141,13 @@ public class CustomBlocksScreen extends Screen {
         int sy = py + PAD + 32;
         int sbase = px + PAD;
         int sw = (gridW() - 2 - 3*3 - 22 - 22 - 3) / 4;
-        btnSortName  = mkBtn(sbase,             sy, sw,   "Name",  b -> setSort(0));
-        btnSortSlot  = mkBtn(sbase + sw+3,      sy, sw,   "Slot",  b -> setSort(1));
-        btnSortGlow  = mkBtn(sbase + (sw+3)*2,  sy, sw,   "Glow",  b -> setSort(2));
-        btnSortSound = mkBtn(sbase + (sw+3)*3,  sy, sw,   "Sound", b -> setSort(3));
-        btnSortDir   = mkBtn(sbase + (sw+3)*4+1,sy, 18,   "^",     b -> { sortAsc=!sortAsc; rebuildFiltered(); });
-        btnColsM     = mkBtn(sbase + (sw+3)*4+22,sy, 18,  "-",     b -> { if(cols>3){cols--;reinit();} });
-        btnColsP     = mkBtn(sbase + (sw+3)*4+43,sy, 18,  "+",     b -> { if(cols<8){cols++;reinit();} });
+        btnSortName  = mkBtnTip(sbase,             sy, sw,   "Name",  "Sort by Name", b -> setSort(0));
+        btnSortSlot  = mkBtnTip(sbase + sw+3,      sy, sw,   "Slot",  "Sort by Slot ID", b -> setSort(1));
+        btnSortGlow  = mkBtnTip(sbase + (sw+3)*2,  sy, sw,   "Glow",  "Sort by Glow Level", b -> setSort(2));
+        btnSortSound = mkBtnTip(sbase + (sw+3)*3,  sy, sw,   "Sound", "Sort by Sound Type", b -> setSort(3));
+        btnSortDir   = mkBtnTip(sbase + (sw+3)*4+1,sy, 18,   "^",     "Toggle Sort Direction", b -> { sortAsc=!sortAsc; rebuildFiltered(); });
+        btnColsM     = mkBtnTip(sbase + (sw+3)*4+22,sy, 18,  "-",     "Decrease Grid Columns", b -> { if(cols>3){cols--;reinit();} });
+        btnColsP     = mkBtnTip(sbase + (sw+3)*4+43,sy, 18,  "+",     "Increase Grid Columns", b -> { if(cols<8){cols++;reinit();} });
         for (ButtonWidget b : new ButtonWidget[]{btnSortName,btnSortSlot,btnSortGlow,btnSortSound,btnSortDir,btnColsM,btnColsP})
             addDrawableChild(b);
 
@@ -154,20 +156,20 @@ public class CustomBlocksScreen extends Screen {
         int by = py + PAD + 14;
         int bw = RIGHT_W - PAD;
         int half = bw/2 - 2;
-        btnTheme      = mkBtn(bx, by,       bw,    darkTheme ? "Light Mode" : "Dark Mode", b -> { darkTheme=!darkTheme; reinit(); });
-        btnCreate     = mkBtn(bx, by+26,    bw,    "New Block",      b -> openPanel(Panel.CREATE));
-        btnGive1      = mkBtn(bx, by+52,    half,  "Give x1",        b -> doGive(1, null));
-        btnGive64     = mkBtn(bx+half+4,by+52,half,"Give x64",       b -> doGive(64, null));
-        btnGivePlayer = mkBtn(bx, by+78,    bw,    "Give to Player", b -> toggleGivePlayerPanel());
-        btnRename     = mkBtn(bx, by+104,   bw,    "Rename",         b -> openPanel(Panel.RENAME));
-        btnRetexture  = mkBtn(bx, by+130,   bw,    "Change Texture", b -> openPanel(Panel.RETEXTURE));
-        btnProperties = mkBtn(bx, by+156,   bw,    "Properties",     b -> openPanel(Panel.PROPERTIES));
-        btnCopyId     = mkBtn(bx, by+182,   bw,    "Copy ID",        b -> doCopyId());
-        btnUrlList    = mkBtn(bx, by+208,   half,  "URL Import",     b -> openPanel(Panel.URL_LIST));
-        btnExport     = mkBtn(bx+half+4,by+208,half,"Export",        b -> doExport());
-        btnBulkDelete = mkBtn(bx, by+234,   half,  "Bulk Delete",    b -> toggleBulkDelete());
-        btnReload     = mkBtn(bx+half+4,by+234,half,"Reload Tex",    b -> doReloadTex());
-        btnDelete     = mkBtn(bx, by+260,   bw,    "Delete Block",   b -> doDelete());
+        btnTheme      = mkBtnTip(bx, by,       bw,    darkTheme ? "Light Mode" : "Dark Mode", "Toggle UI Theme", b -> { darkTheme=!darkTheme; reinit(); });
+        btnCreate     = mkBtnTip(bx, by+26,    bw,    "New Block",      "Create a new custom block", b -> openPanel(Panel.CREATE));
+        btnGive1      = mkBtnTip(bx, by+52,    half,  "Give x1",        "Give yourself 1 of this block", b -> doGive(1, null));
+        btnGive64     = mkBtnTip(bx+half+4,by+52,half,"Give x64",       "Give yourself a stack of 64", b -> doGive(64, null));
+        btnGivePlayer = mkBtnTip(bx, by+78,    bw,    "Give to Player", "Give this block to a specific player", b -> toggleGivePlayerPanel());
+        btnRename     = mkBtnTip(bx, by+104,   bw,    "Rename",         "Change the display name of this block", b -> openPanel(Panel.RENAME));
+        btnRetexture  = mkBtnTip(bx, by+130,   bw,    "Change Texture", "Replace the texture for all faces", b -> openPanel(Panel.RETEXTURE));
+        btnProperties = mkBtnTip(bx, by+156,   bw,    "Properties",     "Open advanced collision and block properties", b -> openPanel(Panel.PROPERTIES));
+        btnCopyId     = mkBtnTip(bx, by+182,   bw,    "Copy ID",        "Copy the block ID to clipboard", b -> doCopyId());
+        btnUrlList    = mkBtnTip(bx, by+208,   half,  "URL Import",     "Import a block list from URLs", b -> openPanel(Panel.URL_LIST));
+        btnExport     = mkBtnTip(bx+half+4,by+208,half,"Export",        "Export blocks to config file", b -> doExport());
+        btnBulkDelete = mkBtnTip(bx, by+234,   half,  "Bulk Delete",    "Select and delete multiple blocks", b -> toggleBulkDelete());
+        btnReload     = mkBtnTip(bx+half+4,by+234,half,"Reload Tex",    "Clear the local texture cache", b -> doReloadTex());
+        btnDelete     = mkBtnTip(bx, by+260,   bw,    "Delete Block",   "Permanently delete this block", b -> doDelete());
 
         for (ButtonWidget b : new ButtonWidget[]{btnTheme,btnCreate,btnGive1,btnGive64,
                 btnGivePlayer,btnRename,btnRetexture,btnProperties,btnCopyId,
@@ -208,24 +210,14 @@ public class CustomBlocksScreen extends Screen {
         btnUrlCancel = mkBtn(px+PAD+84, ulY+102, 70,  "Cancel", b -> closePanel());
 
         // Properties panel
-        int propY = by + 300;
-        btnGlowM  = mkBtn(bx,      propY+18, 20, "-", b -> adjustGlow(-1));
-        btnGlowP  = mkBtn(bx+140,  propY+18, 20, "+", b -> adjustGlow(+1));
-        int hw = (bw-8)/5;
-        btnH0     = mkBtn(bx,          propY+44, hw, "0",    b -> setHard(0f));
-        btnHSoft  = mkBtn(bx+(hw+2),   propY+44, hw, "Soft", b -> setHard(0.5f));
-        btnHNorm  = mkBtn(bx+(hw+2)*2, propY+44, hw, "Norm", b -> setHard(1.5f));
-        btnHHard  = mkBtn(bx+(hw+2)*3, propY+44, hw, "Hard", b -> setHard(5.0f));
-        btnHMax   = mkBtn(bx+(hw+2)*4, propY+44, hw, "MAX",  b -> setHard(-1f));
-        int sw2 = (bw-12)/7;
-        btnSStone = mkBtn(bx,          propY+70, sw2, "Stn", b -> setSound("stone"));
-        btnSWood  = mkBtn(bx+(sw2+2),  propY+70, sw2, "Wd",  b -> setSound("wood"));
-        btnSMetal = mkBtn(bx+(sw2+2)*2,propY+70, sw2, "Mtl", b -> setSound("metal"));
-        btnSGlass = mkBtn(bx+(sw2+2)*3,propY+70, sw2, "Gls", b -> setSound("glass"));
-        btnSGrass = mkBtn(bx+(sw2+2)*4,propY+70, sw2, "Grs", b -> setSound("grass"));
-        btnSSand  = mkBtn(bx+(sw2+2)*5,propY+70, sw2, "Snd", b -> setSound("sand"));
-        btnSWool  = mkBtn(bx+(sw2+2)*6,propY+70, sw2, "Wl",  b -> setSound("wool"));
-        btnPropClose = mkBtn(bx, propY+96, bw, "Done", b -> closePanel());
+        int propY = by + 290;
+        btnGlowM  = mkBtnTip(bx,      propY+18, 20, "-", "Decrease Glow Level", b -> adjustGlow(-1));
+        btnGlowP  = mkBtnTip(bx+140,  propY+18, 20, "+", "Increase Glow Level", b -> adjustGlow(+1));
+        
+        btnHardnessCycle = mkBtnTip(bx, propY+44, bw/2 - 2, "Cycle Hardness", "Change the block's breaking speed", b -> cycleHardness());
+        btnSoundCycle = mkBtnTip(bx + bw/2 + 2, propY+44, bw/2 - 2, "Cycle Sound", "Change step and break sounds", b -> cycleSound());
+        
+        btnPropClose = mkBtn(bx, propY+76, bw, "Done", b -> closePanel());
     }
 
     private void reinit() { resize(client, this.width, this.height); }
@@ -383,8 +375,13 @@ public class CustomBlocksScreen extends Screen {
         ctx.getMatrices().push();
         float scale = 5.0f;
         ctx.getMatrices().scale(scale, scale, 1f);
-        ItemStack stack = (CustomBlocksMod.safeSlotItem(data.index) != null ? new ItemStack(CustomBlocksMod.safeSlotItem(data.index)) : ItemStack.EMPTY);
-        ctx.drawItem(stack, (int)((pvX)/scale), (int)((pvY)/scale));
+
+        if (!data.customId.equals(previewBlockId) || previewStack == null) {
+            previewBlockId = data.customId;
+            previewStack = CustomBlocksMod.safeSlotItem(data.index) != null ? new ItemStack(CustomBlocksMod.safeSlotItem(data.index)) : ItemStack.EMPTY;
+        }
+
+        ctx.drawItem(previewStack, (int)((pvX)/scale), (int)((pvY)/scale));
         ctx.getMatrices().pop();
 
         // Info rows
@@ -419,13 +416,13 @@ public class CustomBlocksScreen extends Screen {
         // Properties overlay
         if (activePanel==Panel.PROPERTIES) {
             int bx = rx-2;
-            int propY = py+PAD+14 + 300;
+            int propY = py+PAD+14 + 290;
             ctx.fill(bx, propY-18, bx+rw+4, propY+110, darkTheme?0xEE_0D0D22:0xEE_CCCCEE);
             ctx.drawBorder(bx, propY-18, rw+4, 128, cBorderHi());
             ctx.drawCenteredTextWithShadow(textRenderer, "Properties", rx+rw/2, propY-14, 0xFF_AADDFF);
             ctx.drawTextWithShadow(textRenderer, "Glow: "+data.lightLevel+" / 15", rx, propY+2, C_GLOW);
             ctx.drawTextWithShadow(textRenderer, "Hardness:", rx, propY+30, C_BLUE);
-            ctx.drawTextWithShadow(textRenderer, "Sound:", rx, propY+56, C_ORANGE);
+            ctx.drawTextWithShadow(textRenderer, "Sound:", rx + bw/2, propY+30, C_ORANGE);
         }
     }
 
@@ -540,9 +537,7 @@ public class CustomBlocksScreen extends Screen {
                 setFocused(fldUrlLines[0]);
             }
             case PROPERTIES -> {
-                for (ButtonWidget b : new ButtonWidget[]{btnGlowM,btnGlowP,btnH0,btnHSoft,btnHNorm,
-                        btnHHard,btnHMax,btnSStone,btnSWood,btnSMetal,btnSGlass,btnSGrass,
-                        btnSSand,btnSWool,btnPropClose})
+                for (ButtonWidget b : new ButtonWidget[]{btnGlowM, btnGlowP, btnHardnessCycle, btnSoundCycle, btnPropClose})
                     addDrawableChild(b);
             }
         }
@@ -557,9 +552,7 @@ public class CustomBlocksScreen extends Screen {
         for (TextFieldWidget f : fldUrlLines) remove(f);
         remove(btnUrlOk); remove(btnUrlCancel);
         remove(btnGlowM); remove(btnGlowP);
-        remove(btnH0); remove(btnHSoft); remove(btnHNorm); remove(btnHHard); remove(btnHMax);
-        remove(btnSStone); remove(btnSWood); remove(btnSMetal); remove(btnSGlass);
-        remove(btnSGrass); remove(btnSSand); remove(btnSWool); remove(btnPropClose);
+        remove(btnHardnessCycle); remove(btnSoundCycle); remove(btnPropClose);
     }
 
     private void toggleGivePlayerPanel() {
@@ -599,17 +592,16 @@ public class CustomBlocksScreen extends Screen {
         if (SlotManager.freeSlots()==0) { status("All "+com.customblocks.CustomBlocksConfig.maxSlots+" slots full!",C_RED); return; }
         closePanel();
         status("Downloading...",C_YELLOW);
-        // name uses _ as word separator in the command (server replaces _ back to spaces)
-        send("customblock createurl "+id+" "+name.replace(" ","_")+" "+url);
+        send("customblock create "+id+" \""+name+"\" "+url);
     }
 
     private void doRename() {
         if (selectedId==null) return;
         String name=fldRenameNew.getText().trim();
         if (name.isEmpty()) { status("Enter a name!",C_RED); return; }
-        if (name.contains("_")) { status("Name cannot contain underscores — use spaces.",C_RED); return; }
+        if (name.contains("\"")) { status("Name cannot contain quotes.",C_RED); return; }
         closePanel();
-        send("customblock rename "+selectedId+" "+name.replace(" ","_"));
+        send("customblock rename "+selectedId+" \""+name+"\"");
         status("Renamed!",C_GREEN);
         rebuildFiltered();
     }
@@ -694,7 +686,7 @@ public class CustomBlocksScreen extends Screen {
             String name=parts[1].replace("_"," ");
             String url=parts[2];
             if (SlotManager.hasId(id)) continue;
-            send("customblock createurl "+id+" "+name.replace(" ","_")+" "+url);
+            send("customblock create "+id+" \""+name+"\" "+url);
             count++;
         }
         closePanel();
@@ -707,6 +699,35 @@ public class CustomBlocksScreen extends Screen {
         if (data==null) return;
         send("customblock setglow "+selectedId+" "+Math.max(0,Math.min(15,data.lightLevel+d)));
     }
+    
+    private void cycleHardness() {
+        if(selectedId == null) return;
+        SlotData d = SlotManager.getById(selectedId);
+        if(d == null) return;
+        float current = d.hardness;
+        float[] hvs = {0f, 0.5f, 1.5f, 5.0f, -1f};
+        for(int i=0; i<hvs.length; i++) {
+            if(Math.abs(hvs[i] - current) < 0.1f) {
+                setHard(hvs[(i+1)%hvs.length]); return;
+            }
+        }
+        setHard(1.5f);
+    }
+    
+    private void cycleSound() {
+        if(selectedId == null) return;
+        SlotData d = SlotManager.getById(selectedId);
+        if(d == null) return;
+        String cur = d.soundType;
+        String[] types = {"stone", "wood", "metal", "glass", "grass", "sand", "wool"};
+        for(int i=0; i<types.length; i++) {
+            if(types[i].equals(cur)) {
+                setSound(types[(i+1)%types.length]); return;
+            }
+        }
+        setSound("stone");
+    }
+
     private void setHard(float v) { if (selectedId!=null) send("customblock sethardness "+selectedId+" "+v); }
     private void setSound(String t) { if (selectedId!=null) send("customblock setsound "+selectedId+" "+t); }
     private void setSort(int m) {
@@ -720,7 +741,7 @@ public class CustomBlocksScreen extends Screen {
         String q=search.toLowerCase();
         for (SlotData d : SlotManager.allSlots()) {
             if (d.customId.equals("tab_icon")) continue; // never show tab_icon in grid
-            if (q.isEmpty()||d.customId.contains(q)||d.displayName.toLowerCase().contains(q))
+            if (q.isEmpty()||d.customId.contains(q)||(d.displayNameLower != null && d.displayNameLower.contains(q)))
                 filtered.add(d);
         }
         Comparator<SlotData> cmp = switch(sortMode) {
@@ -768,6 +789,10 @@ public class CustomBlocksScreen extends Screen {
 
     private ButtonWidget mkBtn(int x,int y,int w,String lbl,ButtonWidget.PressAction a) {
         return ButtonWidget.builder(Text.literal(lbl),a).dimensions(x,y,w,20).build();
+    }
+
+    private ButtonWidget mkBtnTip(int x,int y,int w,String lbl,String tip,ButtonWidget.PressAction a) {
+        return ButtonWidget.builder(Text.literal(lbl),a).dimensions(x,y,w,20).tooltip(net.minecraft.client.gui.tooltip.Tooltip.of(Text.literal(tip))).build();
     }
 
     private TextFieldWidget mkField(int x,int y,int w,String placeholder) {

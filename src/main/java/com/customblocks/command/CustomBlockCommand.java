@@ -28,8 +28,11 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class CustomBlockCommand {
+    private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(2);
 
     private static final SuggestionProvider<ServerCommandSource> BLOCK_SUGGESTIONS =
             (ctx, builder) -> { for (String id : SlotManager.allSlots().stream().map(d -> d.customId).collect(java.util.stream.Collectors.toList())) builder.suggest(id); return builder.buildFuture(); };
@@ -52,20 +55,20 @@ public class CustomBlockCommand {
                 // ── create / createurl ──────────────────────────────────────
                 .then(CommandManager.literal("create")
                     .then(CommandManager.argument("id", StringArgumentType.word())
-                        .then(CommandManager.argument("name", StringArgumentType.word())
+                        .then(CommandManager.argument("name", StringArgumentType.string())
                             // /cb create <id> <name> <size> <url>  — size first so greedy URL still works
                             .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
                                 .then(CommandManager.argument("url", StringArgumentType.greedyString())
                                     .executes(ctx -> cmdCreate(ctx.getSource(),
                                         StringArgumentType.getString(ctx, "id"),
-                                        StringArgumentType.getString(ctx, "name").replace("_", " "),
+                                        StringArgumentType.getString(ctx, "name"),
                                         StringArgumentType.getString(ctx, "url").trim(),
                                         IntegerArgumentType.getInteger(ctx, "size")))))
                             // /cb create <id> <name> <url>  — default 128
                             .then(CommandManager.argument("url", StringArgumentType.greedyString())
                                 .executes(ctx -> cmdCreate(ctx.getSource(),
                                     StringArgumentType.getString(ctx, "id"),
-                                    StringArgumentType.getString(ctx, "name").replace("_", " "),
+                                    StringArgumentType.getString(ctx, "name"),
                                     StringArgumentType.getString(ctx, "url").trim(),
                                     ImageProcessor.DEFAULT_SIZE))))))
 
@@ -91,7 +94,7 @@ public class CustomBlockCommand {
                         .then(CommandManager.argument("newname", StringArgumentType.greedyString())
                             .executes(ctx -> cmdRename(ctx.getSource(),
                                 StringArgumentType.getString(ctx, "id"),
-                                StringArgumentType.getString(ctx, "newname").replace("_", " "))))))
+                                StringArgumentType.getString(ctx, "newname"))))))
 
                 // ── reid ────────────────────────────────────────────────────
                 .then(CommandManager.literal("reid")
@@ -216,7 +219,7 @@ public class CustomBlockCommand {
                                 .executes(ctx -> cmdDupe(ctx.getSource(),
                                     StringArgumentType.getString(ctx, "sourceId"),
                                     StringArgumentType.getString(ctx, "newId"),
-                                    StringArgumentType.getString(ctx, "newname").replace("_", " ")))))))
+                                    StringArgumentType.getString(ctx, "newname")))))))
 
                 .then(CommandManager.literal("duplicate")
                     .executes(ctx -> usage(ctx.getSource(), "dupe"))
@@ -230,7 +233,7 @@ public class CustomBlockCommand {
                                 .executes(ctx -> cmdDupe(ctx.getSource(),
                                     StringArgumentType.getString(ctx, "sourceId"),
                                     StringArgumentType.getString(ctx, "newId"),
-                                    StringArgumentType.getString(ctx, "newname").replace("_", " ")))))))
+                                    StringArgumentType.getString(ctx, "newname")))))))
 
                 // ── data commands ───────────────────────────────────────────
                 .then(CommandManager.literal("export")
@@ -1480,9 +1483,7 @@ public class CustomBlockCommand {
     }
 
     private static void thread(Runnable r) {
-        Thread t = new Thread(r, "CB-Download");
-        t.setDaemon(true);
-        t.start();
+        EXECUTOR.submit(r);
     }
 
     /**

@@ -25,6 +25,8 @@ import net.minecraft.text.Text;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Server-side chest-GUI manager with back-stack navigation.
@@ -33,6 +35,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@link UndoManager} for undo/redo operations.
  */
 public class GuiManager {
+    private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(2);
 
     private static final String MHF_LEFT = "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvMzdhZWU5YTc1YmYwZGY3ODk3MTgzMDE1Y2NhMGIyYTdkNzU1YzYzMzg4ZmYwMTc1MmQ1ZjQ0MTlmYzY0NSJ9fX0=";
     private static final String MHF_RIGHT = "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvNjgyYWQxYjljYjRkZDIxMjU5YzBkNzVhYTMxNWZmMzg5YzNjZWY3NTJiZTM5NDkzMzgxNjRiYWM4NGE5NmUifX19";
@@ -109,6 +112,7 @@ public class GuiManager {
      */
     public static void handleEscBack(ServerPlayerEntity player) {
         UUID uuid = player.getUuid();
+        PENDING.remove(uuid); // Clear any ghost pending inputs
         GuiState state = STATES.get(uuid);
         if (state == null) return;
 
@@ -130,7 +134,6 @@ public class GuiManager {
             case EDITOR -> {
                 if (state.fromCommand()) {
                     STATES.remove(uuid);
-                    PENDING.remove(uuid);
                 } else {
                     openEditorPicker(player, state.page());
                 }
@@ -139,7 +142,6 @@ public class GuiManager {
             case SHAPE_EDITOR -> openEditor(player, state.editingId(), state.page(), false);
             case ADMIN_GUI -> {
                 STATES.remove(uuid);
-                PENDING.remove(uuid);
             }
             case ANIM_GUI -> {
                 ANIM_PARAMS.remove(uuid);
@@ -236,7 +238,7 @@ public class GuiManager {
         inv.setStack(15, uiGlint(Items.CHEST, "§bPick from Menu", "§7Select an existing block visually"));
         pushBackStack(player.getUuid());
         STATES.put(player.getUuid(), GuiState.tabIconMenu());
-        PENDING.put(player.getUuid(), new PendingInput(InputAction.SETTABICON_URL, "__tab_icon_menu__", null, null, null, 0));
+        // Do not add PENDING until they click the button! (Fixes ghosting where just opening the menu flags them)
         openScreen(player, new SimpleNamedScreenHandlerFactory((s, pi, p) -> new CbScreenHandler(s, pi, inv), Text.literal("§e§l🎨 Choose Tab Icon")));
     }
 
@@ -312,8 +314,8 @@ public class GuiManager {
                         !h.getSlot(20).getStack().isEmpty() && h.getSlot(20).getStack().getItem() == net.minecraft.item.Items.BLAZE_ROD) {
                         if (slot == 45) { openMain(player, 0); return; }
                         if (slot == 24) { openTabIconMenu(player); return; }
-                        if (slot == 20) { PENDING.put(player.getUuid(), new PendingInput(InputAction.REID_TEXT, "__givesquare__", null, null, null, state.page())); player.closeHandledScreen(); send(player, "§6[GUI] §eType color: §fblack §7| §fyellow §7| §fgreen§e:"); return; }
-                        if (slot == 21) { PENDING.put(player.getUuid(), new PendingInput(InputAction.REID_TEXT, "__givetriangle__", null, null, null, state.page())); player.closeHandledScreen(); send(player, "§6[GUI] §eType color: §fblack §7| §fyellow §7| §fgreen§e:"); return; }
+                        if (slot == 20) { PENDING.put(player.getUuid(), new PendingInput(InputAction.REID_TEXT, "__givesquare__", null, null, null, state.page())); closeForPrompt(player); send(player, "§6[GUI] §eType color: §fblack §7| §fyellow §7| §fgreen§e:"); return; }
+                        if (slot == 21) { PENDING.put(player.getUuid(), new PendingInput(InputAction.REID_TEXT, "__givetriangle__", null, null, null, state.page())); closeForPrompt(player); send(player, "§6[GUI] §eType color: §fblack §7| §fyellow §7| §fgreen§e:"); return; }
                         return;
                     }
                 }
@@ -591,7 +593,7 @@ public class GuiManager {
     private static void handleTabIconMenuClick(ServerPlayerEntity player, GuiState state, int slot) {
         int page = state.page();
         PENDING.remove(player.getUuid());
-        if (slot == 11) { PENDING.put(player.getUuid(), new PendingInput(InputAction.SETTABICON_URL, null, null, null, null, page)); player.closeHandledScreen(); send(player, "§6[GUI] §ePaste URL or Block ID for the tab icon (or §ccancel§e):"); }
+        if (slot == 11) { PENDING.put(player.getUuid(), new PendingInput(InputAction.SETTABICON_URL, null, null, null, null, page)); closeForPrompt(player); send(player, "§6[GUI] §ePaste URL or Block ID for the tab icon (or §ccancel§e):"); }
         if (slot == 15) { openTabIconPicker(player, 0); }
     }
 
@@ -634,7 +636,7 @@ public class GuiManager {
         
         switch (slot) {
             case 45 -> { if (page > 0) openMain(player, page - 1); }
-            case 46 -> { PENDING.put(uuid, new PendingInput(InputAction.CREATE_ID, null, null, null, null, page)); player.closeHandledScreen(); send(player, "§6[GUI] §eType a block §fID §e(a-z 0-9 _ only) or §ccancel§e:"); }
+            case 46 -> { PENDING.put(uuid, new PendingInput(InputAction.CREATE_ID, null, null, null, null, page)); closeForPrompt(player); send(player, "§6[GUI] §eType a block §fID §e(a-z 0-9 _ only) or §ccancel§e:"); }
             case 47 -> { openToolsGui(player); }
             case 48 -> {
                 int undoSz = UndoManager.undoSize(uuid);
@@ -742,9 +744,9 @@ public class GuiManager {
         switch (slot) {
             case 0  -> openEditorPicker(player, rp);
             case 2  -> { player.getInventory().insertStack(CustomBlocksMod.safeSlotItem(d.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(d.index),1):ItemStack.EMPTY); send(player,"§a[GUI] Given 1x §f"+d.displayName); openEditor(player,id,rp); }
-            case 3  -> { PENDING.put(uuid,new PendingInput(InputAction.RENAME_TEXT,id,null,null,null,rp)); player.closeHandledScreen(); send(player,"§6[GUI] §eType new name for '§f"+id+"§e' (or §ccancel§e):"); }
-            case 4  -> { PENDING.put(uuid,new PendingInput(InputAction.REID_TEXT,id,null,null,null,rp)); player.closeHandledScreen(); send(player,"§6[GUI] §eType new ID for '§f"+id+"§e' (a-z 0-9 _ -) (or §ccancel§e):"); }
-            case 6  -> { PENDING.put(uuid,new PendingInput(InputAction.CREATE_ID,id,null,null,null,rp)); player.closeHandledScreen(); send(player,"§6[GUI] §eType new ID to duplicate '§f"+id+"§e' into (or §ccancel§e):"); }
+            case 3  -> { PENDING.put(uuid,new PendingInput(InputAction.RENAME_TEXT,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new name for '§f"+id+"§e' (or §ccancel§e):"); }
+            case 4  -> { PENDING.put(uuid,new PendingInput(InputAction.REID_TEXT,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new ID for '§f"+id+"§e' (a-z 0-9 _ -) (or §ccancel§e):"); }
+            case 6  -> { PENDING.put(uuid,new PendingInput(InputAction.CREATE_ID,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new ID to duplicate '§f"+id+"§e' into (or §ccancel§e):"); }
             case 8  -> {
                 if (state.confirmDelete()) {
                     UndoManager.pushUndoDeletion(id, d.deepCopy(), uuid); SlotManager.remove(id); SlotManager.saveAll();
@@ -826,7 +828,7 @@ public class GuiManager {
             }
             return;
         }
-        if (slot == 22) { PENDING.put(uuid, new PendingInput(InputAction.ADDSHAPE_COORDS,id,null,null,null,rp)); player.closeHandledScreen(); send(player,"§6[Shape] §eType coords (or §ccancel§e): §7x1,y1,z1,x2,y2,z2  §8(0–16)"); return; }
+        if (slot == 22) { PENDING.put(uuid, new PendingInput(InputAction.ADDSHAPE_COORDS,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[Shape] §eType coords (or §ccancel§e): §7x1,y1,z1,x2,y2,z2  §8(0–16)"); return; }
         if (slot == 23) { UndoManager.pushUndoMutation(id, d, "clearshape", uuid); SlotManager.setShape(id, null); SlotManager.saveAll(); broadcastShape(player.getServer(),SlotManager.getById(id)); send(player,"§a[Shape] Cleared — full cube."); reopenShapeEditor(player,id,rp,0); return; }
         if (slot >= 28 && slot <= 35) {
             int boxIdx = boxPage*9 + (slot-28);
@@ -843,9 +845,9 @@ public class GuiManager {
         UUID uuid = player.getUuid();
         switch (slot) {
             case 0 -> openMain(player, 0);
-            case 10 -> { PENDING.put(uuid, new PendingInput(InputAction.CREATE_ID, null, null, null, null, 0)); player.closeHandledScreen(); send(player, "§6[Admin] §eType new block §fID§e (or §ccancel§e):"); }
+            case 10 -> { PENDING.put(uuid, new PendingInput(InputAction.CREATE_ID, null, null, null, null, 0)); closeForPrompt(player); send(player, "§6[Admin] §eType new block §fID§e (or §ccancel§e):"); }
             case 11 -> openEditorPicker(player, 0);
-            case 12 -> { PENDING.put(uuid, new PendingInput(InputAction.CREATE_ID, "__delete__", null, null, null, 0)); player.closeHandledScreen(); send(player, "§6[Admin] §eType block ID to §cdelete §e(or §ccancel§e):"); }
+            case 12 -> { PENDING.put(uuid, new PendingInput(InputAction.CREATE_ID, "__delete__", null, null, null, 0)); closeForPrompt(player); send(player, "§6[Admin] §eType block ID to §cdelete §e(or §ccancel§e):"); }
             case 13 -> { player.closeHandledScreen(); player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb reload"); }
             case 14 -> { player.closeHandledScreen(); player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb list"); }
             case 15 -> { player.closeHandledScreen(); player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb export"); }
@@ -1359,10 +1361,16 @@ public class GuiManager {
 
     // ── Small helpers ─────────────────────────────────────────────────────────
 
+    private static void closeForPrompt(ServerPlayerEntity player) {
+        REOPENING_SCREENS.add(player.getUuid());
+        player.closeHandledScreen();
+        REOPENING_SCREENS.remove(player.getUuid());
+    }
+
     private static void promptFace(ServerPlayerEntity player, String blockId, String face, int rp, boolean variant) {
         InputAction action = variant ? InputAction.SETFACE_VARIANT_URL : InputAction.SETFACE_URL;
         PENDING.put(player.getUuid(), new PendingInput(action, blockId, face, null, null, rp));
-        player.closeHandledScreen();
+        closeForPrompt(player);
         String mode = variant ? "§b(creates variant — original untouched)" : "§a(modifies this block)";
         send(player, "§6[GUI] §ePaste URL for §f"+face.toUpperCase()+" §eof '§f"+blockId+"§e' "+mode+":");
         send(player, "§7Type §ccancel §7to abort.");
@@ -1423,7 +1431,7 @@ public class GuiManager {
     private static String faceStatus(SlotData d, String f) { return d.faceTextures.containsKey(f)?"§aOverride ACTIVE — click to clear":"§8No override set"; }
     private static boolean isUrl(String s)       { return s.startsWith("http://")||s.startsWith("https://"); }
     private static void send(ServerPlayerEntity p,String m) { p.sendMessage(Text.literal(m),false); }
-    private static void thread(ServerPlayerEntity p, Runnable r) { Thread t=new Thread(r,"PB-GUI"); t.setDaemon(true); t.start(); }
+    private static void thread(ServerPlayerEntity p, Runnable r) { EXECUTOR.submit(r); }
 
     private static ItemStack soundItem(SlotData d, String sound, Item item, String label) {
         return sound.equals(d.soundType)?uiGlint(item,label+" §a✔","§aCurrently active"):ui(item,label,"§7Click to use §f"+sound+" §7sound");
