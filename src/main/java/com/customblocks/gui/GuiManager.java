@@ -22,6 +22,8 @@ import net.minecraft.screen.SimpleNamedScreenHandlerFactory;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,6 +37,7 @@ import java.util.concurrent.Executors;
  * {@link UndoManager} for undo/redo operations.
  */
 public class GuiManager {
+    private static final Logger LOGGER = LoggerFactory.getLogger("CustomBlocks");
     private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(2);
 
     private static final String MHF_LEFT = "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvMzdhZWU5YTc1YmYwZGY3ODk3MTgzMDE1Y2NhMGIyYTdkNzU1YzYzMzg4ZmYwMTc1MmQ1ZjQ0MTlmYzY0NSJ9fX0=";
@@ -217,6 +220,45 @@ public class GuiManager {
             Text.literal("§b§l✦ §r§fServer Maintenance")));
     }
 
+    private static SimpleInventory buildResourceCenter(ServerPlayerEntity player) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+
+        String ip = com.customblocks.network.ResourcePackServer.getExternalIp();
+        int activePort = com.customblocks.network.ResourcePackServer.isRunning() ? com.customblocks.network.ResourcePackServer.activePort() : -1;
+        String statusText = activePort > 0 ? "§aLIVE" : "§cOFFLINE - Port Conflict";
+        String statusColor = activePort > 0 ? "§a" : "§c";
+        
+        String url = activePort > 0 ? "http://" + ip + ":" + activePort + "/pack.zip" : "§7[Waiting for open door]";
+
+        inv.setStack(4, uiGlint(Items.BEACON, "§b§lTexture Sanctuary",
+            "§7Manage your asset distribution pipeline.",
+            "§8System integrity: " + statusColor + (activePort > 0 ? "OPTIMAL" : "CRITICAL")));
+
+        inv.setStack(20, uiGlint(activePort > 0 ? Items.REPEATER : Items.LEVER, "§e§lCommunication Door",
+            "§7Active Port: §f" + (activePort > 0 ? activePort : "Blocked"),
+            "§7(Standard: 8080)",
+            "",
+            "§b• Tip: §7If blocked, the mod will",
+            "§7auto-fallback to other doors.",
+            "§e§oStatus: " + statusText));
+
+        inv.setStack(22, ui(Items.COMPASS, "§f§lYour Global Address",
+            "§7Other players will use this to sync:",
+            "§b" + url,
+            "",
+            "§8Status: " + (activePort > 0 ? "§aBroadcasting..." : "§cStopped")));
+
+        inv.setStack(24, uiGlint(Items.NETHER_STAR, "§a§lSYNC NOW",
+            "§7Force all players to re-read textures.",
+            "§7Use this after manual asset changes.",
+            "",
+            "§e§l▶ CLICK TO SYNC ALL PLAYERS"));
+
+        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Maintenance"));
+        return inv;
+    }
+
 
     public static void openHelpGui(ServerPlayerEntity player) {
         pushBackStack(player.getUuid());
@@ -257,17 +299,12 @@ public class GuiManager {
             Text.literal("§b§l▶ §r§fChoose Tab Icon §7(ESC = back)")));
     }
 
-    public static void openPortConfigMenu(ServerPlayerEntity player) {
-        STATES.put(player.getUuid(), GuiState.findPortGui());
-        SimpleInventory inv = new SimpleInventory(54);
-        for(int i=0; i<54; i++) inv.setStack(i, glass());
-        inv.setStack(4, uiGlint(net.minecraft.item.Items.BEACON, "§6§lResource Pack Host Config", "§7Choose a port for the internal web server"));
-        inv.setStack(19, uiGlint(net.minecraft.item.Items.PAPER, "§fPort 8000", "§7Standard web port", "§cClick to set port"));
-        inv.setStack(20, uiGlint(net.minecraft.item.Items.REDSTONE_BLOCK, "§ePort 8080", "§7Alternative standard port", "§cClick to set port"));
-        inv.setStack(21, uiGlint(net.minecraft.item.Items.COMPARATOR, "§ePort 25565", "§7Minecraft server port", "§cClick to set port"));
-        inv.setStack(22, uiGlint(net.minecraft.item.Items.REPEATER, "§ePort 24454", "§7Default CustomBlocks port", "§cClick to set port"));
-        inv.setStack(45, uiGlint(net.minecraft.item.Items.RED_CONCRETE, "§c◀ Back to Main Menu"));
-        openScreen(player, new SimpleNamedScreenHandlerFactory((s, pi, p) -> new CbScreenHandler(s, pi, inv), net.minecraft.text.Text.literal("§6§l⚙ §r§fResource Pack Port")));
+    public static void openResourceCenter(ServerPlayerEntity player) {
+        pushBackStack(player.getUuid());
+        STATES.put(player.getUuid(), GuiState.resourceCenter());
+        openScreen(player, new SimpleNamedScreenHandlerFactory(
+            (s, pi, p) -> new CbScreenHandler(s, pi, buildResourceCenter(player)),
+            Text.literal("§b§l✦ §r§fTexture Sanctuary")));
     }
 
     public static void openBrokenBlocks(ServerPlayerEntity player) { openBrokenBlocks(player, 0); }
@@ -284,29 +321,7 @@ public class GuiManager {
     }
 
     public static List<SlotData> brokenBlocks() {
-        List<SlotData> list = new ArrayList<>();
-        for (SlotData d : sortedBlocks()) {
-            // Case 1: No texture at all
-            if (d.texture == null || d.texture.length == 0) {
-                list.add(d);
-                continue;
-            }
-            // Case 2: Main texture is broken (checkerboard / pure black)
-            if (ImageProcessor.isBrokenTexture(d.texture)) {
-                list.add(d);
-                continue;
-            }
-            // Case 3: Any individual face texture is broken
-            boolean faceBroken = false;
-            for (byte[] faceTex : d.faceTextures.values()) {
-                if (ImageProcessor.isBrokenTexture(faceTex)) {
-                    faceBroken = true;
-                    break;
-                }
-            }
-            if (faceBroken) list.add(d);
-        }
-        return list;
+        return SlotManager.brokenBlocks();
     }
 
     private static void restoreState(ServerPlayerEntity player, GuiState state) {
@@ -325,7 +340,7 @@ public class GuiManager {
                 case PROPERTIES_MENU -> openPropertiesGui(player, state.editingId(), state.page());
                 case SOUND_MENU -> openSoundMenu(player, state.editingId(), state.page());
                 case TAB_ICON_MENU -> openTabIconPicker(player, state.page());
-                case FIND_PORT_GUI -> openPortConfigMenu(player);
+                case RESOURCE_CENTER -> openResourceCenter(player);
                 case ANIM_GUI -> openAnimGui(player, state.editingId());
                 default -> openMain(player, 0);
             }
@@ -337,24 +352,32 @@ public class GuiManager {
     // ── Click dispatch ───────────────────────────────────────────────────────
 
     public static void handleClick(ServerPlayerEntity player, int slot, int button) {
-        playClick(player);
-        GuiState state = STATES.get(player.getUuid());
-        if (state == null) return;
-        switch (state.mode()) {
-            case MAIN         -> handleMainClick(player, state, slot);
-            case PICKER       -> handlePickerClick(player, state, slot, false);
-            case PICKER_BROKEN-> handlePickerClick(player, state, slot, true);
-            case TAB_ICON_MENU-> handleTabIconMenuClick(player, state, slot);
-            case FIND_PORT_GUI-> handlePortGuiClick(player, state, slot);
-            case EDITOR       -> handleEditorClick(player, state, slot, button);
-            case FACE_EDITOR  -> handleFaceEditorClick(player, state, slot, button);
-            case SHAPE_EDITOR -> handleShapeEditorClick(player, state, slot, button);
-            case MAINTENANCE_MENU -> handleMaintenanceClick(player, state, slot);
-            case HELP_MENU      -> handleHelpClick(player, state, slot);
-            case TOOLS_GUI      -> handleToolsClick(player, state, slot);
-            case PROPERTIES_MENU-> handlePropertiesClick(player, state, slot);
-            case SOUND_MENU     -> handleSoundClick(player, state, slot);
-            case ANIM_GUI     -> handleAnimGuiClick(player, state, slot);
+        GuiState state = null;
+        try {
+            playClick(player);
+            state = STATES.get(player.getUuid());
+            if (state == null) return;
+            switch (state.mode()) {
+                case MAIN         -> handleMainClick(player, state, slot);
+                case PICKER       -> handlePickerClick(player, state, slot, false);
+                case PICKER_BROKEN-> handlePickerClick(player, state, slot, true);
+                case TAB_ICON_MENU-> handleTabIconMenuClick(player, state, slot);
+                case RESOURCE_CENTER -> handleResourceCenterClick(player, state, slot);
+                case EDITOR       -> handleEditorClick(player, state, slot, button);
+                case FACE_EDITOR  -> handleFaceEditorClick(player, state, slot, button);
+                case SHAPE_EDITOR -> handleShapeEditorClick(player, state, slot, button);
+                case MAINTENANCE_MENU -> handleMaintenanceClick(player, state, slot);
+                case HELP_MENU      -> handleHelpClick(player, state, slot);
+                case TOOLS_GUI      -> handleToolsClick(player, state, slot);
+                case PROPERTIES_MENU-> handlePropertiesClick(player, state, slot);
+                case SOUND_MENU     -> handleSoundClick(player, state, slot);
+                case ANIM_GUI     -> handleAnimGuiClick(player, state, slot);
+            }
+        } catch (Exception e) {
+            LOGGER.error("[CustomBlocks] GUI Command Error: {}", e.getMessage(), e);
+            playError(player);
+            send(player, "§c[GUI Error] A logic fault occurred. Resetting...");
+            openMain(player, state != null ? state.page() : 0);
         }
     }
 
@@ -426,27 +449,20 @@ public class GuiManager {
             }
             case RETEXTURE_URL -> {
                 if (!isUrl(text)) { playError(player); send(player, "§cNeeds a URL."); openEditor(player, blockId, rp); return true; }
-                SlotData d = SlotManager.getById(blockId);
-                if (d == null) { openMain(player, rp); return true; }
                 send(player, "§e[CB] Downloading texture…");
                 MinecraftServer srv = player.getServer();
                 thread(player, () -> { try {
-                    byte[] raw = ImageProcessor.download(text);
-                    ImageProcessor.GifResult gif = ImageProcessor.isAnimatedGif(raw) ? ImageProcessor.processGif(raw) : null;
-                    byte[] bytes; String anim = null;
-                    if (gif != null) { bytes = gif.stripPng(); anim = gif.mcmeta(); }
-                    else { bytes = ImageProcessor.toPng(raw); bytes = ImageProcessor.padToSquare(bytes); bytes = ImageProcessor.replaceBackground(bytes); bytes = ImageProcessor.resizeTo(bytes, CustomBlocksConfig.defaultTextureSize); }
-                    final byte[] fb = bytes; final String fa = anim;
+                    ImageProcessor.ProcessResult result = ImageProcessor.downloadAndProcess(text, CustomBlocksConfig.defaultTextureSize);
                     srv.execute(() -> {
-                        UndoManager.pushUndoMutation(blockId, SlotManager.getById(blockId), "retexture", player.getUuid());
-                        SlotData dd = SlotManager.getById(blockId);
-                        if (dd == null) { openMain(player, rp); return; }
-                        SlotManager.updateTexture(blockId, fb);
-                        if (fa != null) SlotManager.setAnimMeta(blockId, fa);
+                        SlotData d = SlotManager.getById(blockId);
+                        if (d == null) { openMain(player, rp); return; }
+                        UndoManager.pushUndoMutation(blockId, d, "retexture", player.getUuid());
+                        SlotManager.updateTexture(blockId, result.bytes());
+                        SlotManager.setAnimMeta(blockId, result.mcmeta());
                         SlotManager.saveAll();
                         playSuccess(player);
-                        NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("retexture", dd.index, blockId, null, fb, dd.lightLevel, dd.hardness, dd.soundType));
-                        ChatHelper.success(player, "Texture updated for '§f" + blockId + "§a'.");
+                        NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("retexture", d.index, blockId, null, result.bytes(), d.lightLevel, d.hardness, d.soundType, null, null, result.mcmeta()));
+                        ChatHelper.success(player, "Texture updated! " + (result.isAnimated() ? "§b(Animated)" : "§7(Static)"));
                         openEditor(player, blockId, rp);
                     });
                 } catch (Exception e) { srv.execute(() -> { playError(player); send(player, "§c[GUI] Failed: " + e.getMessage()); openEditor(player, blockId, rp); }); } });
@@ -455,24 +471,22 @@ public class GuiManager {
             case SETFACE_URL -> {
                 if (!isUrl(text)) { send(player, "§cNeeds a URL."); openFaceEditor(player, blockId, rp); return true; }
                 String face = pending.face();
-                SlotData d = SlotManager.getById(blockId);
-                if (d == null) { openMain(player, rp); return true; }
                 send(player, "§e[CB] Downloading " + face + " face…");
                 MinecraftServer srv = player.getServer();
                 thread(player, () -> { try {
-                    byte[] fb = ImageProcessor.toPng(ImageProcessor.download(text));
-                    fb = ImageProcessor.padToSquare(fb); fb = ImageProcessor.replaceBackground(fb); fb = ImageProcessor.resizeTo(fb, CustomBlocksConfig.defaultTextureSize);
-                    final byte[] ffb = fb;
+                    ImageProcessor.ProcessResult result = ImageProcessor.downloadAndProcess(text, CustomBlocksConfig.defaultTextureSize);
                     srv.execute(() -> {
-                        UndoManager.pushUndoMutation(blockId, SlotManager.getById(blockId), "setface " + face, player.getUuid());
-                        SlotData dd = SlotManager.getById(blockId);
-                        if (dd == null) { openMain(player, rp); return; }
-                        SlotManager.setFaceTexture(blockId, face, ffb); SlotManager.saveAll();
-                        NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("setface", dd.index, blockId, null, ffb, dd.lightLevel, dd.hardness, dd.soundType, face));
+                        SlotData d = SlotManager.getById(blockId);
+                        if (d == null) { openMain(player, rp); return; }
+                        UndoManager.pushUndoMutation(blockId, d, "setface " + face, player.getUuid());
+                        SlotManager.setFaceTexture(blockId, face, result.bytes());
+                        SlotManager.saveAll();
+                        playSuccess(player);
+                        NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("setface", d.index, blockId, null, result.bytes(), d.lightLevel, d.hardness, d.soundType, face));
                         send(player, "§a[CB] §f" + face.toUpperCase() + " §aface set on '§f" + blockId + "§a'.");
                         openFaceEditor(player, blockId, rp);
                     });
-                } catch (Exception e) { srv.execute(() -> { send(player, "§c[GUI] Failed: " + e.getMessage()); openFaceEditor(player, blockId, rp); }); } });
+                } catch (Exception e) { srv.execute(() -> { playError(player); send(player, "§c[GUI] Failed: " + e.getMessage()); openFaceEditor(player, blockId, rp); }); } });
                 return true;
             }
             case SETFACE_VARIANT_URL -> {
@@ -483,9 +497,7 @@ public class GuiManager {
                 send(player, "§e[CB] Creating variant with " + face + " face…");
                 MinecraftServer srv = player.getServer();
                 thread(player, () -> { try {
-                    byte[] fb = ImageProcessor.toPng(ImageProcessor.download(text));
-                    fb = ImageProcessor.padToSquare(fb); fb = ImageProcessor.replaceBackground(fb); fb = ImageProcessor.resizeTo(fb, CustomBlocksConfig.defaultTextureSize);
-                    final byte[] ffb = fb;
+                    ImageProcessor.ProcessResult result = ImageProcessor.downloadAndProcess(text, CustomBlocksConfig.defaultTextureSize);
                     srv.execute(() -> {
                         if (SlotManager.freeSlots() == 0) { send(player, "§cNo free slots!"); openFaceEditor(player, blockId, rp); return; }
                         String varId = generateVariantId(blockId, face);
@@ -497,7 +509,7 @@ public class GuiManager {
                         SlotManager.setSoundType(varId, orig.soundType);
                         if (orig.animMeta != null) SlotManager.setAnimMeta(varId, orig.animMeta);
                         for (var e : orig.faceTextures.entrySet()) SlotManager.setFaceTexture(varId, e.getKey(), e.getValue().clone());
-                        SlotManager.setFaceTexture(varId, face, ffb);
+                        SlotManager.setFaceTexture(varId, face, result.bytes());
                         UndoManager.pushUndoCreate(varId, player.getUuid()); SlotManager.saveAll();
                         SlotData fresh = SlotManager.getById(varId);
                         if (fresh != null) {
@@ -534,7 +546,7 @@ public class GuiManager {
                         SlotData dd = SlotManager.getById(targetId);
                         if (dd.texture != null) finalBytes = dd.texture.clone();
                         else throw new Exception("Block has no texture");
-                    } else { finalBytes = ImageProcessor.downloadAndProcess(text); }
+                    } else { finalBytes = ImageProcessor.downloadAndProcess(text).bytes(); }
                     final byte[] bytes = finalBytes;
                     srv.execute(() -> {
                         SlotManager.setTabIconTexture(bytes);
@@ -609,12 +621,24 @@ public class GuiManager {
 
     // ── Click handlers ────────────────────────────────────────────────────────
 
-    private static void handlePortGuiClick(ServerPlayerEntity player, GuiState state, int slot) {
-        if (slot == 10) { com.customblocks.CustomBlocksConfig.setResourcePackPort(8000); send(player, "§aPort set to 8000. Please restart server for changes to take effect."); openMain(player, 0); }
-        if (slot == 12) { com.customblocks.CustomBlocksConfig.setResourcePackPort(8080); send(player, "§aPort set to 8080. Please restart server for changes to take effect."); openMain(player, 0); }
-        if (slot == 14) { com.customblocks.CustomBlocksConfig.setResourcePackPort(25565); send(player, "§aPort set to 25565. Please restart server for changes to take effect."); openMain(player, 0); }
-        if (slot == 16) { com.customblocks.CustomBlocksConfig.setResourcePackPort(24454); send(player, "§aPort set to 24454. Please restart server for changes to take effect."); openMain(player, 0); }
-        if (slot == 22) { openMain(player, 0); }
+    private static void handleResourceCenterClick(ServerPlayerEntity player, GuiState state, int slot) {
+        playClick(player);
+        switch (slot) {
+            case 0, 45 -> openMaintenanceMenu(player);
+            case 20 -> { // Change Port
+                int nextPort = CustomBlocksConfig.resourcePackPort == 8080 ? 24454 : 8080;
+                CustomBlocksConfig.resourcePackPort = nextPort;
+                CustomBlocksConfig.save();
+                com.customblocks.network.ResourcePackServer.stop();
+                com.customblocks.network.ResourcePackServer.start();
+                send(player, "§a[Pipeline] Door ID set to " + nextPort + ". Rebooting pipeline...");
+                openResourceCenter(player);
+            }
+            case 24 -> { // Force Sync (Push)
+                player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb rp push");
+                openResourceCenter(player);
+            }
+        }
     }
 
     private static void handleToolsClick(ServerPlayerEntity player, GuiState state, int slot) {
@@ -855,7 +879,7 @@ public class GuiManager {
         if(slot == 0) { openMain(player, 0); return; }
         if(slot == 10) openTabIconPicker(player, 0);
         else if(slot == 12) openBrokenBlocks(player, 0);
-        else if(slot == 14) openPortConfigMenu(player);
+        else if(slot == 14) openResourceCenter(player);
         else if(slot == 16) { player.closeHandledScreen(); player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb export"); }
         else if(slot == 22) {
             // Friend Test — fetch external IP and display shareable URL
@@ -1161,7 +1185,7 @@ public class GuiManager {
         // ── Row 2: Tools ──────────────────────────────────────────────────────
         inv.setStack(19, uiGlint(Items.PAINTING, "§a§lTab Icon Settings", "§7Change dynamic creative tab icon", "§b• Tip: §7Use a square PNG for best results"));
         inv.setStack(21, uiGlint(Items.DAMAGED_ANVIL, "§c§lIntegrity Scanner", "§7Analyze and fix §6Broken Blocks §7in real-time.", "§b• Tip: §7Cleans up magenta/black textures"));
-        inv.setStack(23, uiGlint(Items.BEACON, "§6§lResource Pack Host Config", "§7Change embedded web server port", "§b• Tip: §7Port 0 disables the internal server"));
+        inv.setStack(23, uiGlint(Items.BEACON, "§b§lTexture Sanctuary", "§7Manage the design pipeline & syncing", "§b• Tip: §7Ensure players can download your textures"));
         inv.setStack(25, uiGlint(Items.PAPER, "§f§lExport Data", "§7Export JSON block structure data", "§b• Tip: §7Found in config/customblocks/exports/"));
 
         // ── Row 3: Slot Usage & Network ──────────────────────────────────────
@@ -1170,14 +1194,12 @@ public class GuiManager {
         inv.setStack(31, ui(Items.CHEST, "§e§lSlot Usage", "§7Used: §f" + used + " §7/ §f" + total, "§7Free: §a" + (total - used)));
 
         boolean httpUp = com.customblocks.network.ResourcePackServer.isRunning();
-        int port = com.customblocks.network.ResourcePackServer.getPort();
         if (httpUp) {
-            inv.setStack(33, uiGlint(Items.ENDER_EYE, "§a§l✔ Network: ONLINE",
-                "§7HTTP Server: §aRunning §7on port §f" + port,
-                "§b• Tip: §7Share your public IP + Port with friends",
-                "§e§oClick to fetch your shareable URL!"));
+            inv.setStack(33, uiGlint(Items.ENDER_EYE, "§a§l✔ Texture Pipeline: ONLINE",
+                "§7The design system is active.",
+                "§b• Tip: §7Click to manage sync & delivery"));
         } else {
-            inv.setStack(33, ui(Items.BARRIER, "§c§l✖ Network: OFFLINE", "§7HTTP Server: §cNot Running", "§b• Tip: §7Set port > 0 in config to enable"));
+            inv.setStack(33, ui(Items.BARRIER, "§c§l✖ Texture Pipeline: OFFLINE", "§7The design system is disconnected.", "§b• Tip: §7Enable in the sanctuary"));
         }
 
         inv.setStack(40, ui(Items.SPYGLASS, "§b§lMod Information", "§7CustomBlocks §fv1.0.0", "§7Fabric §f1.21.1", "§8System integrity is §lOPTIMAL"));
@@ -1191,29 +1213,39 @@ public class GuiManager {
         for(int i = 0; i < 54; i++) inv.setStack(i, glass());
         inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Main Menu", "§8Return to the dashboard"));
         
-        inv.setStack(4, uiGlint(Items.ENCHANTED_BOOK, "§a§lInteractive Command Hub", "§7Master the CustomBlocks language", "§b• Tip: §7Most commands can be clicked here!"));
+        inv.setStack(4, uiGlint(Items.ENCHANTED_BOOK, "§a§lInteractive Command Hub", 
+            "§7Master the CustomBlocks language", 
+            "§f\"A guide for the master architect\"",
+            "§b• Tip: §7Most commands can be clicked here!"));
 
-        // ── Category: Essentials ───────────────────────────────────────────
+        // ── Category: Creation & Identification ─────────────────────────────
+        inv.setStack(10, uiGlint(Items.WRITABLE_BOOK, "§e§l1. Creation Protocol", "§7How to bring new blocks to life"));
         inv.setStack(19, uiGlint(Items.CRAFTING_TABLE, "§eCreate a Block", "§7/cb create <id> <name> <url>", "§b• Tip: §7Click this to start creation in chat."));
-        inv.setStack(20, uiGlint(Items.NAME_TAG, "§eRename a Block", "§7/cb rename <id> <new name>", "§b• Tip: §7Use underscores _ for spaces."));
-        inv.setStack(21, uiGlint(Items.COMMAND_BLOCK, "§eChange block ID", "§7/cb reid <old_id> <new_id>", "§b• Tip: §7This updates all placements instantly."));
+        inv.setStack(20, uiGlint(Items.NAME_TAG, "§eRename Block", "§7/cb rename <id> <new name>", "§b• Tip: §7Use underscores _ for spaces."));
+        inv.setStack(21, uiGlint(Items.COMMAND_BLOCK, "§eRe-ID Block", "§7/cb reid <old_id> <new_id>", "§b• Tip: §7This updates all placements instantly."));
 
-        // ── Category: Design ───────────────────────────────────────────────
-        inv.setStack(23, uiGlint(Items.MAP, "§bChange Texture", "§7/cb retexture <id> <url>", "§b• Tip: §7Use animated GIFs for moving blocks!"));
-        inv.setStack(24, uiGlint(Items.AMETHYST_SHARD, "§bSet Face texture", "§7/cb setface <id> <face> <url>", "§b• Tip: §7Faces: north, south, east, west, up, down"));
-        inv.setStack(25, uiGlint(Items.STICK, "§bModify Hitbox", "§7/cb addshape <id> <coords>", "§b• Tip: §7Click this to learn about x1 y1 z1 x2 y2 z2"));
+        // ── Category: Design & Animation ───────────────────────────────────
+        inv.setStack(13, uiGlint(Items.PAINTING, "§b§l2. Design & Motion", "§7Aesthetics and temporal flow"));
+        inv.setStack(22, uiGlint(Items.MAP, "§bChange Texture", "§7/cb retexture <id> <url>", "§b• Tip: §7GIFs are automatically animated!"));
+        inv.setStack(23, uiGlint(Items.AMETHYST_SHARD, "§bFace Mapping", "§7/cb setface <id> <face> <url>", "§b• Tip: §7Customize faces: north, south, etc."));
+        inv.setStack(24, uiGlint(Items.CLOCK, "§bAnimation Settings", "§7Access via Design Studio", "§b• Tip: §7Adjust FPS and frame interpolation."));
 
-        // ── Category: Utilities ────────────────────────────────────────────
-        inv.setStack(37, uiGlint(Items.GOLDEN_PICKAXE, "§6Undo Last Action", "§7/cb undo", "§b• Tip: §7Saves up to 20 recent changes."));
-        inv.setStack(38, uiGlint(Items.DIAMOND_PICKAXE, "§6Redo Last Undo", "§7/cb redo", "§b• Tip: §7Restores a change you just undid."));
-        inv.setStack(39, uiGlint(Items.RECOVERY_COMPASS, "§6List Broken Blocks", "§7/cb showbrokenblocks", "§b• Tip: §7Finds missing textures on your server."));
-        inv.setStack(40, uiGlint(Items.REPEATER, "§6Reload Mod", "§7/cb reload", "§b• Tip: §7Force-syncs textures to all players."));
+        // ── Category: Physics & Space ──────────────────────────────────────
+        inv.setStack(16, uiGlint(Items.ENDER_EYE, "§5§l3. Physics & Hitboxes", "§7Shape and physical interaction"));
+        inv.setStack(25, uiGlint(Items.STICK, "§5Modify Hitboxes", "§7/cb addshape <id> <coords>", "§b• Tip: §7Defines where players can walk."));
+        inv.setStack(26, uiGlint(Items.BARRIER, "§5Toggle Collision", "§7/cb sethardness <id> 0", "§b• Tip: §7Make blocks pass-through or solid."));
 
-        inv.setStack(13, ui(Items.BOOK, "§d§lArtist Directive", 
-            "§71. Upload a high-res image URL",
-            "§72. Use §fBlock Design Studio §7to polish",
-            "§73. Add §fPhysics Boxes §7for shape",
-            "§b• Tip: §7The mod handles all technical heavy lifting."));
+        // ── Category: Utilities & Restoration ──────────────────────────────
+        inv.setStack(37, uiGlint(Items.GOLDEN_PICKAXE, "§6Undo Progress", "§7/cb undo", "§b• Tip: §7Restores up to 20 recent steps."));
+        inv.setStack(38, uiGlint(Items.DIAMOND_PICKAXE, "§6Redo Change", "§7/cb redo", "§b• Tip: §7Restores an undone change."));
+        inv.setStack(39, uiGlint(Items.RECOVERY_COMPASS, "§6Integrity Scan", "§7/cb showbrokenblocks", "§b• Tip: §7Lists all blocks with missing textures."));
+        inv.setStack(40, uiGlint(Items.REPEATER, "§6Mod Sync", "§7/cb reload", "§b• Tip: §7Force-syncs data to all players."));
+
+        // ── Decorative Footer ──────────────────────────────────────────────
+        inv.setStack(49, ui(Items.KNOWLEDGE_BOOK, "§a§lThe Architect's Handbook", 
+            "§71. Upload high-res URLs for best quality.",
+            "§72. Use §fDesign Studio §7for fine-tuning.",
+            "§73. Keep your §fUnique IDs §7organized."));
 
         inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Main Menu"));
         return inv;

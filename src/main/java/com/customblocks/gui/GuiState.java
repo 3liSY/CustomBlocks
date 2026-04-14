@@ -79,6 +79,10 @@ public record GuiState(
         return new GuiState(GuiMode.FIND_PORT_GUI, null, 0, false, 0, false);
     }
 
+    public static GuiState resourceCenter() {
+        return new GuiState(GuiMode.RESOURCE_CENTER, null, 0, false, 0, false);
+    }
+
     // ── Mutation (returns new instance) ──────────────────────────────────────
 
     public GuiState withConfirmDelete(boolean confirm) {

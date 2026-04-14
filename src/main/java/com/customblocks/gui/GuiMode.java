@@ -17,5 +17,6 @@ public enum GuiMode {
     SOUND_MENU,
     ANIM_GUI,
     TAB_ICON_MENU,
-    FIND_PORT_GUI
+    FIND_PORT_GUI,
+    RESOURCE_CENTER
 }

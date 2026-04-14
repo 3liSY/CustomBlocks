@@ -32,7 +32,12 @@ import java.util.Queue;
  */
 public final class ImageProcessor {
 
-    private ImageProcessor() {}
+    /**
+     * Container for processed image data and its corresponding Minecraft animation metadata.
+     */
+    public record ProcessResult(byte[] bytes, String mcmeta) {
+        public boolean isAnimated() { return mcmeta != null && !mcmeta.isEmpty(); }
+    }
 
     // TwelveMonkeys auto-registers WebP and other providers at class-load time.
     static {
@@ -59,27 +64,30 @@ public final class ImageProcessor {
     // ── Public API ────────────────────────────────────────────────────────────
 
     /** Full pipeline with custom target size: download → convert → pad → remove bg → resize. */
-    public static byte[] downloadAndProcess(String url, int targetSize) throws IOException, InterruptedException {
+    public static ProcessResult downloadAndProcess(String url, int targetSize) throws IOException, InterruptedException {
         byte[] raw = download(url);
-        // Handle any animated format (GIF, APNG, animated WebP)
-        if (isAnimatedImage(raw)) {
-            GifResult gif = processAnimatedImage(raw, targetSize);
-            if (gif != null) return gif.stripPng;
+        if (raw == null || raw.length == 0) throw new IOException("Downloaded empty data");
+
+        try {
+            // Detect animated format (GIF, APNG, animated WebP)
+            if (isAnimatedImage(raw)) {
+                GifResult gif = processAnimatedImage(raw, targetSize);
+                if (gif != null) return new ProcessResult(gif.stripPng, gif.mcmeta);
+            }
+            
+            byte[] png = toPng(raw);
+            png = padToSquare(png);
+            png = replaceBackground(png);
+            byte[] processed = resizeTo(png, targetSize);
+            return new ProcessResult(processed, null);
+        } catch (Exception e) {
+            CustomBlocksMod.LOGGER.error("[CustomBlocks] Error processing image from " + url, e);
+            throw new IOException("Processing failed: " + e.getMessage());
         }
-        // AVIF detection — not yet supported, give a clear error
-        if (isAvif(raw)) {
-            throw new IOException(
-                "AVIF format is not yet supported. Please convert your AVIF to GIF or APNG first. " +
-                "You can use ezgif.com or ffmpeg: ffmpeg -i input.avif output.gif");
-        }
-        byte[] png = toPng(raw);
-        png = padToSquare(png);
-        png = replaceBackground(png);
-        return resizeTo(png, targetSize);
     }
 
     /** Full pipeline: download → detect GIF → convert → pad to square → remove bg → resize to DEFAULT_SIZE. */
-    public static byte[] downloadAndProcess(String url) throws IOException, InterruptedException {
+    public static ProcessResult downloadAndProcess(String url) throws IOException, InterruptedException {
         return downloadAndProcess(url, DEFAULT_SIZE);
     }
 

@@ -16,46 +16,67 @@ public class ResourcePackServer {
     private static HttpServer server;
     private static byte[] currentPackZip;
     private static String currentHash;
+    private static int activePort = -1;
+    private static String lastError = null;
+
+    public static int activePort() { return activePort; }
 
     public static void start() {
         if (server != null) {
             server.stop(0);
         }
         
-        int port = CustomBlocksConfig.resourcePackPort;
-        if (port <= 0) {
+        int basePort = CustomBlocksConfig.resourcePackPort;
+        if (basePort <= 0) {
             CustomBlocksMod.LOGGER.info("[CustomBlocks] Internal HTTP server is disabled (port <= 0).");
             return;
         }
 
+        // Try base port, then fallbacks
+        int[] portsToTry = {basePort, 8081, 24454, 8082, 3000};
+        boolean started = false;
+        
+        for (int p : portsToTry) {
+            try {
+                server = HttpServer.create(new InetSocketAddress(p), 0);
+                activePort = p;
+                started = true;
+                break;
+            } catch (IOException e) {
+                CustomBlocksMod.LOGGER.warn("[CustomBlocks] Port {} is blocked, trying next...", p);
+                lastError = e.getMessage();
+            }
+        }
+
+        if (!started) {
+            CustomBlocksMod.LOGGER.error("[CustomBlocks] CRITICAL: Could not find any open Communication Door. Texture pipeline is OFFLINE.");
+            return;
+        }
+
         try {
-            server = HttpServer.create(new InetSocketAddress(port), 0);
-            server.createContext("/pack.zip", new HttpHandler() {
-                @Override
-                public void handle(HttpExchange exchange) throws IOException {
-                    if (currentPackZip == null) {
-                        String response = "Pack not ready yet.";
-                        exchange.sendResponseHeaders(404, response.length());
-                        OutputStream os = exchange.getResponseBody();
-                        os.write(response.getBytes());
-                        os.close();
-                        return;
-                    }
-                    exchange.getResponseHeaders().set("Content-Type", "application/zip");
-                    exchange.sendResponseHeaders(200, currentPackZip.length);
-                    OutputStream os = exchange.getResponseBody();
+            server.createContext("/pack.zip", exchange -> {
+                if (currentPackZip == null) {
+                    byte[] msg = "Pipeline warming up...".getBytes();
+                    exchange.sendResponseHeaders(404, msg.length);
+                    exchange.getResponseBody().write(msg);
+                    exchange.getResponseBody().close();
+                    return;
+                }
+                exchange.getResponseHeaders().set("Content-Type", "application/zip");
+                exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
+                exchange.sendResponseHeaders(200, currentPackZip.length);
+                try (OutputStream os = exchange.getResponseBody()) {
                     os.write(currentPackZip);
-                    os.close();
                 }
             });
-            server.setExecutor(null); // creates a default executor
+            server.setExecutor(null);
             server.start();
-            CustomBlocksMod.LOGGER.info("[CustomBlocks] Resource pack server listening on port {}", port);
-            
-            // Build the initial pack
+            lastError = null;
+            CustomBlocksMod.LOGGER.info("[CustomBlocks] Texture Sanctuary is LIVE on port {}", activePort);
             updatePack();
-        } catch (IOException e) {
-            CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to start HTTP server on port " + port, e);
+        } catch (Exception e) {
+            CustomBlocksMod.LOGGER.error("[CustomBlocks] Unexpected error starting pipeline", e);
+            lastError = e.getMessage();
         }
     }
 

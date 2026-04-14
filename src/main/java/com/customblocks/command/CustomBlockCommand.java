@@ -61,18 +61,18 @@ public class CustomBlockCommand {
                             // /cb create <id> <name> <size> <url>  — size first so greedy URL still works
                             .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
                                 .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                                    .executes(ctx -> cmdCreate(ctx.getSource(),
+                                    .executes(ctx -> cmdAdd(ctx.getSource(),
                                         StringArgumentType.getString(ctx, "id"),
                                         StringArgumentType.getString(ctx, "name"),
                                         StringArgumentType.getString(ctx, "url").trim(),
                                         IntegerArgumentType.getInteger(ctx, "size")))))
                             // /cb create <id> <name> <url>  — default 128
                             .then(CommandManager.argument("url", StringArgumentType.greedyString())
-                                .executes(ctx -> cmdCreate(ctx.getSource(),
+                                .executes(ctx -> cmdAdd(ctx.getSource(),
                                     StringArgumentType.getString(ctx, "id"),
                                     StringArgumentType.getString(ctx, "name"),
                                     StringArgumentType.getString(ctx, "url").trim(),
-                                    ImageProcessor.DEFAULT_SIZE))))))
+                                    128))))))
 
                 // ── delete ──────────────────────────────────────────────────
                 .then(CommandManager.literal("delete")
@@ -299,14 +299,14 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("resourcepack")
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
-                        if (p != null) GuiManager.openPortConfigMenu(p);
+                        if (p != null) GuiManager.openResourceCenter(p);
                         else ctx.getSource().sendError(Text.literal("Player only."));
                         return 1;
                     })
                     .then(CommandManager.literal("setport")
                         .executes(ctx -> {
                             ServerPlayerEntity p = ctx.getSource().getPlayer();
-                            if (p != null) GuiManager.openPortConfigMenu(p);
+                            if (p != null) GuiManager.openResourceCenter(p);
                             else ctx.getSource().sendError(Text.literal("Player only."));
                             return 1;
                         })
@@ -315,28 +315,47 @@ public class CustomBlockCommand {
                                 int port = IntegerArgumentType.getInteger(ctx, "port");
                                 CustomBlocksConfig.resourcePackPort = port;
                                 CustomBlocksConfig.save();
+                                com.customblocks.network.ResourcePackServer.stop();
                                 com.customblocks.network.ResourcePackServer.start();
-                                ctx.getSource().sendMessage(Text.literal("§a[CustomBlocks] Server port set to " + port));
+                                ctx.getSource().sendMessage(Text.literal("§a[CustomBlocks] Pipeline door set to " + port));
                                 return 1;
                             })))
                     .then(CommandManager.literal("push")
                         .executes(ctx -> {
                             String hash = com.customblocks.network.ResourcePackServer.getHash();
                             if (hash == null) {
-                                ctx.getSource().sendError(Text.literal("§cPack not built yet."));
+                                ctx.getSource().sendError(Text.literal("§cTexture pipeline is still warming up... try again in a second."));
                                 return 0;
                             }
                             int port = CustomBlocksConfig.resourcePackPort;
-                            String serverIp = ctx.getSource().getServer().getServerIp();
-                            if (serverIp == null || serverIp.isEmpty()) serverIp = "127.0.0.1";
+                            String serverIp = com.customblocks.network.ResourcePackServer.getExternalIp();
                             String url = "http://" + serverIp + ":" + port + "/pack.zip";
-                            
                             for (ServerPlayerEntity p : ctx.getSource().getServer().getPlayerManager().getPlayerList()) {
                                 p.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.common.ResourcePackSendS2CPacket(
-                                    java.util.UUID.randomUUID(), url, hash, true, java.util.Optional.of(Text.literal("Custom Blocks Texture Sync"))
+                                    java.util.UUID.randomUUID(), url, hash, true, java.util.Optional.of(Text.literal("§b§lCustomBlocks §r§7- Downloading latest designs..."))
                                 ));
                             }
-                            ctx.getSource().sendMessage(Text.literal("§a[CustomBlocks] Pushed resource pack to all players!"));
+                            ctx.getSource().sendMessage(Text.literal("§0§l[§b§lCB§0§l] §aTextures pushed to all players! §7(URL: " + url + ")"));
+                            return 1;
+                        })))
+
+                // ── rp (Alias) ────────────────────────────────────────────────
+                .then(CommandManager.literal("rp")
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) GuiManager.openResourceCenter(p);
+                        else ctx.getSource().sendError(Text.literal("Player only."));
+                        return 1;
+                    })
+                    .then(CommandManager.literal("setport")
+                        .executes(ctx -> {
+                            ServerPlayerEntity p = ctx.getSource().getPlayer();
+                            if (p != null) GuiManager.openResourceCenter(p);
+                            return 1;
+                        }))
+                    .then(CommandManager.literal("push")
+                        .executes(ctx -> {
+                            ctx.getSource().getServer().getCommandManager().executeWithPrefix(ctx.getSource(), "cb resourcepack push");
                             return 1;
                         })))
 
@@ -475,8 +494,8 @@ public class CustomBlockCommand {
 
     // ── Implementations ───────────────────────────────────────────────────────
 
-    private static int cmdCreate(ServerCommandSource src, String rawId, String name, String url, int size) {
-        String id = sanitize(rawId);
+    private static int cmdAdd(ServerCommandSource src, String rawId, String name, String url, int size) {
+        final String id = sanitize(rawId);
         if (id.isEmpty()) { ChatHelper.error(src, "Invalid ID."); return 0; }
         if (SlotManager.hasId(id)) { ChatHelper.error(src, "'" + id + "' already exists."); return 0; }
         if (SlotManager.freeSlots() == 0) { ChatHelper.error(src, "All " + CustomBlocksConfig.maxSlots + " slots are full!"); return 0; }
@@ -484,46 +503,30 @@ public class CustomBlockCommand {
         MinecraftServer server = src.getServer();
         thread(() -> {
             try {
-                byte[] raw = ImageProcessor.download(url);
-
-                // Detect animated GIF
-                final ImageProcessor.GifResult gifResult =
-                        ImageProcessor.isAnimatedGif(raw) ? ImageProcessor.processGif(raw, size) : null;
-                if (gifResult != null)
-                    server.execute(() -> src.sendMessage(Text.literal(
-                        "§b[CustomBlocks] Animated GIF detected — " + gifResult.frameCount() + " frames!")));
-
-                byte[] bytes;
-                String animMeta = null;
-                if (gifResult != null) {
-                    bytes = gifResult.stripPng();
-                    animMeta = gifResult.mcmeta();
-                } else {
-                    bytes = ImageProcessor.toPng(raw);
-                    bytes = ImageProcessor.padToSquare(bytes);
-                    bytes = ImageProcessor.replaceBackground(bytes);
-                    bytes = ImageProcessor.resizeTo(bytes, size);
-                }
-
-                final byte[] finalBytes = bytes;
-                final String finalAnim  = animMeta;
+                final ImageProcessor.ProcessResult result = ImageProcessor.downloadAndProcess(url, size);
                 server.execute(() -> {
-                    SlotData d = SlotManager.assign(id, name, finalBytes);
+                    SlotData d = SlotManager.assign(id, name, result.bytes());
                     if (d == null) { src.sendError(Text.literal("§cNo free slots!")); return; }
-                    if (finalAnim != null) SlotManager.setAnimMeta(id, finalAnim);
+                    
+                    if (result.isAnimated()) {
+                        SlotManager.setAnimMeta(id, result.mcmeta());
+                        src.sendMessage(Text.literal("§b[CustomBlocks] Animation metadata generated! §7(Syncing...)"));
+                    }
+
                     UndoManager.pushUndoCreate(id, getPlayerUuid(src));
                     SlotManager.saveAll();
                     NetworkManager.broadcastUpdate(server,
-                        new SlotUpdatePayload("add", d.index, id, name, finalBytes,
-                                d.lightLevel, d.hardness, d.soundType, null, null, finalAnim));
-                        ChatHelper.success(src, "'" + name + "' created! §7(slot " + d.index + ")");
-                    });
-                } catch (Exception e) {
-                    server.execute(() -> {
-                        ChatHelper.error(src, "Failed: " + e.getMessage());
-                        GuiManager.logError();
-                    });
-                }
+                        new SlotUpdatePayload("add", d.index, id, name, result.bytes(),
+                                d.lightLevel, d.hardness, d.soundType, null, null, result.mcmeta()));
+                    
+                    ChatHelper.success(src, "'" + name + "' created! §7(slot " + d.index + ")");
+                });
+            } catch (Exception e) {
+                server.execute(() -> {
+                    ChatHelper.error(src, "Failed: " + e.getMessage());
+                    GuiManager.logError();
+                });
+            }
         });
         return 1;
     }
@@ -878,7 +881,7 @@ public class CustomBlockCommand {
         MinecraftServer server = src.getServer();
         thread(() -> {
             try {
-                byte[] bytes = ImageProcessor.downloadAndProcess(url);
+                byte[] bytes = ImageProcessor.downloadAndProcess(url).bytes();
                 server.execute(() -> {
                     SlotManager.setTabIconTexture(bytes);
                     if (!SlotManager.hasId("tab_icon")) SlotManager.assign("tab_icon", "Tab Icon", bytes);

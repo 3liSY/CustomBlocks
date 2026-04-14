@@ -75,7 +75,7 @@ public class ServerPackGenerator {
                                     StringBuilder sb = new StringBuilder("{\"animation\":{\"interpolate\":true,\"frames\":[");
                                     for (int fi = 0; fi < frames; fi++) {
                                         if (fi > 0) sb.append(",");
-                                        sb.append(fi);
+                                        sb.append("{\"index\":").append(fi).append(",\"time\":5}");
                                     }
                                     sb.append("]}}");
                                     addZipEntry(zos, facePath + ".mcmeta", sb.toString().getBytes(StandardCharsets.UTF_8));

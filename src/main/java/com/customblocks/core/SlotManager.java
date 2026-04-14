@@ -12,6 +12,7 @@ import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Thread-safe slot manager using immutable {@link SlotData} values.
@@ -27,6 +28,7 @@ public final class SlotManager {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("CustomBlocks");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static final java.util.concurrent.ExecutorService IO_EXECUTOR = java.util.concurrent.Executors.newSingleThreadExecutor(r -> new Thread(r, "CustomBlocks-IO"));
 
     private static final String DATA_DIR  = "config/customblocks";
     private static final String DATA_FILE = "slots.json";
@@ -89,6 +91,14 @@ public final class SlotManager {
         return byId.values().stream()
                 .filter(d -> !"tab_icon".equals(d.customId))
                 .sorted(Comparator.comparingInt(d -> d.index))
+                .collect(Collectors.toList());
+    }
+
+    /** @return All slots that are currently considered broken. */
+    public static java.util.List<SlotData> brokenBlocks() {
+        return byId.values().stream()
+                .filter(d -> !"tab_icon".equals(d.customId))
+                .filter(d -> d.isBroken || d.texture == null || d.texture.length <= 4)
                 .collect(Collectors.toList());
     }
 
@@ -247,36 +257,43 @@ public final class SlotManager {
     }
 
     public static void saveAll() {
-        Path dir = Path.of(DATA_DIR);
-        Path file = dir.resolve(DATA_FILE);
-        try {
-            Files.createDirectories(dir);
-            JsonObject root = new JsonObject();
+        saveAllAsync();
+    }
 
-            // Tab icon
-            if (tabIconTexture != null)
-                root.addProperty("tabIconTexture", Base64.getEncoder().encodeToString(tabIconTexture));
+    public static void saveAllAsync() {
+        // Capture a snapshot of the current state immediately
+        List<SlotData> snapshot = new ArrayList<>(byId.values());
+        byte[] icon = tabIconTexture;
 
-            // Slots
-            JsonArray arr = new JsonArray();
-            for (SlotData data : sortedSlots()) {
-                arr.add(serializeSlot(data));
+        IO_EXECUTOR.submit(() -> {
+            Path dir = Path.of(DATA_DIR);
+            Path file = dir.resolve(DATA_FILE);
+            try {
+                Files.createDirectories(dir);
+                JsonObject root = new JsonObject();
+
+                // Tab icon
+                if (icon != null)
+                    root.addProperty("tabIconTexture", Base64.getEncoder().encodeToString(icon));
+
+                // Slots
+                JsonArray arr = new JsonArray();
+                for (SlotData data : snapshot) {
+                    if ("tab_icon".equals(data.customId)) continue;
+                    arr.add(serializeSlot(data));
+                }
+                root.add("slots", arr);
+
+                Path tempFile = dir.resolve(DATA_FILE + ".tmp");
+                Files.writeString(tempFile, GSON.toJson(root), StandardCharsets.UTF_8);
+                Files.move(tempFile, file, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+
+                ResourcePackServer.updatePack();
+                // Optional: LOGGER.debug("[CustomBlocks] Async save complete.");
+            } catch (Exception e) {
+                LOGGER.error("[CustomBlocks] Failed to save slot data asynchronously", e);
             }
-            // Include tab_icon if present
-            SlotData tabData = byId.get("tab_icon");
-            if (tabData != null) arr.add(serializeSlot(tabData));
-
-            root.add("slots", arr);
-            
-            Path tempFile = dir.resolve(DATA_FILE + ".tmp");
-            Files.writeString(tempFile, GSON.toJson(root), StandardCharsets.UTF_8);
-            Files.move(tempFile, file, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            
-            ResourcePackServer.updatePack();
-        } catch (Exception e) {
-            LOGGER.error("[CustomBlocks] Failed to save slot data", e);
-            com.customblocks.gui.GuiManager.logError();
-        }
+        });
     }
 
     /** Client-side: save to the .minecraft directory. */

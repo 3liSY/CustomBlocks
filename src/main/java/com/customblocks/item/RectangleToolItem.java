@@ -59,6 +59,14 @@ public class RectangleToolItem extends Item {
     @Override
     public boolean hasGlint(ItemStack stack){ return true; }
 
+    @Override
+    public void inventoryTick(ItemStack stack, World world, net.minecraft.entity.Entity entity, int slot, boolean selected) {
+        if (selected && !world.isClient && world.getTime() % 10 == 0 && world instanceof ServerWorld sw) {
+            sw.spawnParticles(net.minecraft.particle.ParticleTypes.SOUL_FIRE_FLAME, entity.getX(), entity.getY() + 1.2, entity.getZ(), 1, 0.1, 0.1, 0.1, 0.02);
+            sw.spawnParticles(net.minecraft.particle.ParticleTypes.GLOW, entity.getX(), entity.getY() + 1.2, entity.getZ(), 1, 0.2, 0.2, 0.2, 0.01);
+        }
+    }
+
     // ── Right-click logic ─────────────────────────────────────────────────────
 
     @Override
