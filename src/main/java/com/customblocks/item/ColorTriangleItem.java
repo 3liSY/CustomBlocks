@@ -17,6 +17,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.world.World;
 
 import javax.imageio.ImageIO;
@@ -72,6 +73,7 @@ public class ColorTriangleItem extends Item {
         if (player != null && !player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
             player.sendMessage(
                 Text.literal("§c[CustomBlocks] You need OP to use colour triangles."), true);
+            if (world instanceof ServerWorld sw) sw.playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
             return ActionResult.FAIL;
         }
 
@@ -79,9 +81,11 @@ public class ColorTriangleItem extends Item {
         if (source == null) return ActionResult.PASS;
 
         if (source.texture == null || source.texture.length == 0) {
-            if (player != null)
+            if (player != null) {
                 player.sendMessage(
                     Text.literal("§c[CustomBlocks] This block has no texture."), true);
+                if (world instanceof ServerWorld sw) sw.playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
+            }
             return ActionResult.FAIL;
         }
 
@@ -107,6 +111,10 @@ public class ColorTriangleItem extends Item {
                 player.sendMessage(
                     Text.literal("§a[CustomBlocks] Given §f" + existing.displayName
                         + "§a (variant already existed)."), true);
+                if (world instanceof ServerWorld sw) {
+                    sw.spawnParticles(net.minecraft.particle.ParticleTypes.GLOW, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 5, 0.2, 0.2, 0.2, 0.05);
+                    sw.playSound(null, pos, net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, net.minecraft.sound.SoundCategory.PLAYERS, 0.8f, 1.2f);
+                }
             }
             return ActionResult.SUCCESS;
         }
@@ -161,6 +169,10 @@ public class ColorTriangleItem extends Item {
                         fp.sendMessage(
                             Text.literal("§a[CustomBlocks] Created §f" + newName
                                 + " §aand added it to your inventory!"), true);
+                        
+                        ServerWorld sw = (ServerWorld) world;
+                        sw.spawnParticles(net.minecraft.particle.ParticleTypes.END_ROD, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 15, 0.3, 0.3, 0.3, 0.1);
+                        sw.playSound(null, pos, net.minecraft.sound.SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, net.minecraft.sound.SoundCategory.PLAYERS, 1f, 1f);
                     }
                 });
             } catch (Exception e) {

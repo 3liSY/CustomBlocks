@@ -91,4 +91,32 @@ public class ResourcePackServer {
     public static String getHash() {
         return currentHash;
     }
+
+    public static boolean isRunning() {
+        return server != null;
+    }
+
+    public static int getPort() {
+        return CustomBlocksConfig.resourcePackPort;
+    }
+
+    /**
+     * Fetches the server's external IP address from a public service.
+     * Returns "127.0.0.1" if offline or if the lookup fails.
+     */
+    public static String getExternalIp() {
+        try {
+            java.net.URL url = new java.net.URL("https://checkip.amazonaws.com");
+            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(3000);
+            conn.setReadTimeout(3000);
+            try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(conn.getInputStream()))) {
+                String ip = reader.readLine();
+                return (ip != null && !ip.isBlank()) ? ip.trim() : "127.0.0.1";
+            }
+        } catch (Exception e) {
+            return "127.0.0.1";
+        }
+    }
 }

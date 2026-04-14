@@ -13,6 +13,7 @@ import net.minecraft.item.ItemUsageContext;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.world.World;
 
 /**
@@ -65,6 +66,7 @@ public class ColorSquareItem extends Item {
         if (player != null && !player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
             player.sendMessage(
                 Text.literal("§c[CustomBlocks] You need OP to use colour squares."), true);
+            if (world instanceof ServerWorld sw) sw.playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
             return ActionResult.FAIL;
         }
 
@@ -87,11 +89,13 @@ public class ColorSquareItem extends Item {
         }
 
         if (colorIdx < 0) {
-            if (player != null)
+            if (player != null) {
                 player.sendMessage(Text.literal(
                     "§c[CustomBlocks] No colour segment found in \"§f" + current.customId
                     + "§c\". The colour word (black/yellow/green) must be its own underscore-"
                     + "separated token, e.g. §fblock_black§c or §fblack_block§c."), true);
+                if (world instanceof ServerWorld sw) sw.playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
+            }
             return ActionResult.FAIL;
         }
 
@@ -101,9 +105,11 @@ public class ColorSquareItem extends Item {
 
         // Already this colour?
         if (targetId.equals(current.customId)) {
-            if (player != null)
+            if (player != null) {
                 player.sendMessage(
                     Text.literal("§7[CustomBlocks] Already §f" + colorName + "§7."), true);
+                if (world instanceof ServerWorld sw) sw.playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_CHIME.value(), net.minecraft.sound.SoundCategory.PLAYERS, 0.5f, 1.2f);
+            }
             return ActionResult.SUCCESS;
         }
 
@@ -120,9 +126,15 @@ public class ColorSquareItem extends Item {
         // Swap block in world — flag 3 = update neighbours + notify clients
         world.setBlockState(pos, CustomBlocksMod.SLOT_BLOCKS[target.index].getDefaultState(), 3);
 
-        if (player != null)
+        if (player != null) {
             player.sendMessage(
                 Text.literal("§a[CustomBlocks] Swapped to §f" + target.displayName + "§a!"), true);
+            
+            if (world instanceof ServerWorld sw) {
+                sw.spawnParticles(net.minecraft.particle.ParticleTypes.END_ROD, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 10, 0.2, 0.2, 0.2, 0.05);
+                sw.playSound(null, pos, net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, net.minecraft.sound.SoundCategory.PLAYERS, 0.8f, 1.1f);
+            }
+        }
 
         return ActionResult.SUCCESS;
     }

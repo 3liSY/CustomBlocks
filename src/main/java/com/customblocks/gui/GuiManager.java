@@ -76,6 +76,9 @@ public class GuiManager {
     private static final float[] HARD_CYCLE      = { -1f, 0f, 0.5f, 1.5f, 3f, 5f, 10f, 50f };
     private static final int     BLOCKS_PER_PAGE = 18;
     private static final String[] PRESET_NAMES   = {"full","slab","thin","carpet","pillar","small","micro","pane","trapdoor","fence","stairs","cross"};
+    
+    private static int errorCount = 0;
+    public static void logError() { errorCount++; }
 
     // ── Screen open helpers ──────────────────────────────────────────────────
 
@@ -207,7 +210,7 @@ public class GuiManager {
         pushBackStack(player.getUuid());
         STATES.put(player.getUuid(), GuiState.maintenance());
         openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildMaintenanceMenu()),
+            (s, pi, p) -> new CbScreenHandler(s, pi, buildMaintenanceMenu(player)),
             Text.literal("§b§l✦ §r§fServer Maintenance §7(ESC = back)")));
     }
 
@@ -273,7 +276,7 @@ public class GuiManager {
         final int fp = page;
         openScreen(player, new SimpleNamedScreenHandlerFactory(
             (s, pi, p) -> new CbScreenHandler(s, pi, buildPicker(fp, true)),
-            Text.literal("§c§l▶ §r§fBroken Blocks §7(ESC = back)")));
+            Text.literal("§6§l✦ §r§fIntegrity Scanner §7(ESC = back)")));
     }
 
     public static List<SlotData> brokenBlocks() {
@@ -831,6 +834,29 @@ public class GuiManager {
         else if(slot == 12) openBrokenBlocks(player, 0);
         else if(slot == 14) openPortConfigMenu(player);
         else if(slot == 16) { player.closeHandledScreen(); player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb export"); }
+        else if(slot == 22) {
+            // Friend Test — fetch external IP and display shareable URL
+            if (!com.customblocks.network.ResourcePackServer.isRunning()) {
+                ChatHelper.error(player, "HTTP server is not running. Set a port > 0 first.");
+                return;
+            }
+            ChatHelper.info(player, "Detecting your public IP address…");
+            MinecraftServer srv = player.getServer();
+            EXECUTOR.submit(() -> {
+                String ip = com.customblocks.network.ResourcePackServer.getExternalIp();
+                int port = com.customblocks.network.ResourcePackServer.getPort();
+                String url = "http://" + ip + ":" + port + "/pack.zip";
+                srv.execute(() -> {
+                    ChatHelper.success(player, "Your shareable pack URL:");
+                    player.sendMessage(net.minecraft.text.Text.literal("§b§n" + url), false);
+                    if ("127.0.0.1".equals(ip)) {
+                        ChatHelper.warn(player, "Could not detect public IP — ensure port " + port + " is forwarded!");
+                    } else {
+                        ChatHelper.success(player, "Friends can connect if port §f" + port + "§a is forwarded on your router.");
+                    }
+                });
+            });
+        }
     }
 
     private static void handleHelpClick(ServerPlayerEntity player, GuiState state, int slot) {
@@ -1028,7 +1054,7 @@ public class GuiManager {
             if (i > 0) sb.append(",");
             sb.append("{\"index\":").append(i).append(",\"time\":").append(tickTime).append("}");
         }
-        sb.append("]}}");;
+        sb.append("]}}");
         String newMeta = sb.toString();
         UndoManager.pushUndoMutation(id, SlotManager.getById(id), "animsettings", player.getUuid());
         SlotManager.setAnimMeta(id, newMeta);
@@ -1086,15 +1112,65 @@ public class GuiManager {
         return inv;
     }
 
-    private static SimpleInventory buildMaintenanceMenu() {
+    private static SimpleInventory buildMaintenanceMenu(ServerPlayerEntity player) {
         SimpleInventory inv = new SimpleInventory(27);
         for(int i = 0; i < 27; i++) inv.setStack(i, glass());
         inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Main Menu", "§8(or press ESC)"));
-        
+
+        MinecraftServer server = player.getServer();
+        long maxMem = Runtime.getRuntime().maxMemory() / 1024 / 1024;
+        long usedMem = (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024 / 1024;
+        double mspt = server == null ? 0 : server.getAverageTickTime();
+        double tps = server == null ? 20.0 : Math.min(20.0, 1000.0 / Math.max(0.1, mspt));
+        int players = server == null ? 0 : server.getPlayerManager().getCurrentPlayerCount();
+
+        // ── Row 1: The Status Dashboard ──────────────────────────────────────
+        inv.setStack(3, uiGlint(Items.CLOCK, "§b§lServer Performance",
+            "§7Avg Tick: §f" + String.format("%.1f", mspt) + "ms",
+            "§7TPS: §a" + String.format("%.1f", tps) + " §2/ 20.0"));
+
+        inv.setStack(4, uiGlint(Items.KNOWLEDGE_BOOK, "§d§lMemory Usage",
+            "§7Used: §f" + usedMem + "MB",
+            "§7Limit: §7" + maxMem + "MB"));
+
+        inv.setStack(5, uiGlint(Items.PLAYER_HEAD, "§e§lActive Connections",
+            "§7Players: §f" + players + " §7Online"));
+
+        String errColor = errorCount > 0 ? "§c" : "§a";
+        inv.setStack(6, errorCount > 0 
+            ? uiGlint(Items.OBSERVER, "§6§lInternal Error Meter", errColor + "Errors Caught: §l" + errorCount, "§7Diagnostic monitoring active.")
+            : ui(Items.OBSERVER, "§6§lInternal Error Meter", "§aNo errors detected.", "§7System integrity is §lOPTIMAL§7."));
+
+        // ── Row 2: Tools ──────────────────────────────────────────────────────
         inv.setStack(10, uiGlint(Items.PAINTING, "§a§lTab Icon Settings", "§7Change dynamic creative tab icon"));
-        inv.setStack(12, uiGlint(Items.ANVIL, "§c§lBroken Blocks Cache", "§7Find and fix broken textures"));
-        inv.setStack(14, uiGlint(Items.REDSTONE_TORCH, "§6§lResource Pack Host Config", "§7Change embedded web server port"));
+        inv.setStack(12, uiGlint(Items.DAMAGED_ANVIL, "§c§lIntegrity Scanner", "§7Analyze and fix §6Broken Blocks §7in real-time."));
+        inv.setStack(14, uiGlint(Items.BEACON, "§6§lResource Pack Host Config", "§7Change embedded web server port"));
         inv.setStack(16, uiGlint(Items.PAPER, "§f§lExport Data", "§7Export JSON block structure data"));
+
+        // ── Row 3: Status & Friend Test ──────────────────────────────────────
+        int used = SlotManager.usedSlots();
+        int total = com.customblocks.CustomBlocksConfig.maxSlots;
+        inv.setStack(20, ui(Items.CHEST, "§e§lSlot Usage",
+            "§7Used: §f" + used + " §7/ §f" + total,
+            "§7Free: §a" + (total - used)));
+
+        boolean httpUp = com.customblocks.network.ResourcePackServer.isRunning();
+        int port = com.customblocks.network.ResourcePackServer.getPort();
+        if (httpUp) {
+            inv.setStack(22, uiGlint(Items.ENDER_EYE, "§a§l✔ Friend Test — Server ONLINE",
+                "§7HTTP Pack Server: §aRunning §7on port §f" + port,
+                "§7Hash: §8" + (com.customblocks.network.ResourcePackServer.getHash() != null ? com.customblocks.network.ResourcePackServer.getHash().substring(0, 8) + "…" : "building…"),
+                "§e§oClick to fetch your shareable URL!"));
+        } else {
+            inv.setStack(22, ui(Items.BARRIER, "§c§l✖ Friend Test — Server OFFLINE",
+                "§7HTTP Pack Server: §cNot Running",
+                "§7Port: §f" + port + (port <= 0 ? " §c(disabled)" : ""),
+                "§8Set port > 0 in config to enable."));
+        }
+
+        inv.setStack(24, ui(Items.SPYGLASS, "§b§lMod Version",
+            "§7CustomBlocks §fv1.0.0",
+            "§7Fabric §f1.21.1"));
 
         return inv;
     }
@@ -1149,13 +1225,13 @@ public class GuiManager {
         )));
         inv.setStack(4, disp);
         
-        inv.setStack(10, ui(Items.RED_DYE,"§c◀ Light -1","§7Now: §e"+d.lightLevel));
-        inv.setStack(11, uiGlint(Items.GLOWSTONE_DUST,"§e✦ Light: §f"+d.lightLevel,"§70=off • 7=torch • 14=sea lantern • 15=max"));
-        inv.setStack(12, ui(Items.YELLOW_DYE,"§a▶ Light +1","§7Now: §e"+d.lightLevel));
+        inv.setStack(10, ui(Items.QUARTZ,"§c◀ Light -1","§7Now: §e"+d.lightLevel));
+        inv.setStack(11, uiGlint(Items.AMETHYST_CLUSTER,"§e✦ Light: §f"+d.lightLevel,"§70=off • 7=torch • 14=sea lantern • 15=max"));
+        inv.setStack(12, ui(Items.GLOWSTONE_DUST,"§a▶ Light +1","§7Now: §e"+d.lightLevel));
         
-        inv.setStack(14, ui(Items.RED_DYE,"§c◀ Hardness -","§7Now: §f"+hardnessLabel(d.hardness)));
-        inv.setStack(15, ui(Items.IRON_PICKAXE,"§b⚙ Hardness: §f"+hardnessLabel(d.hardness),"§7-1=Unbreakable • 0=Instant • 1.5=Default"));
-        inv.setStack(16, ui(Items.LIME_DYE,"§a▶ Hardness +","§7Now: §f"+hardnessLabel(d.hardness)));
+        inv.setStack(14, ui(Items.FLINT,"§c◀ Hardness -","§7Now: §f"+hardnessLabel(d.hardness)));
+        inv.setStack(15, uiGlint(Items.NETHERITE_INGOT,"§b⚙ Hardness: §f"+hardnessLabel(d.hardness),"§7-1=Unbreakable • 0=Instant • 1.5=Default"));
+        inv.setStack(16, ui(Items.NETHERITE_SCRAP,"§a▶ Hardness +","§7Now: §f"+hardnessLabel(d.hardness)));
 
         inv.setStack(22, d.noCollision
             ? uiGlint(Items.BARRIER,"§c⊘ Collision: §lOFF","§7Block has NO hitbox","§8Click to ENABLE collision")
@@ -1432,7 +1508,7 @@ public class GuiManager {
     private static String hardnessLabel(float h) { if(h<0)return "∞ Unbreakable"; if(h==0)return "0 (Instant)"; return String.valueOf(h); }
     private static String faceStatus(SlotData d, String f) { return d.faceTextures.containsKey(f)?"§aOverride ACTIVE — click to clear":"§8No override set"; }
     private static boolean isUrl(String s)       { return s.startsWith("http://")||s.startsWith("https://"); }
-    private static void send(ServerPlayerEntity p,String m) { p.sendMessage(Text.literal(m),false); }
+    private static void send(ServerPlayerEntity p, String m) { ChatHelper.info(p, m); }
     private static void thread(ServerPlayerEntity p, Runnable r) { EXECUTOR.submit(r); }
 
     private static ItemStack soundItem(SlotData d, String sound, Item item, String label) {

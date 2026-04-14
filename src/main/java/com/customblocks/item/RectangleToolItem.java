@@ -105,6 +105,11 @@ public class RectangleToolItem extends Item {
             "§7  §aShift+click §7= high quality (256px)   §8current: §f" + size + "px"), false);
         player.sendMessage(Text.literal("§7Type §ccancel §7to abort."), false);
 
+        if (world instanceof ServerWorld sw) {
+            sw.spawnParticles(net.minecraft.particle.ParticleTypes.GLOW, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 10, 0.2, 0.2, 0.2, 0.05);
+            sw.playSound(null, pos, net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, net.minecraft.sound.SoundCategory.PLAYERS, 1f, 1.2f);
+        }
+
         return ActionResult.SUCCESS;
     }
 
@@ -120,6 +125,7 @@ public class RectangleToolItem extends Item {
 
         if (trimmed.equalsIgnoreCase("cancel")) {
             player.sendMessage(Text.literal("§7[CustomBlocks] Face-paint cancelled."), false);
+            player.getServerWorld().playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
             return true;
         }
 
@@ -224,6 +230,9 @@ public class RectangleToolItem extends Item {
                     player.sendMessage(Text.literal(
                         "§a[CustomBlocks] Created variant §f'" + variantId + "'§a! " +
                         "§7(slot #" + newBlock.index + ") — original untouched."), false);
+                    
+                    world.spawnParticles(net.minecraft.particle.ParticleTypes.END_ROD, session.pos().getX() + 0.5, session.pos().getY() + 0.5, session.pos().getZ() + 0.5, 20, 0.3, 0.3, 0.3, 0.1);
+                    world.playSound(null, session.pos(), net.minecraft.sound.SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, net.minecraft.sound.SoundCategory.PLAYERS, 1f, 1f);
                 });
 
             } catch (Exception e) {

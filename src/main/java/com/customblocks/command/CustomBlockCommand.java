@@ -11,6 +11,7 @@ import com.customblocks.network.NetworkManager;
 import com.customblocks.command.PermissionHelper;
 import com.customblocks.block.SlotBlock;
 import com.customblocks.network.SlotUpdatePayload;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -23,6 +24,7 @@ import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
+import com.customblocks.gui.ChatHelper;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -49,7 +51,7 @@ public class CustomBlockCommand {
 
     public static void register() {
         CommandRegistrationCallback.EVENT.register((dispatcher, reg, env) -> {
-            var tree = CommandManager.literal("customblock")
+            LiteralArgumentBuilder<ServerCommandSource> tree = CommandManager.literal("customblock")
                 .requires(src -> PermissionHelper.canUse(src))
 
                 // ── create / createurl ──────────────────────────────────────
@@ -289,6 +291,10 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("gui")
                     .executes(ctx -> cmdGui(ctx.getSource())))
 
+                // ── admingui (legacy redirect) ───────────────────────────────
+                .then(CommandManager.literal("admingui")
+                    .executes(ctx -> cmdGui(ctx.getSource())))
+
                 // ── reload ───────────────────────────────────────────────────
                 .then(CommandManager.literal("reload")
                     .executes(ctx -> cmdReload(ctx.getSource())))
@@ -475,10 +481,10 @@ public class CustomBlockCommand {
 
     private static int cmdCreate(ServerCommandSource src, String rawId, String name, String url, int size) {
         String id = sanitize(rawId);
-        if (id.isEmpty()) { src.sendError(Text.literal("§cInvalid ID.")); return 0; }
-        if (SlotManager.hasId(id)) { src.sendError(Text.literal("§c'" + id + "' already exists.")); return 0; }
-        if (SlotManager.freeSlots() == 0) { src.sendError(Text.literal("§cAll " + CustomBlocksConfig.maxSlots + " slots are full!")); return 0; }
-        src.sendMessage(Text.literal("§e[CustomBlocks] Downloading... §7(" + size + "px)"));
+        if (id.isEmpty()) { ChatHelper.error(src, "Invalid ID."); return 0; }
+        if (SlotManager.hasId(id)) { ChatHelper.error(src, "'" + id + "' already exists."); return 0; }
+        if (SlotManager.freeSlots() == 0) { ChatHelper.error(src, "All " + CustomBlocksConfig.maxSlots + " slots are full!"); return 0; }
+        ChatHelper.info(src, "Downloading... §7(" + size + "px)");
         MinecraftServer server = src.getServer();
         thread(() -> {
             try {
@@ -514,11 +520,14 @@ public class CustomBlockCommand {
                     NetworkManager.broadcastUpdate(server,
                         new SlotUpdatePayload("add", d.index, id, name, finalBytes,
                                 d.lightLevel, d.hardness, d.soundType, null, null, finalAnim));
-                    src.sendMessage(Text.literal("§a[CustomBlocks] '" + name + "' created! §7(slot " + d.index + ")"));
-                });
-            } catch (Exception e) {
-                server.execute(() -> src.sendError(Text.literal("§c[CustomBlocks] Failed: " + e.getMessage())));
-            }
+                        ChatHelper.success(src, "'" + name + "' created! §7(slot " + d.index + ")");
+                    });
+                } catch (Exception e) {
+                    server.execute(() -> {
+                        ChatHelper.error(src, "Failed: " + e.getMessage());
+                        GuiManager.logError();
+                    });
+                }
         });
         return 1;
     }
@@ -526,10 +535,10 @@ public class CustomBlockCommand {
     private static int cmdDupe(ServerCommandSource src, String rawSourceId, String rawNewId, String newName) {
         String sourceId = sanitize(rawSourceId);
         String newId    = sanitize(rawNewId);
-        if (!SlotManager.hasId(sourceId)) { src.sendError(notFound(sourceId)); return 0; }
-        if (newId.isEmpty())              { src.sendError(Text.literal("§cInvalid new ID.")); return 0; }
-        if (SlotManager.hasId(newId))     { src.sendError(Text.literal("§c'" + newId + "' already exists.")); return 0; }
-        if (SlotManager.freeSlots() == 0) { src.sendError(Text.literal("§cAll " + CustomBlocksConfig.maxSlots + " slots are full!")); return 0; }
+        if (!SlotManager.hasId(sourceId)) { src.sendMessage(notFound(sourceId)); return 0; }
+        if (newId.isEmpty())              { ChatHelper.error(src, "Invalid new ID."); return 0; }
+        if (SlotManager.hasId(newId))     { ChatHelper.error(src, "'" + newId + "' already exists."); return 0; }
+        if (SlotManager.freeSlots() == 0) { ChatHelper.error(src, "All " + CustomBlocksConfig.maxSlots + " slots are full!"); return 0; }
 
         SlotData s = SlotManager.getById(sourceId);
         String finalName = (newName != null && !newName.isBlank()) ? newName : s.displayName + " (Copy)";
@@ -564,7 +573,7 @@ public class CustomBlockCommand {
         SlotManager.saveAll();
         NetworkManager.broadcastUpdate(src.getServer(),
             new SlotUpdatePayload("remove", d.index, id, null, null, 0, 0, "stone"));
-        src.sendMessage(Text.literal("§a[CustomBlocks] '" + id + "' deleted."));
+        ChatHelper.success(src, "'" + id + "' deleted.");
         return 1;
     }
 
@@ -592,25 +601,25 @@ public class CustomBlockCommand {
     }
 
     private static int cmdRename(ServerCommandSource src, String id, String newName) {
-        if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
+        if (!SlotManager.hasId(id)) { src.sendMessage(notFound(id)); return 0; }
         SlotData d = SlotManager.getById(id);
         UndoManager.pushUndoMutation(id, d, "rename", getPlayerUuid(src));
         SlotManager.rename(id, newName);
         SlotManager.saveAll();
         NetworkManager.broadcastUpdate(src.getServer(),
             new SlotUpdatePayload("rename", d.index, id, newName, null, 0, 0, "stone"));
-        src.sendMessage(Text.literal("§a[CustomBlocks] Renamed to '" + newName + "'."));
+        ChatHelper.success(src, "Renamed to '§f" + newName + "§a'.");
         return 1;
     }
 
     private static int cmdReId(ServerCommandSource src, String oldId, String newId) {
-        if (!SlotManager.hasId(oldId)) { src.sendError(notFound(oldId)); return 0; }
+        if (!SlotManager.hasId(oldId)) { src.sendMessage(notFound(oldId)); return 0; }
         if (SlotManager.hasId(newId)) {
-            src.sendError(Text.literal("§c[CustomBlocks] ID '" + newId + "' is already taken."));
+            ChatHelper.error(src, "ID '" + newId + "' is already taken.");
             return 0;
         }
         if (!newId.matches("[a-z0-9_\\-]+")) {
-            src.sendError(Text.literal("§c[CustomBlocks] ID must be lowercase letters, numbers, _ or - only."));
+            ChatHelper.error(src, "ID must be lowercase letters, numbers, _ or - only.");
             return 0;
         }
         SlotData d = SlotManager.getById(oldId);
@@ -624,7 +633,7 @@ public class CustomBlockCommand {
         NetworkManager.broadcastUpdate(src.getServer(),
             new SlotUpdatePayload("add", updated.index, newId, updated.displayName, updated.texture,
                 updated.lightLevel, updated.hardness, updated.soundType, null, null, updated.animMeta));
-        src.sendMessage(Text.literal("§a[CustomBlocks] Re-ID'd §f'" + oldId + "' §a→ §f'" + newId + "'."));
+        ChatHelper.success(src, "Re-ID'd §f'" + oldId + "' §a→ §f'" + newId + "'.");
         return 1;
     }
 
@@ -758,8 +767,8 @@ public class CustomBlockCommand {
     }
 
     private static int cmdRetexture(ServerCommandSource src, String id, String url, int size) {
-        if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
-        src.sendMessage(Text.literal("§e[CustomBlocks] Downloading texture... §7(" + size + "px)"));
+        if (!SlotManager.hasId(id)) { src.sendMessage(notFound(id)); return 0; }
+        ChatHelper.info(src, "Downloading texture... §7(" + size + "px)");
         MinecraftServer server = src.getServer();
         thread(() -> {
             try {
@@ -779,17 +788,20 @@ public class CustomBlockCommand {
                 server.execute(() -> {
                     SlotData d = SlotManager.getById(id);
         UndoManager.pushUndoMutation(id, d, "retexture", getPlayerUuid(src));
-                    if (d == null) { src.sendError(notFound(id)); return; }
+                    if (d == null) { src.sendMessage(notFound(id)); return; }
                     SlotManager.updateTexture(id, fb);
                     if (fa != null) SlotManager.setAnimMeta(id, fa);
                     SlotManager.saveAll();
                     NetworkManager.broadcastUpdate(server,
                         new SlotUpdatePayload("retexture", d.index, id, null, fb,
                                 d.lightLevel, d.hardness, d.soundType, null, null, fa));
-                    src.sendMessage(Text.literal("§a[CustomBlocks] Texture updated for '" + id + "'."));
+                    ChatHelper.success(src, "Texture updated for '§f" + id + "§a'.");
                 });
             } catch (Exception e) {
-                server.execute(() -> src.sendError(Text.literal("§c[CustomBlocks] Failed: " + e.getMessage())));
+                server.execute(() -> {
+                    ChatHelper.error(src, "Failed: " + e.getMessage());
+                    GuiManager.logError();
+                });
             }
         });
         return 1;
@@ -797,21 +809,29 @@ public class CustomBlockCommand {
 
     private static int cmdGive(ServerCommandSource src, String id, int amount, Collection<ServerPlayerEntity> targets) {
         SlotData d = SlotManager.getById(id);
-        if (d == null) { src.sendError(notFound(id)); return 0; }
-        SlotBlock.SlotItem item = CustomBlocksMod.safeSlotItem(d.index); if (item == null) { src.sendError(Text.literal("§cSlot item missing for index " + d.index)); return 0; }
+        if (d == null) { src.sendMessage(notFound(id)); return 0; }
+        SlotBlock.SlotItem item = CustomBlocksMod.safeSlotItem(d.index); 
+        if (item == null) { 
+            ChatHelper.error(src, "Slot item missing for index " + d.index); 
+            GuiManager.logError();
+            return 0; 
+        }
         ItemStack stack = new ItemStack(item, Math.max(1, Math.min(64, amount)));
         if (targets == null || targets.isEmpty()) {
             try {
                 ServerPlayerEntity self = src.getPlayerOrThrow();
                 self.getInventory().insertStack(stack.copy());
-                src.sendMessage(Text.literal("§a[CustomBlocks] Given " + amount + "x '" + d.displayName + "' to you."));
-            } catch (Exception ex) { src.sendError(Text.literal("§cRun as a player or specify a target.")); }
+                ChatHelper.success(src, "Given " + amount + "x '§f" + d.displayName + "§a' to you.");
+            } catch (Exception ex) { 
+                ChatHelper.error(src, "Run as a player or specify a target."); 
+                GuiManager.logError();
+            }
         } else {
             for (ServerPlayerEntity p : targets) {
                 p.getInventory().insertStack(stack.copy());
-                p.sendMessage(Text.literal("§a[CustomBlocks] You received " + amount + "x '" + d.displayName + "'."));
+                ChatHelper.success(p, "You received " + amount + "x '§f" + d.displayName + "§a'.");
             }
-            src.sendMessage(Text.literal("§a[CustomBlocks] Gave " + amount + "x to " + targets.size() + " player(s)."));
+            ChatHelper.success(src, "Gave " + amount + "x to " + targets.size() + " player(s).");
         }
         return 1;
     }
@@ -1293,7 +1313,7 @@ public class CustomBlockCommand {
         final String D = "§8§m                                              §r";
         int used = SlotManager.usedSlots(), free = SlotManager.freeSlots();
         src.sendMessage(Text.literal(" "));
-        src.sendMessage(Text.literal("  §6§l✦ CustomBlocks §r§8│ §7" + used + " blocks  §8│  §7" + free + " free  §8│  §7" + CustomBlocksConfig.maxSlots + " total"));
+        ChatHelper.info(src, "§6§lCustomBlocks §r§8│ §7" + used + " blocks  §8│  §7" + free + " free");
         src.sendMessage(Text.literal(D));
         if (used == 0) {
             src.sendMessage(Text.literal("  §7No blocks yet. Use §b/cb create§7 to add one."));
@@ -1336,7 +1356,7 @@ public class CustomBlockCommand {
         final String A = "§f";     // arg colour
 
         src.sendMessage(Text.literal(" "));
-        src.sendMessage(Text.literal("  §6§l✦ CustomBlocks  §r§8│ §7/cb or /customblock  §8│ §71.0"));
+        ChatHelper.info(src, "§6§lCustomBlocks  §r§8│ §7/cb or /customblock  §8│ §71.0");
         src.sendMessage(Text.literal(D));
 
         src.sendMessage(Text.literal(H + "  Blocks"));
@@ -1445,7 +1465,7 @@ public class CustomBlockCommand {
     private static int cmdReload(ServerCommandSource src) {
         SlotManager.loadAll();
         CustomBlocksMod.broadcastFullSync(src.getServer());
-        src.sendMessage(Text.literal("§a[CustomBlocks] Reloaded all blocks and synced to all players."));
+        ChatHelper.success(src, "Reloaded all blocks and synced to all players.");
         return 1;
     }
 
@@ -1453,7 +1473,11 @@ public class CustomBlockCommand {
         try {
             ServerPlayerEntity player = src.getPlayerOrThrow();
             GuiManager.openEditorPicker(player);
-        } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); }
+        } catch (Exception ex) { 
+            ex.printStackTrace(); 
+            com.customblocks.gui.GuiManager.logError();
+            src.sendError(Text.literal("§0§l[§b§lCB§0§l] §cError: " + ex.getMessage())); 
+        }
         return 1;
     }
 
@@ -1461,7 +1485,11 @@ public class CustomBlockCommand {
         try {
             ServerPlayerEntity player = src.getPlayerOrThrow();
             GuiManager.openMain(player, 0);
-        } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); }
+        } catch (Exception ex) { 
+            ex.printStackTrace(); 
+            com.customblocks.gui.GuiManager.logError();
+            src.sendError(Text.literal("§0§l[§b§lCB§0§l] §cError: " + ex.getMessage())); 
+        }
         return 1;
     }
 
@@ -1470,47 +1498,52 @@ public class CustomBlockCommand {
         try {
             ServerPlayerEntity player = src.getPlayerOrThrow();
             GuiManager.openEditor(player, id, 0, true);  // fromCommand = true → 1-press ESC exits
-        } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); }
+        } catch (Exception ex) { 
+            ex.printStackTrace(); 
+            com.customblocks.gui.GuiManager.logError();
+            src.sendError(Text.literal("§0§l[§b§lCB§0§l] §cError: " + ex.getMessage())); 
+        }
         return 1;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static int usage(ServerCommandSource src, String cmd) {
-        src.sendError(Text.literal(switch (cmd) {
-            case "bulkdelete"    -> "§cUsage: /cb bulkdelete <id1> <id2> ...  — delete multiple blocks at once";
-            case "delete"       -> "§cUsage: /cb delete <id>";
-            case "rename"       -> "§cUsage: /cb rename <id> <newname>";
-            case "reid"         -> "§cUsage: /cb reid <id> <newid>  — changes the block's ID (lowercase, a-z 0-9 _ -)";
-            case "retexture"    -> "§cUsage: /cb retexture <id> <url>";
-            case "give"         -> "§cUsage: /cb give <id> [amount 1-64] [player]";
-            case "setglow"      -> "§cUsage: /cb setglow <id> <0-15>";
-            case "sethardness"  -> "§cUsage: /cb sethardness <id> <-1 to 50>  (-1=unbreakable)";
-            case "setsound"     -> "§cUsage: /cb setsound <id> <sound>  — stone|wood|grass|metal|glass|sand|wool|gravel|snow|dirt|coral|bamboo|nether_brick|ice|honey|bone|slime";
-            case "settabicon"   -> "§cUsage: /cb settabicon <url>";
-            case "clearface"    -> "§cUsage: /cb clearface <id> <top|bottom|north|south|east|west>";
-            case "givesquare"   -> "§cUsage: /cb givesquare <black|yellow|green>";
-            case "givetriangle" -> "§cUsage: /cb givetriangle <black|yellow|green>";
-            case "clearallfaces"-> "§cUsage: /cb clearallfaces <id>";
-            case "resize"       -> "§cUsage: /cb resize <id> <16-256>  — rescale stored texture";
-            case "editor" -> "§cUsage: /cb editor [id]  — omit ID to pick from a list";
-            case "setshape"     -> "§cUsage: /cb setshape <id> <preset|x1,y1,z1,x2,y2,z2>  — presets: full slab thin carpet pillar small micro pane trapdoor fence stairs cross";
-            case "addshape"     -> "§cUsage: /cb addshape <id> <x1,y1,z1,x2,y2,z2>";
-            case "removeshape"  -> "§cUsage: /cb removeshape <id> <boxIndex 0-15>";
-            case "clearshape"   -> "§cUsage: /cb clearshape <id>";
-            case "setcollision" -> "§cUsage: /cb setcollision <id> <on|off>";
-            case "saveshape"    -> "§cUsage: /cb saveshape <templateName> <id>";
-            case "loadshape"    -> "§cUsage: /cb loadshape <id> <templateName>";
-            case "shapeeditor"  -> "§cUsage: /cb shapeeditor <id>";
-            case "square"       -> "§cUsage: /cb square <black|yellow|green>";
-            case "triangle"     -> "§cUsage: /cb triangle <black|yellow|green>";
-            default -> "§cUsage: /cb help";
-        }));
+        String msg = switch (cmd) {
+            case "bulkdelete"    -> "bulkdelete <id1> <id2> ...  — delete multiple blocks";
+            case "delete"       -> "delete <id>";
+            case "rename"       -> "rename <id> <newname>";
+            case "reid"         -> "reid <id> <newid>  — change block ID";
+            case "retexture"    -> "retexture <id> <url>";
+            case "give"         -> "give <id> [amount] [player]";
+            case "setglow"      -> "setglow <id> <0-15>";
+            case "sethardness"  -> "sethardness <id> <val>";
+            case "setsound"     -> "setsound <id> <type>";
+            case "settabicon"   -> "settabicon <url>";
+            case "clearface"    -> "clearface <id> <face>";
+            case "givesquare"   -> "square <black|yellow|green>";
+            case "givetriangle" -> "triangle <black|yellow|green>";
+            case "clearallfaces"-> "clearallfaces <id>";
+            case "resize"       -> "resize <id> <16-256>";
+            case "editor" -> "editor [id]";
+            case "setshape"     -> "setshape <id> <preset|coords>";
+            case "addshape"     -> "addshape <id> <coords>";
+            case "removeshape"  -> "removeshape <id> <boxIndex>";
+            case "clearshape"   -> "clearshape <id>";
+            case "setcollision" -> "setcollision <id> <on|off>";
+            case "saveshape"    -> "saveshape <name> <id>";
+            case "loadshape"    -> "loadshape <id> <name>";
+            case "shapeeditor"  -> "shapeeditor <id>";
+            case "square"       -> "square <black|yellow|green>";
+            case "triangle"     -> "triangle <black|yellow|green>";
+            default -> "help";
+        };
+        ChatHelper.warn(src, "Usage: /cb " + msg);
         return 0;
     }
 
     private static Text notFound(String id) {
-        return Text.literal("§c'" + id + "' not found. Use /cb list to see all blocks.");
+        return Text.literal("§0§l[§b§lCB§0§l] §c'" + id + "' not found. §8✖");
     }
 
     private static String sanitize(String id) {

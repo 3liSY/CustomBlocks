@@ -242,6 +242,7 @@ public final class SlotManager {
             LOGGER.info("[CustomBlocks] Loaded {} slots.", byId.size());
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] Failed to load slot data", e);
+            com.customblocks.gui.GuiManager.logError();
         }
     }
 
@@ -270,6 +271,7 @@ public final class SlotManager {
             ResourcePackServer.updatePack();
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] Failed to save slot data", e);
+            com.customblocks.gui.GuiManager.logError();
         }
     }
 

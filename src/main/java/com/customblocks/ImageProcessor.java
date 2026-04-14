@@ -662,6 +662,7 @@ public final class ImageProcessor {
             }
             return brokenPixels > (totalPixels * 0.9);
         } catch (Exception e) {
+            com.customblocks.gui.GuiManager.logError();
             return false;
         }
     }
