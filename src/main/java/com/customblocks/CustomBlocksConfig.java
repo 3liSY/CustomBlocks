@@ -139,7 +139,11 @@ public final class CustomBlocksConfig {
             root.addProperty("resourcePackPort", resourcePackPort);
             root.addProperty("reloadDebounceMs", reloadDebounceMs);
             root.addProperty("joinDebounceMs", joinDebounceMs);
-            Files.writeString(file, GSON.toJson(root), StandardCharsets.UTF_8);
+            Path tempFile = dir.resolve(CONFIG_FILE + ".tmp");
+            Files.writeString(tempFile, GSON.toJson(root), StandardCharsets.UTF_8);
+            java.nio.file.Files.move(tempFile, file,
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] Failed to save config", e);
         }

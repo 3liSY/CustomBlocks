@@ -267,7 +267,11 @@ public final class SlotManager {
             if (tabData != null) arr.add(serializeSlot(tabData));
 
             root.add("slots", arr);
-            Files.writeString(file, GSON.toJson(root), StandardCharsets.UTF_8);
+            
+            Path tempFile = dir.resolve(DATA_FILE + ".tmp");
+            Files.writeString(tempFile, GSON.toJson(root), StandardCharsets.UTF_8);
+            Files.move(tempFile, file, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            
             ResourcePackServer.updatePack();
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] Failed to save slot data", e);

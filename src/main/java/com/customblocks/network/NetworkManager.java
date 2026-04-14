@@ -66,20 +66,8 @@ public final class NetworkManager {
         FullSyncPayload syncPayload = new FullSyncPayload(entries, tabIcon);
         ServerPlayNetworking.send(player, syncPayload);
 
-        // Enqueue all textures for drip-feed delivery
+        // Sent via HTTP Resource Pack Server asynchronously. No packet spam needed!
         TextureQueue queue = getOrCreateQueue(player);
-        for (SlotData data : SlotManager.allSlots()) {
-            if (data.texture != null && data.texture.length > 0) {
-                queue.enqueue(new SlotUpdatePayload("retexture", data.index, data.customId,
-                        null, data.texture, data.lightLevel, data.hardness, data.soundType));
-            }
-            // Also send face textures
-            for (var faceEntry : data.faceTextures.entrySet()) {
-                queue.enqueue(new SlotUpdatePayload("setface", data.index, data.customId,
-                        null, faceEntry.getValue(), data.lightLevel, data.hardness,
-                        data.soundType, faceEntry.getKey()));
-            }
-        }
 
         // Sentinel: tells the client that every join texture has been queued.
         // The client uses this to fire exactly one resource-pack reload instead
