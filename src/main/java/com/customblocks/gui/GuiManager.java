@@ -21,6 +21,7 @@ import net.minecraft.item.Items;
 import net.minecraft.screen.SimpleNamedScreenHandlerFactory;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,15 +58,19 @@ public class GuiManager {
     private static final Map<UUID, AnimParams> ANIM_PARAMS = new ConcurrentHashMap<>();
 
     public enum InputAction {
-        CREATE_ID, CREATE_NAME, CREATE_URL,
-        RETEXTURE_URL, SETFACE_URL, RENAME_TEXT,
-        SETFACE_VARIANT_URL,
-        SETTABICON_URL,
-        ADDSHAPE_COORDS,
-        REID_TEXT,
-        ADMIN_CUSTOM_TITLE,
         SET_LIGHT,
-        SET_HARDNESS
+        SET_HARDNESS,
+        WEB_LINK_CAST,
+        CREATE_ID,
+        CREATE_NAME,
+        CREATE_URL,
+        RETEXTURE_URL,
+        SETFACE_URL,
+        SETFACE_VARIANT_URL,
+        RENAME_TEXT,
+        REID_TEXT,
+        SETTABICON_URL,
+        ADMIN_CUSTOM_TITLE
     }
 
     public record PendingInput(InputAction action, String blockId, String face,
@@ -230,9 +235,12 @@ public class GuiManager {
             "§7Designs registered: §f" + SlotManager.usedSlots(),
             "§7Status: §aWorking Perfectly"));
 
-        inv.setStack(22, uiGlint(Items.RECOVERY_COMPASS, "§6§lQuick-Link Hub",
-            "§7Click to §eShare §7the latest",
-            "§7designs with your friends."));
+        // Phase 5 Outside the box: Using an Echo Shard for the download link (Royal Standard)
+        inv.setStack(22, uiGlint(Items.ECHO_SHARD, "§b§lClick to get resourcepack link download",
+            "§7Generates a §eLive Link §7to your",
+            "§7entire texture collection.",
+            "",
+            "§b§nClick to broadcast to chat"));
 
         inv.setStack(24, uiGlint(Items.NETHER_STAR, "§a§lFORCE SYNC",
             "§7Updates all players with the",
@@ -412,9 +420,8 @@ public class GuiManager {
                 case MAINTENANCE_MENU -> handleMaintenanceClick(player, state, slot);
                 case HELP_MENU      -> handleHelpClick(player, state, slot);
                 case TOOLS_GUI      -> handleToolsClick(player, state, slot);
-                case PROPERTIES_MENU-> handlePropertiesClick(player, state, slot);
                 case SOUND_MENU     -> handleSoundClick(player, state, slot);
-                case ANIM_GUI     -> handleAnimGuiClick(player, state, slot);
+                case ANIM_GUI       -> handleAnimGuiClick(player, state, slot);
             }
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] GUI Command Error: {}", e.getMessage(), e);
@@ -470,11 +477,8 @@ public class GuiManager {
                 MinecraftServer srv = player.getServer();
                 thread(player, () -> { try {
                     byte[] raw = ImageProcessor.download(text);
-                    ImageProcessor.GifResult gif = ImageProcessor.isAnimatedGif(raw) ? ImageProcessor.processGif(raw) : null;
-                    byte[] bytes; String anim = null;
-                    if (gif != null) { bytes = gif.stripPng(); anim = gif.mcmeta(); }
-                    else { bytes = ImageProcessor.toPng(raw); bytes = ImageProcessor.padToSquare(bytes); bytes = ImageProcessor.replaceBackground(bytes); bytes = ImageProcessor.resizeTo(bytes, CustomBlocksConfig.defaultTextureSize); }
-                    final byte[] fb = bytes; final String fa = anim;
+                    ImageProcessor.ProcessResult result = ImageProcessor.isAnimatedImage(raw) ? ImageProcessor.processAnimation(raw, CustomBlocksConfig.defaultTextureSize) : new ImageProcessor.ProcessResult(ImageProcessor.resizeTo(ImageProcessor.replaceBackground(ImageProcessor.padToSquare(ImageProcessor.toPng(raw))), CustomBlocksConfig.defaultTextureSize), null, 1);
+                    final byte[] fb = result.bytes(); final String fa = result.mcmeta();
                     srv.execute(() -> {
                         if (SlotManager.hasId(id)) { playError(player); send(player, "§c'" + id + "' already exists."); openMain(player, rp); return; }
                         SlotData d = SlotManager.assign(id, name, fb);
@@ -611,18 +615,6 @@ public class GuiManager {
                 } catch (Exception e) { srv.execute(() -> { send(player, "§c[GUI] Failed: " + e.getMessage()); openMain(player, rp); }); } });
                 return true;
             }
-            case ADDSHAPE_COORDS -> {
-                try {
-                    SlotData.ShapeBox box = SlotData.ShapeBox.parse(text);
-                    UndoManager.pushUndoMutation(blockId, SlotManager.getById(blockId), "addshape", player.getUuid());
-                    SlotManager.addBox(blockId, box);
-                    SlotManager.saveAll();
-                    SlotData d = SlotManager.getById(blockId);
-                    broadcastShape(player.getServer(), d);
-                    send(player, "§a[Physics] Box added! Total: §f" + (d.shapeBoxes != null ? d.shapeBoxes.size() : 0));
-                } catch (Exception e) { send(player, "§cBad coords. Use: x1,y1,z1,x2,y2,z2 (0–16)"); }
-                openShapeEditor(player, blockId, rp); return true;
-            }
             case REID_TEXT -> {
                 if ("__givesquare__".equals(blockId)) {
                     String col = text.toLowerCase().trim();
@@ -703,6 +695,27 @@ public class GuiManager {
                 }
                 return true;
             }
+            case WEB_LINK_CAST -> {
+                if (!isUrl(text)) { send(player, "§cNeeds a URL."); openEditor(player, blockId, rp); return true; }
+                ChatHelper.info(player, "Casting web-link to block...");
+                MinecraftServer srv = player.getServer();
+                thread(player, () -> { try {
+                    ImageProcessor.ProcessResult result = ImageProcessor.downloadAndProcess(text, CustomBlocksConfig.defaultTextureSize);
+                    srv.execute(() -> {
+                        SlotData d = SlotManager.getById(blockId);
+                        if (d == null) return;
+                        UndoManager.pushUndoMutation(blockId, d, "web-link cast", player.getUuid());
+                        SlotManager.updateTexture(blockId, result.bytes());
+                        SlotManager.setAnimMeta(blockId, result.mcmeta());
+                        SlotManager.saveAll();
+                        playSuccess(player);
+                        NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("retexture", d.index, blockId, null, result.bytes(), d.lightLevel, d.hardness, d.soundType, null, null, result.mcmeta()));
+                        ChatHelper.success(player, "Link synchronized! Architecture updated. §b✔");
+                        openEditor(player, blockId, rp);
+                    });
+                } catch (Exception e) { srv.execute(() -> { send(player, "§cCast failed: " + e.getMessage()); openEditor(player, blockId, rp); }); } });
+                return true;
+            }
         }
         return false;
     }
@@ -718,7 +731,16 @@ public class GuiManager {
         if (slot == 22) { // Copy Link
             String url = com.customblocks.network.ResourcePackServer.getPackUrl(player.getServer());
             player.closeHandledScreen();
-            player.sendMessage(Text.literal("§0§l[§b§lCB§0§l] §fShare this link with friends: §b§n" + url).styled(s -> s.withUnderline(true)), false);
+            // Royal Architect Fix: Making the link CLICKABLE and professionally branded
+            player.sendMessage(Text.literal("§0§l[§b§lCB§0§l] §fTexture Pipeline Link: ")
+                .append(Text.literal("§b§n" + url)
+                .styled(s -> s.withUnderline(true)
+                             .withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.OPEN_URL, url))
+                             .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, Text.literal("§eClick to open in browser"))))), false);
+            
+            if (player.getWorld() instanceof ServerWorld sw) {
+                sw.playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, net.minecraft.sound.SoundCategory.PLAYERS, 0.8f, 1.2f);
+            }
         }
         if (slot == 24) { // Force Sync
             NetworkManager.broadcastFullSync(player.getServer());
@@ -949,6 +971,7 @@ public class GuiManager {
             case 12 -> openShapeEditor(player, id, rp);
             case 14 -> openPropertiesGui(player, id, rp);
             case 16 -> openSoundMenu(player, id, rp);
+            case 17 -> { PENDING.put(uuid, new PendingInput(InputAction.WEB_LINK_CAST, id, null, null, null, rp)); closeForPrompt(player); send(player, "§0§l[§b§lCB§0§l] §ePaste the §fWeb-Link URL§e to cast onto this block (or §ccancel§e):"); }
             case 22 -> { if (d.isAnimated()) openAnimGui(player, id); }
             case 28 -> { PENDING.put(uuid,new PendingInput(InputAction.RENAME_TEXT,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new name for '§f"+id+"§e' (or §ccancel§e):"); }
             case 29 -> { PENDING.put(uuid,new PendingInput(InputAction.REID_TEXT,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new ID for '§f"+id+"§e' (a-z 0-9 _ -) (or §ccancel§e):"); }
@@ -997,7 +1020,7 @@ public class GuiManager {
             }
             return;
         }
-        if (slot == 22) { PENDING.put(uuid, new PendingInput(InputAction.ADDSHAPE_COORDS,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[Shape] §eType coords (or §ccancel§e): §7x1,y1,z1,x2,y2,z2  §8(0–16)"); return; }
+        if (slot == 22) return; // slot 22 was add-shape (purged)
         if (slot == 23) { UndoManager.pushUndoMutation(id, d, "clearshape", uuid); SlotManager.setShape(id, null); SlotManager.saveAll(); broadcastShape(player.getServer(),SlotManager.getById(id)); send(player,"§a[Shape] Cleared — full cube."); reopenShapeEditor(player,id,rp,0); return; }
         if (slot >= 28 && slot <= 36) {
             int boxIdx = boxPage*9 + (slot-28);
@@ -1491,6 +1514,7 @@ public class GuiManager {
         )));
         inv.setStack(4, disp);
         inv.setStack(8, uiGlint(Items.MAP,"§b§l⬛ Retexture Block","§7Update the main texture of this block","§b• Tip: §7Paste a URL from Imgur, Discord, etc."));
+        inv.setStack(17, uiGlint(Items.ECHO_SHARD, "§b§lRemote Link Cast", "§7Instantly cast an image/GIF onto this", "§7block via a URL link. (Web-Linker)", "", "§e§l▶ Click to cast."));
         
         inv.setStack(19, uiGlint(Items.PAINTING, "§d§l⬡ Face Mapping Forge", "§7Apply textures to individual faces","§b• Tip: §7Change Top, Bottom, or Side textures separately"));
         inv.setStack(21, uiGlint(Items.ENDER_PEARL, "§5§l⬡ Shape Sculptor", "§7Presets, custom boxes, and collisions","§b• Tip: §7Make slabs, stairs, or custom hitboxes"));
@@ -1532,7 +1556,7 @@ public class GuiManager {
             boolean act = (presetBoxes == null && !d.isShaped()) || (presetBoxes != null && presetBoxes.equals(boxes));
             inv.setStack(10+i, act?uiGlint(pItems[Math.min(i,pItems.length-1)],"§a§l"+p.toUpperCase()+"","§aCurrently Active"):ui(pItems[Math.min(i,pItems.length-1)],"§b"+cap(p),"§7Preset shape","§b• Tip: §7Applies a standard Minecraft shape"));
         }
-        inv.setStack(22, uiGlint(Items.LIME_DYE,"§a➕ Create Physics Box","§7Click to type coordinates in chat","§b• Tip: §7Syntax is x1 y1 z1 x2 y2 z2 (min 0, max 16)"));
+        inv.setStack(22, glass());
         inv.setStack(23, ui(Items.ORANGE_DYE,"§c⊘ Remove All Physics","§7Reset to a solid full cube","§b• Tip: §7Clears all custom hitboxes on this block"));
         for (int i=24;i<=26;i++) inv.setStack(i,glass());
         inv.setStack(27, ui(Items.PURPLE_STAINED_GLASS_PANE,"§5── Active Physics Boxes §8(click to delete) ──","§7Individual hitbox parts"));

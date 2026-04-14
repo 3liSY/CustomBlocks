@@ -14,8 +14,11 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Queue;
 
 /**
@@ -35,8 +38,8 @@ public final class ImageProcessor {
     /**
      * Container for processed image data and its corresponding Minecraft animation metadata.
      */
-    public record ProcessResult(byte[] bytes, String mcmeta) {
-        public boolean isAnimated() { return mcmeta != null && !mcmeta.isEmpty(); }
+    public record ProcessResult(byte[] bytes, String mcmeta, int frameCount) {
+        public boolean isAnimated() { return frameCount > 1; }
     }
 
     // TwelveMonkeys auto-registers WebP and other providers at class-load time.
@@ -71,10 +74,10 @@ public final class ImageProcessor {
         try {
             // Detect animated format (GIF, APNG, animated WebP)
             if (isAnimatedImage(raw)) {
-                GifResult gif = processAnimatedImage(raw, targetSize);
-                if (gif != null) {
-                    if (isBrokenTexture(gif.stripPng)) throw new IOException("Broken texture detected in GIF.");
-                    return new ProcessResult(gif.stripPng, gif.mcmeta);
+                ProcessResult anim = processAnimation(raw, targetSize);
+                if (anim != null && anim.isAnimated()) {
+                    if (isBrokenTexture(anim.bytes)) throw new IOException("Broken texture detected in animation.");
+                    return anim;
                 }
             }
             
@@ -83,7 +86,7 @@ public final class ImageProcessor {
             png = replaceBackground(png);
             byte[] processed = resizeTo(png, targetSize);
             if (isBrokenTexture(processed)) throw new IOException("Broken texture detected.");
-            return new ProcessResult(processed, null);
+            return new ProcessResult(processed, null, 1);
         } catch (Exception e) {
             CustomBlocksMod.LOGGER.error("[CustomBlocks] Error processing image from " + url, e);
             throw new IOException("Processing failed: " + e.getMessage());
@@ -289,144 +292,141 @@ public final class ImageProcessor {
         return baos.toByteArray();
     }
 
-    /** Backwards-compat alias. */
-    public static byte[] replaceWhiteBackground(byte[] pngBytes) throws IOException {
-        return replaceBackground(pngBytes);
-    }
-
-    // ── Animated GIF ──────────────────────────────────────────────────────────
-
-    public record GifResult(
-            byte[] stripPng,    // all frames in a vertical strip
-            String mcmeta,      // Minecraft animation JSON (write as <tex>.png.mcmeta)
-            int    frameCount
-    ) {}
-
-    public static boolean isAnimatedGif(byte[] raw) {
-        if (raw.length < 6) return false;
-        if (!(raw[0]=='G' && raw[1]=='I' && raw[2]=='F')) return false;
-        int count = 0;
-        for (int i = 6; i < raw.length - 1 && count < 2; i++)
-            if ((raw[i] & 0xFF) == 0x2C) count++;
-        return count >= 2;
-    }
-
     /**
-     * Returns true for any animated/multi-frame image format:
-     * GIF, APNG, animated WebP (WEBPVP8X with ANIM chunk), AVIF sequences.
+     * Returns true if this pixel should be treated as background during flood-fill.
+     * Uses configurable CIE-Lab Delta E distance from pure white.
      */
+    public static boolean isBackground(int argb) {
+        int a = (argb >> 24) & 0xFF;
+        if (a < OPAQUE_THRESHOLD) return true;
+        if (CustomBlocksConfig.bgRemovalTolerance <= 0) return false;
+        double distance = deltaE(rgbToLab(argb), LAB_WHITE);
+        return distance <= CustomBlocksConfig.bgRemovalTolerance;
+    }
+
+    /** Detects if the image is likely animated (GIF, APNG, animated WebP). */
     public static boolean isAnimatedImage(byte[] raw) {
-        if (raw.length < 12) return false;
-        return isAnimatedGif(raw) || isAnimatedPng(raw) || isAnimatedWebP(raw);
-    }
-
-    /**
-     * Detect APNG — a PNG that contains the 'acTL' animation control chunk.
-     * Normal PNGs only have IHDR/IDAT/etc; APNG also has acTL + fcTL + fdAT.
-     */
-    public static boolean isAnimatedPng(byte[] raw) {
-        if (raw.length < 8) return false;
-        // PNG magic bytes
-        if (!( raw[0]==(byte)0x89 && raw[1]==0x50 && raw[2]==0x4E && raw[3]==0x47
-            && raw[4]==0x0D && raw[5]==0x0A && raw[6]==0x1A && raw[7]==0x0A)) return false;
-        // Scan for 'acTL' chunk type (bytes: 0x61 0x63 0x54 0x4C)
-        for (int i = 8; i < raw.length - 7; i++) {
-            if (raw[i]=='a' && raw[i+1]=='c' && raw[i+2]=='T' && raw[i+3]=='L') return true;
+        if (raw.length < 4) return false;
+        // GIF87a/GIF89a
+        if (raw[0] == 'G' && raw[1] == 'I' && raw[2] == 'F') return true;
+        // WebP (RIFF + WEBPVP8X) - heuristic
+        if (raw.length > 30 && raw[0] == 'R' && raw[1] == 'I' && raw[2] == 'F' && raw[3] == 'F' 
+            && raw[8] == 'W' && raw[9] == 'E' && raw[10] == 'B' && raw[11] == 'P') {
+            // Check for ANIM chunk in WebP
+            String head = new String(raw, 0, Math.min(200, raw.length));
+            if (head.contains("ANIM")) return true;
+        }
+        // APNG (PNG signature + acTL chunk)
+        if (raw[0] == (byte)0x89 && raw[1] == 0x50 && raw[2] == 0x4E && raw[3] == 0x47) {
+            String head = new String(raw, 0, Math.min(200, raw.length), StandardCharsets.US_ASCII);
+            if (head.contains("acTL")) return true;
         }
         return false;
     }
 
-    /**
-     * Detect animated WebP — has RIFF header, WEBP marker, and an ANIM chunk.
-     */
-    public static boolean isAnimatedWebP(byte[] raw) {
-        if (raw.length < 16) return false;
-        if (!(raw[0]=='R' && raw[1]=='I' && raw[2]=='F' && raw[3]=='F')) return false;
-        if (!(raw[8]=='W' && raw[9]=='E' && raw[10]=='B' && raw[11]=='P')) return false;
-        // Look for 'ANIM' chunk
-        for (int i = 12; i < Math.min(raw.length - 4, 512); i++) {
-            if (raw[i]=='A' && raw[i+1]=='N' && raw[i+2]=='I' && raw[i+3]=='M') return true;
-        }
-        return false;
-    }
+    // ── Animated Image Processing ────────────────────────────────────────────
 
     /**
-     * Process any animated image (GIF, APNG, animated WebP) into a vertical PNG strip + mcmeta.
-     * For APNG and animated WebP, attempts to read via ImageIO (TwelveMonkeys adds WebP support).
-     * Returns null if the image has ≤1 frame or cannot be processed.
+     * Universal animation processor. Detects format (GIF, WebP, APNG), extracts frames,
+     * applies disposal methods, and builds a vertical PNG strip with .mcmeta.
      */
-    public static GifResult processAnimatedImage(byte[] raw, int frameSize) {
-        if (isAnimatedGif(raw))   return processGif(raw, frameSize);
-        if (isAnimatedPng(raw))   return processApng(raw, frameSize);
-        if (isAnimatedWebP(raw))  return processGif(raw, frameSize); // ImageIO handles multi-frame WebP via TwelveMonkeys
-        return null;
-    }
-
-    /**
-     * Process an APNG into a vertical strip + mcmeta, same pipeline as processGif.
-     * Uses ImageIO's GIF reader path — APNG requires TwelveMonkeys or similar plugin.
-     * Falls back gracefully: if only 1 frame is readable, returns null (use static pipeline).
-     */
-    public static GifResult processApng(byte[] pngBytes, int frameSize) {
+    public static ProcessResult processAnimation(byte[] raw, int frameSize) {
         frameSize = Math.max(16, Math.min(MAX_SIZE, frameSize));
-        try {
-            ImageInputStream iis = ImageIO.createImageInputStream(new ByteArrayInputStream(pngBytes));
-            // Try PNG reader that supports APNG (TwelveMonkeys or JDK)
-            Iterator<ImageReader> it = ImageIO.getImageReadersByFormatName("png");
-            ImageReader reader = null;
-            while (it.hasNext()) {
-                ImageReader r = it.next();
-                r.setInput(iis, false);
-                try {
-                    if (r.getNumImages(true) > 1) { reader = r; break; }
-                } catch (Exception ignored) { r.dispose(); }
-            }
-            if (reader == null) return null;
+        try (ImageInputStream iis = ImageIO.createImageInputStream(new ByteArrayInputStream(raw))) {
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(iis);
+            if (!readers.hasNext()) return null;
 
-            int numFrames = Math.min(reader.getNumImages(true), 64);
-            if (numFrames <= 1) { reader.dispose(); return null; }
+            ImageReader reader = readers.next();
+            reader.setInput(iis);
+
+            int numFrames = 0;
+            try {
+                numFrames = reader.getNumImages(true);
+            } catch (IOException e) {
+                reader.dispose();
+                return null;
+            }
+
+            if (numFrames <= 1) {
+                reader.dispose();
+                return null;
+            }
+
+            // Cap frames to 64 to prevent server OOM
+            numFrames = Math.min(numFrames, 64);
+
+            BufferedImage firstFrame = reader.read(0);
+            int fw = firstFrame.getWidth();
+            int fh = firstFrame.getHeight();
 
             java.util.List<BufferedImage> frames = new java.util.ArrayList<>();
-            int defaultDelay = 2; // ticks
-            for (int i = 0; i < numFrames; i++) {
-                try { frames.add(toArgb(reader.read(i))); } catch (Exception e) { break; }
-            }
-            reader.dispose();
-            if (frames.size() <= 1) return null;
+            java.util.List<Integer> ticks = new java.util.ArrayList<>();
+            BufferedImage composite = new BufferedImage(fw, fh, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D gComp = composite.createGraphics();
 
-            // Build strip
+            for (int i = 0; i < numFrames; i++) {
+                BufferedImage frame = reader.read(i);
+                int delayCsecs = 10; // default 100ms
+                try {
+                    IIOMetadata meta = reader.getImageMetadata(i);
+                    // Seek delay in common metadata formats (GIF/WebP)
+                    String[] names = meta.getMetadataFormatNames();
+                    for (String name : names) {
+                        org.w3c.dom.Node root = meta.getAsTree(name);
+                        // Search for delayTime in nodes (simplified heuristic)
+                        org.w3c.dom.NodeList nodes = root.getChildNodes();
+                        for (int k = 0; k < nodes.getLength(); k++) {
+                            if (nodes.item(k).getNodeName().contains("Control")) {
+                                org.w3c.dom.NamedNodeMap attrs = nodes.item(k).getAttributes();
+                                org.w3c.dom.Node delayNode = attrs.getNamedItem("delayTime");
+                                if (delayNode != null) delayCsecs = Integer.parseInt(delayNode.getNodeValue());
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+
+                // Convert csecs to Game Ticks (1 tick = 50ms = 5 csecs)
+                ticks.add(Math.max(1, delayCsecs / 5));
+
+                // Minimal disposal handling: overdraw
+                gComp.setComposite(AlphaComposite.SrcOver);
+                gComp.drawImage(frame, 0, 0, null);
+                frames.add(copyArgb(composite));
+            }
+            gComp.dispose();
+            reader.dispose();
+
+            if (frames.isEmpty()) return null;
+
+            // Build deterministic vertical strip
             BufferedImage strip = new BufferedImage(frameSize, frameSize * frames.size(), BufferedImage.TYPE_INT_ARGB);
-            Graphics2D sg = strip.createGraphics();
-            sg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-            sg.setColor(java.awt.Color.BLACK);
-            sg.fillRect(0, 0, frameSize, frameSize * frames.size());
-            for (int i = 0; i < frames.size(); i++)
-                sg.drawImage(frames.get(i), 0, i * frameSize, frameSize, frameSize, null);
-            sg.dispose();
+            Graphics2D gStrip = strip.createGraphics();
+            gStrip.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            gStrip.setColor(Color.BLACK);
+            gStrip.fillRect(0, 0, frameSize, frameSize * frames.size());
+
+            for (int i = 0; i < frames.size(); i++) {
+                gStrip.drawImage(frames.get(i), 0, i * frameSize, frameSize, frameSize, null);
+            }
+            gStrip.dispose();
 
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             ImageIO.write(strip, "PNG", baos);
 
-            StringBuilder mcmeta = new StringBuilder("{\"animation\":{\"interpolate\":false,\"frames\":[");
+            // Generate mcmetas with "interpolate: true" for Fluid Motion (Royalty Standard)
+            StringBuilder mcmeta = new StringBuilder("{\"animation\":{\"interpolate\":true,\"frames\":[");
             for (int i = 0; i < frames.size(); i++) {
                 if (i > 0) mcmeta.append(",");
-                mcmeta.append("{\"index\":").append(i).append(",\"time\":").append(defaultDelay).append("}");
+                mcmeta.append("{\"index\":").append(i).append(",\"time\":").append(ticks.get(i)).append("}");
             }
             mcmeta.append("]}}");
-            return new GifResult(baos.toByteArray(), mcmeta.toString(), frames.size());
+
+            return new ProcessResult(baos.toByteArray(), mcmeta.toString(), frames.size());
         } catch (Exception e) {
+            CustomBlocksMod.LOGGER.error("[CustomBlocks] Animation processing failed", e);
             return null;
         }
     }
-
-    /**
-     * Extract GIF frames into a vertical PNG strip + Minecraft animation .mcmeta JSON.
-     * Returns null if the GIF has <= 1 frame (use regular processing instead).
-     */
-    public static GifResult processGif(byte[] gifBytes) {
-        return processGif(gifBytes, DEFAULT_SIZE);
-    }
-
 
     /**
      * Scale image to exactly targetSize × targetSize pixels using bicubic interpolation.
@@ -448,209 +448,6 @@ public final class ImageProcessor {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         ImageIO.write(out, "PNG", baos);
         return baos.toByteArray();
-    }
-
-    /** processGif with explicit frame size. */
-    public static GifResult processGif(byte[] gifBytes, int frameSize) {
-        frameSize = Math.max(16, Math.min(MAX_SIZE, frameSize));
-        try {
-            System.setProperty("java.awt.headless", "true");
-            ImageInputStream iis = ImageIO.createImageInputStream(new ByteArrayInputStream(gifBytes));
-            Iterator<ImageReader> it = ImageIO.getImageReadersByFormatName("gif");
-            if (!it.hasNext()) return null;
-            ImageReader reader = it.next();
-            reader.setInput(iis, false);
-
-            int numFrames = reader.getNumImages(true);
-            if (numFrames <= 1) { reader.dispose(); return null; }
-            // Cap frames to prevent OOM with huge GIFs
-            numFrames = Math.min(numFrames, 64);
-
-            BufferedImage frame0 = reader.read(0);
-            int fw = frame0.getWidth(), fh = frame0.getHeight();
-
-            java.util.List<BufferedImage> frames = new java.util.ArrayList<>();
-            java.util.List<Integer> delays = new java.util.ArrayList<>();
-            BufferedImage composite = new BufferedImage(fw, fh, BufferedImage.TYPE_INT_ARGB);
-
-            // Track previous frame geometry for disposal handling
-            int prevFX = 0, prevFY = 0, prevFW = fw, prevFH = fh;
-            String prevDisposal = "doNotDispose";
-
-            for (int i = 0; i < numFrames; i++) {
-                BufferedImage frame = reader.read(i);
-                int delayCsecs = 10;
-                int frameX = 0, frameY = 0;
-                String disposal = "doNotDispose";
-                try {
-                    IIOMetadata meta = reader.getImageMetadata(i);
-                    String fmt = meta.getNativeMetadataFormatName();
-                    org.w3c.dom.Node root = meta.getAsTree(fmt);
-                    org.w3c.dom.NodeList children = root.getChildNodes();
-                    for (int j = 0; j < children.getLength(); j++) {
-                        org.w3c.dom.Node child = children.item(j);
-                        String nodeName = child.getNodeName();
-                        if ("GraphicControlExtension".equals(nodeName)) {
-                            org.w3c.dom.NamedNodeMap attrs = child.getAttributes();
-                            org.w3c.dom.Node d = attrs.getNamedItem("delayTime");
-                            if (d != null) delayCsecs = Integer.parseInt(d.getNodeValue());
-                            org.w3c.dom.Node dm = attrs.getNamedItem("disposalMethod");
-                            if (dm != null) disposal = dm.getNodeValue();
-                        } else if ("ImageDescriptor".equals(nodeName)) {
-                            org.w3c.dom.NamedNodeMap attrs = child.getAttributes();
-                            org.w3c.dom.Node lp = attrs.getNamedItem("imageLeftPosition");
-                            org.w3c.dom.Node tp = attrs.getNamedItem("imageTopPosition");
-                            if (lp != null) frameX = Integer.parseInt(lp.getNodeValue());
-                            if (tp != null) frameY = Integer.parseInt(tp.getNodeValue());
-                        }
-                    }
-                } catch (Exception ignored) {}
-                int ticks = Math.max(1, delayCsecs / 5);
-                delays.add(ticks);
-
-                // Apply previous frame's disposal method before drawing this frame
-                if ("restoreToBackgroundColor".equals(prevDisposal)) {
-                    // Clear the region the previous frame occupied
-                    Graphics2D cg = composite.createGraphics();
-                    cg.setComposite(AlphaComposite.Clear);
-                    cg.fillRect(prevFX, prevFY, prevFW, prevFH);
-                    cg.dispose();
-                } else if ("restoreToPrevious".equals(prevDisposal)) {
-                    // Full clear — safest fallback
-                    Graphics2D cg = composite.createGraphics();
-                    cg.setComposite(AlphaComposite.Clear);
-                    cg.fillRect(0, 0, fw, fh);
-                    cg.dispose();
-                }
-                // "doNotDispose" — keep composite as-is (accumulate)
-
-                // Draw this frame at its correct offset position
-                Graphics2D cg = composite.createGraphics();
-                cg.setComposite(AlphaComposite.SrcOver);
-                cg.drawImage(frame, frameX, frameY, null);
-                cg.dispose();
-                frames.add(copyArgb(composite));
-
-                prevFX = frameX; prevFY = frameY;
-                prevFW = frame.getWidth(); prevFH = frame.getHeight();
-                prevDisposal = disposal;
-            }
-            reader.dispose();
-
-            // Build strip at target frameSize
-            BufferedImage strip = new BufferedImage(frameSize, frameSize * numFrames, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D sg = strip.createGraphics();
-            sg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-            sg.setColor(Color.BLACK);
-            sg.fillRect(0, 0, frameSize, frameSize * numFrames);
-            for (int i = 0; i < frames.size(); i++) {
-                sg.drawImage(frames.get(i), 0, i * frameSize, frameSize, frameSize, null);
-            }
-            sg.dispose();
-
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            ImageIO.write(strip, "PNG", baos);
-
-            StringBuilder mcmeta = new StringBuilder("{\"animation\":{\"interpolate\":false,\"frames\":[");
-            for (int i = 0; i < numFrames; i++) {
-                if (i > 0) mcmeta.append(",");
-                mcmeta.append("{\"index\":").append(i).append(",\"time\":").append(delays.get(i)).append("}");
-            }
-            mcmeta.append("]}}");
-
-            return new GifResult(baos.toByteArray(), mcmeta.toString(), numFrames);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private static double[] rgbToLab(int argb) {
-        int r = (argb >> 16) & 0xFF;
-        int g = (argb >> 8) & 0xFF;
-        int b = argb & 0xFF;
-
-        double rF = r / 255.0;
-        double gF = g / 255.0;
-        double bF = b / 255.0;
-
-        rF = (rF > 0.04045) ? Math.pow((rF + 0.055) / 1.055, 2.4) : (rF / 12.92);
-        gF = (gF > 0.04045) ? Math.pow((gF + 0.055) / 1.055, 2.4) : (gF / 12.92);
-        bF = (bF > 0.04045) ? Math.pow((bF + 0.055) / 1.055, 2.4) : (bF / 12.92);
-
-        rF *= 100.0; gF *= 100.0; bF *= 100.0;
-
-        double x = rF * 0.4124 + gF * 0.3576 + bF * 0.1805;
-        double y = rF * 0.2126 + gF * 0.7152 + bF * 0.0722;
-        double z = rF * 0.0193 + gF * 0.1192 + bF * 0.9505;
-
-        // D65 reference
-        x /= 95.047; y /= 100.000; z /= 108.883;
-
-        x = (x > 0.008856) ? Math.cbrt(x) : (7.787 * x) + (16.0 / 116.0);
-        y = (y > 0.008856) ? Math.cbrt(y) : (7.787 * y) + (16.0 / 116.0);
-        z = (z > 0.008856) ? Math.cbrt(z) : (7.787 * z) + (16.0 / 116.0);
-
-        double L = (116.0 * y) - 16.0;
-        double a = 500.0 * (x - y);
-        double b_star = 200.0 * (y - z);
-
-        return new double[]{L, a, b_star};
-    }
-
-    private static double deltaE(double[] lab1, double[] lab2) {
-        return Math.sqrt(Math.pow(lab1[0] - lab2[0], 2) + Math.pow(lab1[1] - lab2[1], 2) + Math.pow(lab1[2] - lab2[2], 2));
-    }
-
-    private static final double[] LAB_WHITE = rgbToLab(0xFFFFFFFF);
-
-    /**
-     * Returns true if this pixel should be treated as background during flood-fill.
-     * Uses configurable CIE-Lab Delta E distance from pure white.
-     */
-    private static boolean isBackground(int argb) {
-        int a = (argb >> 24) & 0xFF;
-        if (a < OPAQUE_THRESHOLD) return true;
-        if (CustomBlocksConfig.bgRemovalTolerance <= 0) return false;
-        double distance = deltaE(rgbToLab(argb), LAB_WHITE);
-        return distance <= CustomBlocksConfig.bgRemovalTolerance;
-    }
-
-    /**
-     * Returns true if this pixel is a fringe candidate (anti-aliased edge pixel).
-     * Uses a higher tolerance than isBackground to catch subtly-bright edge pixels.
-     */
-    private static boolean isFringe(int argb) {
-        int a = (argb >> 24) & 0xFF;
-        if (a < OPAQUE_THRESHOLD) return true;
-        if (CustomBlocksConfig.bgRemovalTolerance <= 0) return false;
-        double distance = deltaE(rgbToLab(argb), LAB_WHITE);
-        // Fringe uses a slighter wider tolerance, e.g. + 15
-        return distance <= (CustomBlocksConfig.bgRemovalTolerance + 15);
-    }
-
-    /**
-     * Convert any BufferedImage to TYPE_INT_ARGB, preserving the alpha channel exactly.
-     * Uses AlphaComposite.Src so semi-transparent pixels are copied as-is.
-     */
-    private static BufferedImage toArgb(BufferedImage src) {
-        if (src.getType() == BufferedImage.TYPE_INT_ARGB) return src;
-        BufferedImage out = new BufferedImage(src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g = out.createGraphics();
-        // AlphaComposite.Src copies pixels verbatim, preserving source alpha
-        g.setComposite(AlphaComposite.Src);
-        g.drawImage(src, 0, 0, null);
-        g.dispose();
-        return out;
-    }
-
-    private static BufferedImage copyArgb(BufferedImage src) {
-        BufferedImage copy = new BufferedImage(src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g = copy.createGraphics();
-        g.drawImage(src, 0, 0, null);
-        g.dispose();
-        return copy;
     }
 
     /**
@@ -703,16 +500,81 @@ public final class ImageProcessor {
         }
     }
 
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static double[] rgbToLab(int argb) {
+        int r = (argb >> 16) & 0xFF;
+        int g = (argb >> 8) & 0xFF;
+        int b = argb & 0xFF;
+
+        double rF = r / 255.0;
+        double gF = g / 255.0;
+        double bF = b / 255.0;
+
+        rF = (rF > 0.04045) ? Math.pow((rF + 0.055) / 1.055, 2.4) : (rF / 12.92);
+        gF = (gF > 0.04045) ? Math.pow((gF + 0.055) / 1.055, 2.4) : (gF / 12.92);
+        bF = (bF > 0.04045) ? Math.pow((bF + 0.055) / 1.055, 2.4) : (bF / 12.92);
+
+        rF *= 100.0; gF *= 100.0; bF *= 100.0;
+
+        double x = rF * 0.4124 + gF * 0.3576 + bF * 0.1805;
+        double y = rF * 0.2126 + gF * 0.7152 + bF * 0.0722;
+        double z = rF * 0.0193 + gF * 0.1192 + bF * 0.9505;
+
+        // D65 reference
+        x /= 95.047; y /= 100.000; z /= 108.883;
+
+        x = (x > 0.008856) ? Math.cbrt(x) : (7.787 * x) + (16.0 / 116.0);
+        y = (y > 0.008856) ? Math.cbrt(y) : (7.787 * y) + (16.0 / 116.0);
+        z = (z > 0.008856) ? Math.cbrt(z) : (7.787 * z) + (16.0 / 116.0);
+
+        double L = (116.0 * y) - 16.0;
+        double a = 500.0 * (x - y);
+        double b_star = 200.0 * (y - z);
+
+        return new double[]{L, a, b_star};
+    }
+
+    private static double deltaE(double[] lab1, double[] lab2) {
+        return Math.sqrt(Math.pow(lab1[0] - lab2[0], 2) + Math.pow(lab1[1] - lab2[1], 2) + Math.pow(lab1[2] - lab2[2], 2));
+    }
+
+    private static final double[] LAB_WHITE = rgbToLab(0xFFFFFFFF);
+
     /**
-     * Detect AVIF format (ISO Base Media File Format with 'avif' or 'avis' brand).
-     * AVIF starts with a ftyp box containing 'avif' or 'avis' as the major brand.
+     * Returns true if this pixel is a fringe candidate (anti-aliased edge pixel).
+     * Uses a higher tolerance than isBackground to catch subtly-bright edge pixels.
      */
-    public static boolean isAvif(byte[] raw) {
-        if (raw.length < 12) return false;
-        // Check for ftyp box: bytes 4-7 = "ftyp", bytes 8-11 = brand
-        if (!(raw[4]=='f' && raw[5]=='t' && raw[6]=='y' && raw[7]=='p')) return false;
-        String brand = new String(raw, 8, Math.min(4, raw.length - 8));
-        return brand.startsWith("avif") || brand.startsWith("avis");
+    private static boolean isFringe(int argb) {
+        int a = (argb >> 24) & 0xFF;
+        if (a < OPAQUE_THRESHOLD) return true;
+        if (CustomBlocksConfig.bgRemovalTolerance <= 0) return false;
+        double distance = deltaE(rgbToLab(argb), LAB_WHITE);
+        // Fringe uses a slighter wider tolerance, e.g. + 15
+        return distance <= (CustomBlocksConfig.bgRemovalTolerance + 15);
+    }
+
+    /**
+     * Convert any BufferedImage to TYPE_INT_ARGB, preserving the alpha channel exactly.
+     * Uses AlphaComposite.Src so semi-transparent pixels are copied as-is.
+     */
+    private static BufferedImage toArgb(BufferedImage src) {
+        if (src.getType() == BufferedImage.TYPE_INT_ARGB) return src;
+        BufferedImage out = new BufferedImage(src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = out.createGraphics();
+        // AlphaComposite.Src copies pixels verbatim, preserving source alpha
+        g.setComposite(AlphaComposite.Src);
+        g.drawImage(src, 0, 0, null);
+        g.dispose();
+        return out;
+    }
+
+    private static BufferedImage copyArgb(BufferedImage src) {
+        BufferedImage copy = new BufferedImage(src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = copy.createGraphics();
+        g.drawImage(src, 0, 0, null);
+        g.dispose();
+        return copy;
     }
 
     private static String detectFormat(byte[] raw) {
@@ -722,6 +584,6 @@ public final class ImageProcessor {
         if (raw[0]=='G' && raw[1]=='I' && raw[2]=='F') return "GIF";
         if (raw[0]=='R' && raw[1]=='I' && raw[2]=='F' && raw[3]=='F') return "RIFF/WebP";
         if (raw[0]==0x42 && raw[1]==0x4D) return "BMP";
-        return null;
+        return "Unknown (" + String.format("%02X %02X %02X %02X", raw[0], raw[1], raw[2], raw[3]) + ")";
     }
 }

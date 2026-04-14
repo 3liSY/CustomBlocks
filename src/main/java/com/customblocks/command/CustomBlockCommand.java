@@ -323,15 +323,6 @@ public class CustomBlockCommand {
                                 StringArgumentType.getString(ctx, "id"),
                                 StringArgumentType.getString(ctx, "shape"))))))
 
-                .then(CommandManager.literal("addshape")
-                    .executes(ctx -> usage(ctx.getSource(), "addshape"))
-                    .then(CommandManager.argument("id", StringArgumentType.word())
-                        .suggests(BLOCK_SUGGESTIONS)
-                        .then(CommandManager.argument("coords", StringArgumentType.greedyString())
-                            .executes(ctx -> cmdAddShape(ctx.getSource(),
-                                StringArgumentType.getString(ctx, "id"),
-                                StringArgumentType.getString(ctx, "coords"))))))
-
                 .then(CommandManager.literal("removeshape")
                     .executes(ctx -> usage(ctx.getSource(), "removeshape"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
@@ -726,11 +717,13 @@ public class CustomBlockCommand {
         thread(() -> {
             try {
                 byte[] raw = ImageProcessor.download(url);
-                ImageProcessor.GifResult gifResult = ImageProcessor.isAnimatedGif(raw) ? ImageProcessor.processGif(raw, size) : null;
+                ImageProcessor.ProcessResult anim = ImageProcessor.isAnimatedImage(raw) ? ImageProcessor.processAnimation(raw, size) : null;
                 byte[] bytes;
                 String animMeta = null;
-                if (gifResult != null) { bytes = gifResult.stripPng(); animMeta = gifResult.mcmeta(); }
-                else {
+                if (anim != null && anim.isAnimated()) {
+                    bytes = anim.bytes();
+                    animMeta = anim.mcmeta();
+                } else {
                     bytes = ImageProcessor.toPng(raw);
                     bytes = ImageProcessor.padToSquare(bytes);
                     bytes = ImageProcessor.replaceBackground(bytes);
@@ -1181,15 +1174,15 @@ public class CustomBlockCommand {
                     byte[] raw = java.nio.file.Files.readAllBytes(img.toPath());
                     String animMeta = null;
                     byte[] bytes;
-                    if (ImageProcessor.isAnimatedGif(raw)) {
-                        ImageProcessor.GifResult gif = ImageProcessor.processGif(raw);
-                        if (gif != null) { bytes = gif.stripPng(); animMeta = gif.mcmeta(); }
-                        else { bytes = ImageProcessor.toPng(raw); bytes = ImageProcessor.padToSquare(bytes); bytes = ImageProcessor.replaceBackground(bytes); }
-                    } else {
-                        bytes = ImageProcessor.toPng(raw);
-                        bytes = ImageProcessor.padToSquare(bytes);
-                        bytes = ImageProcessor.replaceBackground(bytes);
-                    }
+                     ImageProcessor.ProcessResult result = ImageProcessor.isAnimatedImage(raw) ? ImageProcessor.processAnimation(raw, 128) : null;
+                     if (result != null && result.isAnimated()) {
+                         bytes = result.bytes();
+                         animMeta = result.mcmeta();
+                     } else {
+                         bytes = ImageProcessor.toPng(raw);
+                         bytes = ImageProcessor.padToSquare(bytes);
+                         bytes = ImageProcessor.replaceBackground(bytes);
+                     }
                     toAdd.add(new String[]{id, displayName});
                     toBytes.add(bytes);
                     toAnims.add(animMeta);

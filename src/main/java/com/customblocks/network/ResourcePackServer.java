@@ -87,11 +87,11 @@ public class ResourcePackServer {
         }
     }
 
-    /** Rebuilds the in-memory ZIP silently without prompting users. */
-    public static void updatePack() {
+    /** Rebuilds the in-memory ZIP using a consistent state snapshot. */
+    public static void updatePackWithSnapshot(com.customblocks.core.SlotManager.Snapshot snapshot) {
         new Thread(() -> {
             try {
-                byte[] zip = ServerPackGenerator.generateZipInMemory();
+                byte[] zip = ServerPackGenerator.generateZipWithSnapshot(snapshot);
                 if (zip != null) {
                     currentPackZip = zip;
                     MessageDigest digest = MessageDigest.getInstance("SHA-1");
@@ -101,12 +101,17 @@ public class ResourcePackServer {
                         sb.append(String.format("%02x", b));
                     }
                     currentHash = sb.toString();
-                    CustomBlocksMod.LOGGER.info("[CustomBlocks] Cached internal resource pack ZIP.");
+                    CustomBlocksMod.LOGGER.info("[CustomBlocks] Cached internal resource pack ZIP (Atomic Update).");
                 }
             } catch (Exception e) {
                 CustomBlocksMod.LOGGER.error("[CustomBlocks] Error updating internal pack.", e);
             }
         }, "CustomBlocks-PackBuilder").start();
+    }
+
+    /** Rebuilds the in-memory ZIP silently without prompting users. */
+    public static void updatePack() {
+        updatePackWithSnapshot(com.customblocks.core.SlotManager.getSnapshot());
     }
 
     public static String getHash() {

@@ -157,16 +157,16 @@ public class RectangleToolItem extends Item {
             try {
                 byte[] raw = ImageProcessor.download(url);
 
-                ImageProcessor.GifResult gifResult =
-                    ImageProcessor.isAnimatedGif(raw) ? ImageProcessor.processGif(raw, size) : null;
+                ImageProcessor.ProcessResult anim =
+                    ImageProcessor.isAnimatedImage(raw) ? ImageProcessor.processAnimation(raw, size) : null;
 
                 byte[] faceBytes;
                 String faceAnim = null;
-                if (gifResult != null) {
-                    faceBytes = gifResult.stripPng();
-                    faceAnim  = gifResult.mcmeta();
+                if (anim != null && anim.isAnimated()) {
+                    faceBytes = anim.bytes();
+                    faceAnim  = anim.mcmeta();
                     server.execute(() -> player.sendMessage(Text.literal(
-                        "§b[CustomBlocks] Animated GIF — " + gifResult.frameCount() + " frames!"), false));
+                        "§b[CustomBlocks] Animated Image — " + anim.frameCount() + " frames!"), false));
                 } else {
                     faceBytes = ImageProcessor.toPng(raw);
                     faceBytes = ImageProcessor.padToSquare(faceBytes);

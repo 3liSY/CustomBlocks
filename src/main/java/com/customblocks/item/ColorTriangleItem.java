@@ -88,14 +88,25 @@ public class ColorTriangleItem extends Item {
         SlotData source = SlotManager.getBySlot(sb.getSlotKey());
         if (source == null) return ActionResult.PASS;
 
-        if (source.texture == null || source.texture.length == 0) {
+        byte[] workTexture = source.texture;
+        if (workTexture == null || workTexture.length == 0) {
+            // Heuristic Fallback: Use north face, then any face
+            workTexture = source.faceTextures.get("north");
+            if (workTexture == null && !source.faceTextures.isEmpty()) {
+                workTexture = source.faceTextures.values().iterator().next();
+            }
+        }
+
+        if (workTexture == null || workTexture.length == 0) {
             if (player != null) {
                 player.sendMessage(
-                    Text.literal("§c[CustomBlocks] This block has no texture."), true);
+                    Text.literal("§0§l[§b§lCB§0§l] §cThis block has no texture data to recolour."), true);
                 if (world instanceof ServerWorld sw) sw.playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
             }
             return ActionResult.FAIL;
         }
+
+        byte[] finalTex = workTexture;
 
         // ── Build the new block ID ────────────────────────────────────────────
         String baseId  = stripColorSuffix(source.customId);
@@ -144,7 +155,7 @@ public class ColorTriangleItem extends Item {
         Thread t = new Thread(() -> {
             try {
                 System.setProperty("java.awt.headless", "true");
-                byte[] newTexture = recolourBackground(finalSrc.texture, fR, fG, fB);
+                byte[] newTexture = recolourBackground(finalTex, fR, fG, fB);
 
                 server.execute(() -> {
                     if (SlotManager.freeSlots() == 0) {

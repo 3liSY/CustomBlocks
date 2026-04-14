@@ -23,16 +23,29 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 public class ServerPackGenerator {
+    private static final Gson   GSON        = new GsonBuilder().setPrettyPrinting().create();
+    private static final int    PACK_FORMAT = 34;
+    private static final String MOD_ID      = CustomBlocksMod.MOD_ID;
 
-    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final int PACK_FORMAT = 34;
-    private static final String MOD_ID = CustomBlocksMod.MOD_ID;
     private static final Map<String, String> FACE_TO_MC = Map.of(
-            "top", "up", "bottom", "down", "north", "north",
-            "south", "south", "east", "east", "west", "west"
+            "top",    "up",
+            "bottom", "down",
+            "north",  "north",
+            "south",  "south",
+            "east",   "east",
+            "west",   "west"
     );
 
+
+    /** Default: generate from live snapshot. */
     public static byte[] generateZipInMemory() {
+        return generateZipWithSnapshot(SlotManager.getSnapshot());
+    }
+
+    /**
+     * The Royal Architect Fix: Generates the ZIP from a frozen snapshot to prevent texture 'griefing'.
+     */
+    public static byte[] generateZipWithSnapshot(SlotManager.Snapshot snapshot) {
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             try (ZipOutputStream zos = new ZipOutputStream(baos)) {
@@ -45,10 +58,14 @@ public class ServerPackGenerator {
                 meta.add("pack", pack);
                 addZipEntry(zos, "pack.mcmeta", GSON.toJson(meta).getBytes(StandardCharsets.UTF_8));
 
+                // Map slots by index for fast lookup during model generation
+                Map<Integer, SlotData> slotMap = new java.util.HashMap<>();
+                for (SlotData d : snapshot.slots()) slotMap.put(d.index, d);
+
                 for (int i = 0; i < CustomBlocksConfig.maxSlots; i++) {
                     String slotKey = "slot_" + i;
                     String modelRef = MOD_ID + ":block/" + slotKey;
-                    SlotData data = SlotManager.getByIndex(i);
+                    SlotData data = slotMap.get(i);
 
                     // default texture
                     if (data != null && data.texture != null && data.texture.length > 0) {
@@ -72,6 +89,7 @@ public class ServerPackGenerator {
                                 BufferedImage faceImg = ImageIO.read(new ByteArrayInputStream(faceBytes));
                                 if (faceImg != null && faceImg.getHeight() > faceImg.getWidth()) {
                                     int frames = faceImg.getHeight() / faceImg.getWidth();
+                                    // Royal standard: Fluid Motion (interpolate: true)
                                     StringBuilder sb = new StringBuilder("{\"animation\":{\"interpolate\":true,\"frames\":[");
                                     for (int fi = 0; fi < frames; fi++) {
                                         if (fi > 0) sb.append(",");
@@ -151,7 +169,7 @@ public class ServerPackGenerator {
                 }
 
                 // Tab Icon
-                byte[] tabIcon = SlotManager.getTabIconTexture();
+                byte[] tabIcon = snapshot.tabIcon();
                 if (tabIcon != null && tabIcon.length > 0) {
                     addZipEntry(zos, "assets/" + MOD_ID + "/textures/item/tab_icon.png", tabIcon);
                     addZipEntry(zos, "pack.png", tabIcon);

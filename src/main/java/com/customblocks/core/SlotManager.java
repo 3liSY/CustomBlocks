@@ -16,15 +16,11 @@ import java.util.stream.Stream;
 
 /**
  * Thread-safe slot manager using immutable {@link SlotData} values.
- * <p>
- * Slot data lives in two maps:
- * <ul>
- *     <li>{@code byId}   — customId → SlotData  (fast ID lookup)</li>
- *     <li>{@code bySlot} — "slot_N" → SlotData  (fast slot-index lookup)</li>
- * </ul>
- * All mutation methods atomically replace the SlotData in both maps.
  */
 public final class SlotManager {
+
+    /** Atomic container for the entire custom-block database. */
+    public record Snapshot(List<SlotData> slots, byte[] tabIcon) {}
 
     private static final Logger LOGGER = LoggerFactory.getLogger("CustomBlocks");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -100,6 +96,14 @@ public final class SlotManager {
                 .filter(d -> !"tab_icon".equals(d.customId))
                 .filter(d -> d.isBroken || d.texture == null || d.texture.length <= 4)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Captures an atomic, immutable snapshot of the current state.
+     * This is the Royal Architect fix for 'Griefing' — prevents desync during ZIP generation.
+     */
+    public static synchronized Snapshot getSnapshot() {
+        return new Snapshot(new ArrayList<>(byId.values()), tabIconTexture);
     }
 
     // ── Mutation ─────────────────────────────────────────────────────────────
@@ -261,9 +265,8 @@ public final class SlotManager {
     }
 
     public static void saveAllAsync() {
-        // Capture a snapshot of the current state immediately
-        List<SlotData> snapshot = new ArrayList<>(byId.values());
-        byte[] icon = tabIconTexture;
+        // Capture a snapshot of the current state immediately (Snapshot Atomicity)
+        Snapshot snapshot = getSnapshot();
 
         IO_EXECUTOR.submit(() -> {
             Path dir = Path.of(DATA_DIR);
@@ -273,12 +276,12 @@ public final class SlotManager {
                 JsonObject root = new JsonObject();
 
                 // Tab icon
-                if (icon != null)
-                    root.addProperty("tabIconTexture", Base64.getEncoder().encodeToString(icon));
+                if (snapshot.tabIcon != null)
+                    root.addProperty("tabIconTexture", Base64.getEncoder().encodeToString(snapshot.tabIcon));
 
                 // Slots
                 JsonArray arr = new JsonArray();
-                for (SlotData data : snapshot) {
+                for (SlotData data : snapshot.slots) {
                     if ("tab_icon".equals(data.customId)) continue;
                     arr.add(serializeSlot(data));
                 }
@@ -288,8 +291,8 @@ public final class SlotManager {
                 Files.writeString(tempFile, GSON.toJson(root), StandardCharsets.UTF_8);
                 Files.move(tempFile, file, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
 
-                ResourcePackServer.updatePack();
-                // Optional: LOGGER.debug("[CustomBlocks] Async save complete.");
+                // Pass the EXACT same snapshot to the Resource Pack generator
+                ResourcePackServer.updatePackWithSnapshot(snapshot);
             } catch (Exception e) {
                 LOGGER.error("[CustomBlocks] Failed to save slot data asynchronously", e);
             }
