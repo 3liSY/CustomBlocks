@@ -72,13 +72,17 @@ public final class ImageProcessor {
             // Detect animated format (GIF, APNG, animated WebP)
             if (isAnimatedImage(raw)) {
                 GifResult gif = processAnimatedImage(raw, targetSize);
-                if (gif != null) return new ProcessResult(gif.stripPng, gif.mcmeta);
+                if (gif != null) {
+                    if (isBrokenTexture(gif.stripPng)) throw new IOException("Broken texture detected in GIF.");
+                    return new ProcessResult(gif.stripPng, gif.mcmeta);
+                }
             }
             
             byte[] png = toPng(raw);
             png = padToSquare(png);
             png = replaceBackground(png);
             byte[] processed = resizeTo(png, targetSize);
+            if (isBrokenTexture(processed)) throw new IOException("Broken texture detected.");
             return new ProcessResult(processed, null);
         } catch (Exception e) {
             CustomBlocksMod.LOGGER.error("[CustomBlocks] Error processing image from " + url, e);
@@ -393,7 +397,7 @@ public final class ImageProcessor {
             // Build strip
             BufferedImage strip = new BufferedImage(frameSize, frameSize * frames.size(), BufferedImage.TYPE_INT_ARGB);
             Graphics2D sg = strip.createGraphics();
-            sg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            sg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
             sg.setColor(java.awt.Color.BLACK);
             sg.fillRect(0, 0, frameSize, frameSize * frames.size());
             for (int i = 0; i < frames.size(); i++)
@@ -403,7 +407,7 @@ public final class ImageProcessor {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             ImageIO.write(strip, "PNG", baos);
 
-            StringBuilder mcmeta = new StringBuilder("{\"animation\":{\"frames\":[");
+            StringBuilder mcmeta = new StringBuilder("{\"animation\":{\"interpolate\":false,\"frames\":[");
             for (int i = 0; i < frames.size(); i++) {
                 if (i > 0) mcmeta.append(",");
                 mcmeta.append("{\"index\":").append(i).append(",\"time\":").append(defaultDelay).append("}");
@@ -536,7 +540,7 @@ public final class ImageProcessor {
             // Build strip at target frameSize
             BufferedImage strip = new BufferedImage(frameSize, frameSize * numFrames, BufferedImage.TYPE_INT_ARGB);
             Graphics2D sg = strip.createGraphics();
-            sg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            sg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
             sg.setColor(Color.BLACK);
             sg.fillRect(0, 0, frameSize, frameSize * numFrames);
             for (int i = 0; i < frames.size(); i++) {
@@ -547,7 +551,7 @@ public final class ImageProcessor {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             ImageIO.write(strip, "PNG", baos);
 
-            StringBuilder mcmeta = new StringBuilder("{\"animation\":{\"interpolate\":true,\"frames\":[");
+            StringBuilder mcmeta = new StringBuilder("{\"animation\":{\"interpolate\":false,\"frames\":[");
             for (int i = 0; i < numFrames; i++) {
                 if (i > 0) mcmeta.append(",");
                 mcmeta.append("{\"index\":").append(i).append(",\"time\":").append(delays.get(i)).append("}");
@@ -666,15 +670,17 @@ public final class ImageProcessor {
             int blackPixels   = 0;   // pure black (0,0,0)
             int totalPixels   = w * h;
             if (totalPixels == 0) return true;
+            double[] LAB_MAGENTA = rgbToLab(0xFFFF00FF);
+            double[] LAB_BLACK = rgbToLab(0xFF000000);
             for (int y = 0; y < h; y++) {
                 for (int x = 0; x < w; x++) {
                     int argb = img.getRGB(x, y);
                     int a = (argb >> 24) & 0xFF;
-                    int r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
                     if (a < 5) continue; // ignore transparency
-                    if (r >= 240 && g <= 15 && b >= 240) {
+                    double[] lab = rgbToLab(argb);
+                    if (deltaE(lab, LAB_MAGENTA) <= 12.0) {
                         magentaPixels++;
-                    } else if (r <= 10 && g <= 10 && b <= 10) {
+                    } else if (deltaE(lab, LAB_BLACK) <= 12.0) {
                         blackPixels++;
                     }
                 }

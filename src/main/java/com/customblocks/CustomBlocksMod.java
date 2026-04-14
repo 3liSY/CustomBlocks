@@ -247,6 +247,9 @@ public class CustomBlocksMod implements ModInitializer {
             return net.minecraft.util.ActionResult.PASS;
         });
 
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            com.customblocks.assistant.AssistantManager.hide();
+        });
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
             ResourcePackServer.stop();
         });

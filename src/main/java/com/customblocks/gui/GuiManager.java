@@ -63,7 +63,9 @@ public class GuiManager {
         SETTABICON_URL,
         ADDSHAPE_COORDS,
         REID_TEXT,
-        ADMIN_CUSTOM_TITLE
+        ADMIN_CUSTOM_TITLE,
+        SET_LIGHT,
+        SET_HARDNESS
     }
 
     public record PendingInput(InputAction action, String blockId, String face,
@@ -663,6 +665,44 @@ public class GuiManager {
                 openMain(player, 0);
                 return true;
             }
+            case SET_LIGHT -> {
+                if ("cancel".equalsIgnoreCase(text)) { send(player, "§7[Properties] Cancelled."); openPropertiesGui(player, blockId, rp); return true; }
+                try {
+                    int light = Integer.parseInt(text);
+                    if (light < 0 || light > 15) throw new NumberFormatException();
+                    SlotData d = SlotManager.getById(blockId);
+                    if (d == null) { openMain(player, rp); return true; }
+                    UndoManager.pushUndoMutation(blockId, d, "setglow", player.getUuid());
+                    SlotManager.setLightLevel(blockId, light);
+                    SlotManager.saveAll();
+                    syncProp(player, SlotManager.getById(blockId)); 
+                    send(player, "§a[CB] Light level set to " + light + ".");
+                    openPropertiesGui(player, blockId, rp);
+                } catch (NumberFormatException e) {
+                    send(player, "§cInvalid light level. Must be 0-15.");
+                    openPropertiesGui(player, blockId, rp);
+                }
+                return true;
+            }
+            case SET_HARDNESS -> {
+                if ("cancel".equalsIgnoreCase(text)) { send(player, "§7[Properties] Cancelled."); openPropertiesGui(player, blockId, rp); return true; }
+                try {
+                    float hardness = Float.parseFloat(text);
+                    if (hardness < -1.0f) throw new NumberFormatException();
+                    SlotData d = SlotManager.getById(blockId);
+                    if (d == null) { openMain(player, rp); return true; }
+                    UndoManager.pushUndoMutation(blockId, d, "sethardness", player.getUuid());
+                    SlotManager.setHardness(blockId, hardness);
+                    SlotManager.saveAll();
+                    syncProp(player, SlotManager.getById(blockId)); 
+                    send(player, "§a[CB] Hardness set to " + hardness + ".");
+                    openPropertiesGui(player, blockId, rp);
+                } catch (NumberFormatException e) {
+                    send(player, "§cInvalid hardness value.");
+                    openPropertiesGui(player, blockId, rp);
+                }
+                return true;
+            }
         }
         return false;
     }
@@ -959,13 +999,13 @@ public class GuiManager {
         }
         if (slot == 22) { PENDING.put(uuid, new PendingInput(InputAction.ADDSHAPE_COORDS,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[Shape] §eType coords (or §ccancel§e): §7x1,y1,z1,x2,y2,z2  §8(0–16)"); return; }
         if (slot == 23) { UndoManager.pushUndoMutation(id, d, "clearshape", uuid); SlotManager.setShape(id, null); SlotManager.saveAll(); broadcastShape(player.getServer(),SlotManager.getById(id)); send(player,"§a[Shape] Cleared — full cube."); reopenShapeEditor(player,id,rp,0); return; }
-        if (slot >= 28 && slot <= 35) {
+        if (slot >= 28 && slot <= 36) {
             int boxIdx = boxPage*9 + (slot-28);
             if (boxIdx < boxes.size()) { UndoManager.pushUndoMutation(id, d, "removeshape", uuid); SlotManager.removeBox(id,boxIdx); SlotManager.saveAll(); broadcastShape(player.getServer(),SlotManager.getById(id)); send(player,"§a[Shape] Removed box #"+boxIdx+"."); int np=Math.min(boxPage,Math.max(0,(boxes.size()-2)/9)); reopenShapeEditor(player,id,rp,np); }
             return;
         }
         List<SlotData> variants = findShapeVariants(id);
-        if (slot >= 37 && slot <= 44) { int vi=slot-37; if(vi<variants.size()) openEditor(player,variants.get(vi).customId,rp); return; }
+        if (slot >= 38 && slot <= 44) { int vi=slot-38; if(vi<variants.size()) openEditor(player,variants.get(vi).customId,rp); return; }
         if (slot==45 && boxPage>0) { reopenShapeEditor(player,id,rp,boxPage-1); return; }
         if (slot==53) { int maxPg=Math.max(0,(boxes.size()-1)/9); if(boxPage<maxPg) reopenShapeEditor(player,id,rp,boxPage+1); }
     }
@@ -1013,11 +1053,13 @@ public class GuiManager {
         if(d == null) { openMain(player, rp); return; }
         UUID uuid = player.getUuid();
         switch(slot) {
-            case 10 -> { UndoManager.pushUndoMutation(id, d, "setglow", uuid); SlotManager.setLightLevel(id,Math.max(0,d.lightLevel-1)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
-            case 12 -> { UndoManager.pushUndoMutation(id, d, "setglow", uuid); SlotManager.setLightLevel(id,Math.min(15,d.lightLevel+1)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
-            case 14 -> { UndoManager.pushUndoMutation(id, d, "sethardness", uuid); SlotManager.setHardness(id,prevHardness(d.hardness)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
-            case 16 -> { UndoManager.pushUndoMutation(id, d, "sethardness", uuid); SlotManager.setHardness(id,nextHardness(d.hardness)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
-            case 22 -> {
+            case 19 -> { UndoManager.pushUndoMutation(id, d, "setglow", uuid); SlotManager.setLightLevel(id,Math.max(0,d.lightLevel-1)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
+            case 20 -> { PENDING.put(uuid, new PendingInput(InputAction.SET_LIGHT, id, null, null, null, rp)); closeForPrompt(player); send(player, "§6[Properties] §eType light level (0-15) or §ccancel§e:"); }
+            case 21 -> { UndoManager.pushUndoMutation(id, d, "setglow", uuid); SlotManager.setLightLevel(id,Math.min(15,d.lightLevel+1)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
+            case 23 -> { UndoManager.pushUndoMutation(id, d, "sethardness", uuid); SlotManager.setHardness(id,prevHardness(d.hardness)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
+            case 24 -> { PENDING.put(uuid, new PendingInput(InputAction.SET_HARDNESS, id, null, null, null, rp)); closeForPrompt(player); send(player, "§6[Properties] §eType hardness value (e.g. 0.5, 1.5, -1) or §ccancel§e:"); }
+            case 25 -> { UndoManager.pushUndoMutation(id, d, "sethardness", uuid); SlotManager.setHardness(id,nextHardness(d.hardness)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
+            case 40 -> {
                 UndoManager.pushUndoMutation(id, d, "setcollision", uuid); SlotManager.setCollision(id,!d.noCollision); SlotManager.saveAll();
                 SlotData upd = SlotManager.getById(id);
                 NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setcollision",upd.index,id,null,null,0,0,"stone",null,upd.noCollision?"false":"true"));
@@ -1362,11 +1404,11 @@ public class GuiManager {
         inv.setStack(4, disp);
         
         inv.setStack(19, ui(Items.QUARTZ,"§c◀ Decrease Glow §8(-1)","§7Current: §e"+d.lightLevel, "§b• Tip: §7Light level 15 is max brightness"));
-        inv.setStack(20, uiGlint(Items.AMETHYST_CLUSTER,"§e✦ Light: §f"+d.lightLevel,"§70=off • 7=torch • 15=max", "§b• Tip: §7Matches Minecraft vanilla light values"));
+        inv.setStack(20, uiGlint(Items.AMETHYST_CLUSTER,"§e✦ Light: §f"+d.lightLevel,"§70=off • 7=torch • 15=max", "§b• Tip: §7Matches Minecraft vanilla light values", "§e§lClick to type value manually"));
         inv.setStack(21, ui(Items.GLOWSTONE_DUST,"§a▶ Increase Glow §8(+1)","§7Current: §e"+d.lightLevel));
         
         inv.setStack(23, ui(Items.FLINT,"§c◀ Softer §8(-)","§7Current: §f"+hardnessLabel(d.hardness), "§b• Tip: §7Hardness 0 breaks instantly"));
-        inv.setStack(24, uiGlint(Items.NETHERITE_INGOT,"§b⚙ Hardness: §f"+hardnessLabel(d.hardness),"§7-1=Bedrock • 0=Instant • 1.5=Stone", "§b• Tip: §7Determines how fast players mine this"));
+        inv.setStack(24, uiGlint(Items.NETHERITE_INGOT,"§b⚙ Hardness: §f"+hardnessLabel(d.hardness),"§7-1=Bedrock • 0=Instant • 1.5=Stone", "§b• Tip: §7Determines how fast players mine this", "§e§lClick to type value manually"));
         inv.setStack(25, ui(Items.NETHERITE_SCRAP,"§a▶ Harder §8(+)","§7Current: §f"+hardnessLabel(d.hardness)));
 
         inv.setStack(40, d.noCollision
@@ -1495,18 +1537,18 @@ public class GuiManager {
         for (int i=24;i<=26;i++) inv.setStack(i,glass());
         inv.setStack(27, ui(Items.PURPLE_STAINED_GLASS_PANE,"§5── Active Physics Boxes §8(click to delete) ──","§7Individual hitbox parts"));
         int bstart = boxPage*9;
-        for (int i=0;i<8&&(bstart+i)<boxes.size();i++) { SlotData.ShapeBox b=boxes.get(bstart+i); inv.setStack(28+i,ui(Items.STRUCTURE_VOID,"§e§lPhysics Box #"+(bstart+i),"§7"+b.toDisplayString(),"§c§oClick to DELETE this box")); }
-        for (int s=28+Math.min(8,Math.max(0,boxes.size()-bstart));s<=35;s++) inv.setStack(s,glass());
+        for (int i=0;i<9&&(bstart+i)<boxes.size();i++) { SlotData.ShapeBox b=boxes.get(bstart+i); inv.setStack(28+i,ui(Items.STRUCTURE_VOID,"§e§lPhysics Box #"+(bstart+i),"§7"+b.toDisplayString(),"§c§oClick to DELETE this box")); }
+        for (int s=28+Math.min(9,Math.max(0,boxes.size()-bstart));s<=36;s++) inv.setStack(s,glass());
         List<SlotData> variants = findShapeVariants(d.customId);
-        inv.setStack(36, ui(Items.LIME_STAINED_GLASS_PANE,"§a── Multi-Shape Collection ──","§7Variant blocks based on this design"));
-        for (int i=0;i<Math.min(8,variants.size());i++) {
+        inv.setStack(37, ui(Items.LIME_STAINED_GLASS_PANE,"§a── Multi-Shape Collection ──","§7Variant blocks based on this design"));
+        for (int i=0;i<Math.min(7,variants.size());i++) {
             SlotData v=variants.get(i);
             ItemStack vs=CustomBlocksMod.safeSlotItem(v.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(v.index)):ItemStack.EMPTY;
             vs.set(DataComponentTypes.CUSTOM_NAME,Text.literal("§f§l"+v.displayName).styled(s->s.withItalic(false)));
             vs.set(DataComponentTypes.LORE,new LoreComponent(List.of(lore("§7ID: §b"+v.customId),lore("§7Shape: §5"+v.shapeLabel()),lore("§8Click to open this variant's studio"))));
-            inv.setStack(37+i,vs);
+            inv.setStack(38+i,vs);
         }
-        for (int s=37+Math.min(8,variants.size());s<=44;s++) inv.setStack(s,glass());
+        for (int s=38+Math.min(7,variants.size());s<=44;s++) inv.setStack(s,glass());
         int tbp=boxes.isEmpty()?0:Math.max(0,(boxes.size()-1)/9);
         inv.setStack(45,boxPage>0?uiGlint(Items.ARROW,"§7◀ Previous Boxes","§8Page "+boxPage):glass());
         for(int i=46;i<=48;i++) inv.setStack(i,glass());
