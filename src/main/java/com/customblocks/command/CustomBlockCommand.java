@@ -291,10 +291,6 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("gui")
                     .executes(ctx -> cmdGui(ctx.getSource())))
 
-                // ── admingui (legacy redirect) ───────────────────────────────
-                .then(CommandManager.literal("admingui")
-                    .executes(ctx -> cmdGui(ctx.getSource())))
-
                 // ── reload ───────────────────────────────────────────────────
                 .then(CommandManager.literal("reload")
                     .executes(ctx -> cmdReload(ctx.getSource())))

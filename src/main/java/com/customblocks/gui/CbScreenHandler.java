@@ -25,6 +25,9 @@ public class CbScreenHandler extends GenericContainerScreenHandler {
     private boolean disposed = false;
 
     public CbScreenHandler(int syncId, PlayerInventory playerInventory, Inventory inventory) {
+        // Standardize on 6 rows (54 slots) for all CustomBlocks manageable menus.
+        // If the inventory is small (like a chest 9x3), we use 3 rows, but for anything
+        // larger (like our editors/pickers), we use 6 rows to allow for the 'Premium Depth' feel.
         super(inventory.size() <= 27 ? ScreenHandlerType.GENERIC_9X3 : ScreenHandlerType.GENERIC_9X6,
               syncId, playerInventory, inventory, inventory.size() <= 27 ? 3 : 6);
         this.inventory = inventory;

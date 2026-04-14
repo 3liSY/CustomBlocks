@@ -539,7 +539,7 @@ public final class ImageProcessor {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             ImageIO.write(strip, "PNG", baos);
 
-            StringBuilder mcmeta = new StringBuilder("{\"animation\":{\"frames\":[");
+            StringBuilder mcmeta = new StringBuilder("{\"animation\":{\"interpolate\":true,\"frames\":[");
             for (int i = 0; i < numFrames; i++) {
                 if (i > 0) mcmeta.append(",");
                 mcmeta.append("{\"index\":").append(i).append(",\"time\":").append(delays.get(i)).append("}");
@@ -642,7 +642,11 @@ public final class ImageProcessor {
     }
 
     /**
-     * Checks if a texture is mostly alternating magenta (#FF00FF) and black (#000000).
+     * Checks if a texture is 'Broken' (corrupted, missing, or failed download).
+     * Detects:
+     *  1. Classic MC checkerboard (Pure Magenta + Pure Black)
+     *  2. High concentration of Pure Magenta (Broken download/export)
+     *  3. Pure/Near-Pure Black (Failed processing or empty buffer)
      */
     public static boolean isBrokenTexture(byte[] pngBytes) {
         if (pngBytes == null || pngBytes.length == 0) return true;
@@ -650,7 +654,7 @@ public final class ImageProcessor {
             BufferedImage img = ImageIO.read(new ByteArrayInputStream(pngBytes));
             if (img == null) return true;
             int w = img.getWidth(), h = img.getHeight();
-            int magentaPixels = 0;   // pure magenta (255,0,255) — the MC missing texture color
+            int magentaPixels = 0;   // pure magenta (255,0,255)
             int blackPixels   = 0;   // pure black (0,0,0)
             int totalPixels   = w * h;
             if (totalPixels == 0) return true;
@@ -659,23 +663,29 @@ public final class ImageProcessor {
                     int argb = img.getRGB(x, y);
                     int a = (argb >> 24) & 0xFF;
                     int r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
-                    if (a < 10) continue; // skip fully transparent pixels
+                    if (a < 5) continue; // ignore transparency
                     if (r >= 240 && g <= 15 && b >= 240) {
                         magentaPixels++;
-                    } else if (r <= 15 && g <= 15 && b <= 15) {
+                    } else if (r <= 10 && g <= 10 && b <= 10) {
                         blackPixels++;
                     }
                 }
             }
-            // Classic MC missing-texture checkerboard: magenta + black squares
-            int checkerboard = magentaPixels + blackPixels;
-            if (magentaPixels > 0 && checkerboard > (totalPixels * 0.4)) return true;
-            // Fully black texture (failed download or cleared texture)
-            if (blackPixels > (totalPixels * 0.95)) return true;
+            // Corruption signals:
+            float magentaRatio = (float) magentaPixels / totalPixels;
+            float blackRatio   = (float) blackPixels / totalPixels;
+            
+            // Standard MC missing-texture check
+            if (magentaRatio > 0.1 && (magentaRatio + blackRatio) > 0.45) return true;
+            // High-concentration magenta (export failure)
+            if (magentaRatio > 0.3) return true;
+            // Near-total black (download failure)
+            if (blackRatio > 0.92) return true;
+            
             return false;
         } catch (Exception e) {
             com.customblocks.gui.GuiManager.logError();
-            return true; // if we can't even read it, it's broken
+            return true;
         }
     }
 

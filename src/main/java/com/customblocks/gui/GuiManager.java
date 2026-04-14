@@ -118,16 +118,19 @@ public class GuiManager {
      */
     public static void handleEscBack(ServerPlayerEntity player) {
         UUID uuid = player.getUuid();
-        PENDING.remove(uuid); // Clear any ghost pending inputs
+        PENDING.remove(uuid); 
         GuiState state = STATES.get(uuid);
         if (state == null) return;
 
         Deque<GuiState> stack = BACK_STACK.get(uuid);
         if (stack != null && !stack.isEmpty()) {
             GuiState prev = stack.pop();
+            // Implement "Back once, then exit entirely":
+            // We pop the previous menu, then clear the stack so the next ESC closes.
+            stack.clear();
             restoreState(player, prev);
         } else {
-            // At root - fully close
+            // At root or after one back-step - fully close
             STATES.remove(uuid);
         }
     }
@@ -154,7 +157,7 @@ public class GuiManager {
         STATES.put(player.getUuid(), GuiState.main(page));
         openScreen(player, new SimpleNamedScreenHandlerFactory(
             (s, pi, p) -> new CbScreenHandler(s, pi, buildMain(player, STATES.getOrDefault(player.getUuid(), GuiState.main(0)).page())),
-            Text.literal("§8CustomBlocks - Main Menu")));
+            Text.literal("§b§l✦ §r§fMain Dashboard")));
     }
 
     public static void openEditorPicker(ServerPlayerEntity player) { openEditorPicker(player, 0); }
@@ -167,7 +170,7 @@ public class GuiManager {
         final int fp = page;
         openScreen(player, new SimpleNamedScreenHandlerFactory(
             (s, pi, p) -> new CbScreenHandler(s, pi, buildPicker(fp, false)),
-            Text.literal("§b§l▶ §r§fChoose a block §7(ESC = back)")));
+            Text.literal("§b§l▶ §r§fChoose a block")));
     }
 
     public static void openEditor(ServerPlayerEntity player, String id, int returnPage, boolean fromCommand) {
@@ -179,7 +182,7 @@ public class GuiManager {
             : GuiState.editor(id, returnPage));
         openScreen(player, new SimpleNamedScreenHandlerFactory(
             (s, pi, p) -> new CbScreenHandler(s, pi, buildEditor(d, false)),
-            Text.literal("§e§l✎ §r§fEditor §8— §e" + d.displayName + " §7(ESC = back)")));
+            Text.literal("§e§l✎ §r§fBlock Design Studio §8— " + d.displayName)));
     }
 
     public static void openEditor(ServerPlayerEntity player, String id, int returnPage) {
@@ -193,7 +196,7 @@ public class GuiManager {
         STATES.put(player.getUuid(), GuiState.faceEditor(id, returnPage));
         openScreen(player, new SimpleNamedScreenHandlerFactory(
             (s, pi, p) -> new CbScreenHandler(s, pi, buildFaceEditor(d)),
-            Text.literal("§d§l⬡ §r§fFace Editor §8— §d" + d.displayName + " §7(ESC = back)")));
+            Text.literal("§d§l⬡ §r§fFace Mapping Forge §8— " + d.displayName)));
     }
 
     public static void openShapeEditor(ServerPlayerEntity player, String id, int returnPage) {
@@ -203,7 +206,7 @@ public class GuiManager {
         STATES.put(player.getUuid(), GuiState.shapeEditor(id, returnPage));
         openScreen(player, new SimpleNamedScreenHandlerFactory(
             (s, pi, p) -> new CbScreenHandler(s, pi, buildShapeEditor(d, 0)),
-            Text.literal("§5§l⬡ §r§fShape Editor §8— §5" + d.displayName + " §7(ESC = back)")));
+            Text.literal("§5§l⬡ §r§fShape Sculptor §8— " + d.displayName)));
     }
 
     public static void openMaintenanceMenu(ServerPlayerEntity player) {
@@ -211,7 +214,7 @@ public class GuiManager {
         STATES.put(player.getUuid(), GuiState.maintenance());
         openScreen(player, new SimpleNamedScreenHandlerFactory(
             (s, pi, p) -> new CbScreenHandler(s, pi, buildMaintenanceMenu(player)),
-            Text.literal("§b§l✦ §r§fServer Maintenance §7(ESC = back)")));
+            Text.literal("§b§l✦ §r§fServer Maintenance")));
     }
 
 
@@ -220,7 +223,7 @@ public class GuiManager {
         STATES.put(player.getUuid(), GuiState.help());
         openScreen(player, new SimpleNamedScreenHandlerFactory(
             (s, pi, p) -> new CbScreenHandler(s, pi, buildHelpGui()),
-            Text.literal("§a§l✦ §r§fHelp & Info §7(ESC = back)")));
+            Text.literal("§a§l✦ §r§fCommand Hub & Reference")));
     }
 
     public static void openPropertiesGui(ServerPlayerEntity player, String id, int returnPage) {
@@ -230,7 +233,7 @@ public class GuiManager {
         STATES.put(player.getUuid(), GuiState.properties(id, returnPage));
         openScreen(player, new SimpleNamedScreenHandlerFactory(
             (s, pi, p) -> new CbScreenHandler(s, pi, buildPropertiesGui(d)),
-            Text.literal("§6§l⚙ §r§fProperties §8— §6" + d.displayName + " §7(ESC = back)")));
+            Text.literal("§6§l⚙ §r§fEngine Properties §8— " + d.displayName)));
     }
 
     public static void openSoundMenu(ServerPlayerEntity player, String id, int returnPage) {
@@ -240,7 +243,7 @@ public class GuiManager {
         STATES.put(player.getUuid(), GuiState.sound(id, returnPage));
         openScreen(player, new SimpleNamedScreenHandlerFactory(
             (s, pi, p) -> new CbScreenHandler(s, pi, buildSoundMenu(d)),
-            Text.literal("§e§l♫ §r§fBlock Sounds §8— §e" + d.displayName + " §7(ESC = back)")));
+            Text.literal("§e§l♫ §r§fAcoustic Tuner §8— " + d.displayName)));
     }
 
     public static void openTabIconPicker(ServerPlayerEntity player, int page) {
@@ -256,13 +259,14 @@ public class GuiManager {
 
     public static void openPortConfigMenu(ServerPlayerEntity player) {
         STATES.put(player.getUuid(), GuiState.findPortGui());
-        SimpleInventory inv = new SimpleInventory(27);
-        for(int i=0; i<27; i++) inv.setStack(i, glass());
-        inv.setStack(10, uiGlint(net.minecraft.item.Items.REDSTONE, "§ePort 8000", "§7Standard port for most servers", "§cClick to set port to 8000"));
-        inv.setStack(12, uiGlint(net.minecraft.item.Items.REDSTONE_BLOCK, "§ePort 8080", "§7Alternative standard port", "§cClick to set port to 8080"));
-        inv.setStack(14, uiGlint(net.minecraft.item.Items.COMPARATOR, "§ePort 25565", "§7Minecraft server port", "§cClick to set port to 25565"));
-        inv.setStack(16, uiGlint(net.minecraft.item.Items.REPEATER, "§ePort 24454", "§7Default CustomBlocks port", "§cClick to set port to 24454"));
-        inv.setStack(22, ui(net.minecraft.item.Items.RED_CONCRETE, "§c◀ Back to Main Menu"));
+        SimpleInventory inv = new SimpleInventory(54);
+        for(int i=0; i<54; i++) inv.setStack(i, glass());
+        inv.setStack(4, uiGlint(net.minecraft.item.Items.BEACON, "§6§lResource Pack Host Config", "§7Choose a port for the internal web server"));
+        inv.setStack(19, uiGlint(net.minecraft.item.Items.PAPER, "§fPort 8000", "§7Standard web port", "§cClick to set port"));
+        inv.setStack(20, uiGlint(net.minecraft.item.Items.REDSTONE_BLOCK, "§ePort 8080", "§7Alternative standard port", "§cClick to set port"));
+        inv.setStack(21, uiGlint(net.minecraft.item.Items.COMPARATOR, "§ePort 25565", "§7Minecraft server port", "§cClick to set port"));
+        inv.setStack(22, uiGlint(net.minecraft.item.Items.REPEATER, "§ePort 24454", "§7Default CustomBlocks port", "§cClick to set port"));
+        inv.setStack(45, uiGlint(net.minecraft.item.Items.RED_CONCRETE, "§c◀ Back to Main Menu"));
         openScreen(player, new SimpleNamedScreenHandlerFactory((s, pi, p) -> new CbScreenHandler(s, pi, inv), net.minecraft.text.Text.literal("§6§l⚙ §r§fResource Pack Port")));
     }
 
@@ -276,7 +280,7 @@ public class GuiManager {
         final int fp = page;
         openScreen(player, new SimpleNamedScreenHandlerFactory(
             (s, pi, p) -> new CbScreenHandler(s, pi, buildPicker(fp, true)),
-            Text.literal("§6§l✦ §r§fIntegrity Scanner §7(ESC = back)")));
+            Text.literal("§6§l✦ §r§fIntegrity Scanner")));
     }
 
     public static List<SlotData> brokenBlocks() {
@@ -333,6 +337,7 @@ public class GuiManager {
     // ── Click dispatch ───────────────────────────────────────────────────────
 
     public static void handleClick(ServerPlayerEntity player, int slot, int button) {
+        playClick(player);
         GuiState state = STATES.get(player.getUuid());
         if (state == null) return;
         switch (state.mode()) {
@@ -395,7 +400,7 @@ public class GuiManager {
                 String id = pending.partialId(), name = pending.partialName();
                 if (id == null || name == null) { openMain(player, rp); return true; }
                 if (SlotManager.freeSlots() == 0) { send(player, "§cAll slots full!"); openMain(player, rp); return true; }
-                send(player, "§e[GUI] Downloading '" + name + "'…");
+                send(player, "§e[CB] Downloading '" + name + "'…");
                 MinecraftServer srv = player.getServer();
                 thread(player, () -> { try {
                     byte[] raw = ImageProcessor.download(text);
@@ -405,24 +410,25 @@ public class GuiManager {
                     else { bytes = ImageProcessor.toPng(raw); bytes = ImageProcessor.padToSquare(bytes); bytes = ImageProcessor.replaceBackground(bytes); bytes = ImageProcessor.resizeTo(bytes, CustomBlocksConfig.defaultTextureSize); }
                     final byte[] fb = bytes; final String fa = anim;
                     srv.execute(() -> {
-                        if (SlotManager.hasId(id)) { send(player, "§c'" + id + "' already exists."); openMain(player, rp); return; }
+                        if (SlotManager.hasId(id)) { playError(player); send(player, "§c'" + id + "' already exists."); openMain(player, rp); return; }
                         SlotData d = SlotManager.assign(id, name, fb);
-                        if (d == null) { send(player, "§cNo free slots!"); openMain(player, rp); return; }
+                        if (d == null) { playError(player); send(player, "§cNo free slots!"); openMain(player, rp); return; }
                         if (fa != null) SlotManager.setAnimMeta(id, fa);
                         UndoManager.pushUndoCreate(id, player.getUuid()); SlotManager.saveAll();
                         SlotData updated = SlotManager.getById(id);
+                        playSuccess(player);
                         NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("add", d.index, id, name, fb, d.lightLevel, d.hardness, d.soundType, null, null, updated != null ? updated.animMeta : fa));
-                        send(player, "§a[GUI] Created '§f" + name + "§a'! §7(slot #" + d.index + ")");
+                        ChatHelper.success(player, "Created '§f" + name + "§a'! §7(slot #" + d.index + ")");
                         openEditor(player, id, rp);
                     });
-                } catch (Exception e) { srv.execute(() -> { send(player, "§c[GUI] Failed: " + e.getMessage()); openMain(player, rp); }); } });
+                } catch (Exception e) { srv.execute(() -> { playError(player); send(player, "§c[GUI] Failed: " + e.getMessage()); openMain(player, rp); }); } });
                 return true;
             }
             case RETEXTURE_URL -> {
-                if (!isUrl(text)) { send(player, "§cNeeds a URL."); openEditor(player, blockId, rp); return true; }
+                if (!isUrl(text)) { playError(player); send(player, "§cNeeds a URL."); openEditor(player, blockId, rp); return true; }
                 SlotData d = SlotManager.getById(blockId);
                 if (d == null) { openMain(player, rp); return true; }
-                send(player, "§e[GUI] Downloading texture…");
+                send(player, "§e[CB] Downloading texture…");
                 MinecraftServer srv = player.getServer();
                 thread(player, () -> { try {
                     byte[] raw = ImageProcessor.download(text);
@@ -438,11 +444,12 @@ public class GuiManager {
                         SlotManager.updateTexture(blockId, fb);
                         if (fa != null) SlotManager.setAnimMeta(blockId, fa);
                         SlotManager.saveAll();
+                        playSuccess(player);
                         NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("retexture", dd.index, blockId, null, fb, dd.lightLevel, dd.hardness, dd.soundType));
-                        send(player, "§a[GUI] Texture updated for '§f" + blockId + "§a'.");
+                        ChatHelper.success(player, "Texture updated for '§f" + blockId + "§a'.");
                         openEditor(player, blockId, rp);
                     });
-                } catch (Exception e) { srv.execute(() -> { send(player, "§c[GUI] Failed: " + e.getMessage()); openEditor(player, blockId, rp); }); } });
+                } catch (Exception e) { srv.execute(() -> { playError(player); send(player, "§c[GUI] Failed: " + e.getMessage()); openEditor(player, blockId, rp); }); } });
                 return true;
             }
             case SETFACE_URL -> {
@@ -450,7 +457,7 @@ public class GuiManager {
                 String face = pending.face();
                 SlotData d = SlotManager.getById(blockId);
                 if (d == null) { openMain(player, rp); return true; }
-                send(player, "§e[GUI] Downloading " + face + " face…");
+                send(player, "§e[CB] Downloading " + face + " face…");
                 MinecraftServer srv = player.getServer();
                 thread(player, () -> { try {
                     byte[] fb = ImageProcessor.toPng(ImageProcessor.download(text));
@@ -462,7 +469,7 @@ public class GuiManager {
                         if (dd == null) { openMain(player, rp); return; }
                         SlotManager.setFaceTexture(blockId, face, ffb); SlotManager.saveAll();
                         NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("setface", dd.index, blockId, null, ffb, dd.lightLevel, dd.hardness, dd.soundType, face));
-                        send(player, "§a[GUI] §f" + face.toUpperCase() + " §aface set on '§f" + blockId + "§a'.");
+                        send(player, "§a[CB] §f" + face.toUpperCase() + " §aface set on '§f" + blockId + "§a'.");
                         openFaceEditor(player, blockId, rp);
                     });
                 } catch (Exception e) { srv.execute(() -> { send(player, "§c[GUI] Failed: " + e.getMessage()); openFaceEditor(player, blockId, rp); }); } });
@@ -473,7 +480,7 @@ public class GuiManager {
                 String face = pending.face();
                 SlotData orig = SlotManager.getById(blockId);
                 if (orig == null) { openMain(player, rp); return true; }
-                send(player, "§e[GUI] Creating variant with " + face + " face…");
+                send(player, "§e[CB] Creating variant with " + face + " face…");
                 MinecraftServer srv = player.getServer();
                 thread(player, () -> { try {
                     byte[] fb = ImageProcessor.toPng(ImageProcessor.download(text));
@@ -499,7 +506,7 @@ public class GuiManager {
                                 NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("setface", fresh.index, varId, null, fe.getValue(), fresh.lightLevel, fresh.hardness, fresh.soundType, fe.getKey()));
                         }
                         player.getInventory().insertStack(nb.index < CustomBlocksMod.SLOT_ITEMS.length && CustomBlocksMod.SLOT_ITEMS[nb.index] != null ? new ItemStack(CustomBlocksMod.SLOT_ITEMS[nb.index], 1) : ItemStack.EMPTY);
-                        send(player, "§a[GUI] Variant '§f" + varId + "§a' created & given!");
+                        send(player, "§a[CB] Variant '§f" + varId + "§a' created & given!");
                         openFaceEditor(player, varId, rp);
                     });
                 } catch (Exception e) { srv.execute(() -> { send(player, "§c[GUI] Failed: " + e.getMessage()); openFaceEditor(player, blockId, rp); }); } });
@@ -511,7 +518,7 @@ public class GuiManager {
                 UndoManager.pushUndoMutation(blockId, d, "rename", player.getUuid());
                 SlotManager.rename(blockId, text.replace("_"," ")); SlotManager.saveAll();
                 NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("rename", d.index, blockId, text.replace("_"," "), null, 0, 0, "stone"));
-                send(player, "§a[GUI] Renamed to '§f" + text + "§a'.");
+                send(player, "§a[CB] Renamed to '§f" + text + "§a'.");
                 openEditor(player, blockId, rp); return true;
             }
             case SETTABICON_URL -> {
@@ -519,7 +526,7 @@ public class GuiManager {
                 String targetId = text.toLowerCase().trim();
                 boolean isBlock = SlotManager.hasId(targetId);
                 if (!isUrl(text) && !isBlock) { send(player, "§cNeeds a URL or Block ID."); openMain(player, rp); return true; }
-                send(player, "§e[GUI] Processing tab icon…");
+                send(player, "§e[CB] Processing tab icon…");
                 MinecraftServer srv = player.getServer();
                 thread(player, () -> { try {
                     byte[] finalBytes;
@@ -543,7 +550,7 @@ public class GuiManager {
                             }
                         }
                         NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("tabicon", -1, null, null, bytes, 0, 0, "stone"));
-                        send(player, "§a[GUI] Tab icon updated!");
+                        send(player, "§a[CB] Tab icon updated!");
                         openMain(player, rp);
                     });
                 } catch (Exception e) { srv.execute(() -> { send(player, "§c[GUI] Failed: " + e.getMessage()); openMain(player, rp); }); } });
@@ -557,7 +564,7 @@ public class GuiManager {
                     SlotManager.saveAll();
                     SlotData d = SlotManager.getById(blockId);
                     broadcastShape(player.getServer(), d);
-                    send(player, "§a[Shape] Box added! Total: §f" + (d.shapeBoxes != null ? d.shapeBoxes.size() : 0));
+                    send(player, "§a[Physics] Box added! Total: §f" + (d.shapeBoxes != null ? d.shapeBoxes.size() : 0));
                 } catch (Exception e) { send(player, "§cBad coords. Use: x1,y1,z1,x2,y2,z2 (0–16)"); }
                 openShapeEditor(player, blockId, rp); return true;
             }
@@ -567,14 +574,14 @@ public class GuiManager {
                     if (!List.of("black","yellow","green").contains(col)) { send(player, "§cChoose: §fblack §7| §fyellow §7| §fgreen"); openMain(player, rp); return true; }
                     Item it = net.minecraft.registry.Registries.ITEM.get(net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, col + "_square"));
                     if (it != null && it != Items.AIR) player.getInventory().insertStack(new ItemStack(it, 1));
-                    send(player, "§a[GUI] Given §f" + col + " Square§a!"); openMain(player, rp); return true;
+                    send(player, "§a[CB] Given §f" + col + " Square§a!"); openMain(player, rp); return true;
                 }
                 if ("__givetriangle__".equals(blockId)) {
                     String col = text.toLowerCase().trim();
                     if (!List.of("black","yellow","green").contains(col)) { send(player, "§cChoose: §fblack §7| §fyellow §7| §fgreen"); openMain(player, rp); return true; }
                     Item it = net.minecraft.registry.Registries.ITEM.get(net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, col + "_triangle"));
                     if (it != null && it != Items.AIR) player.getInventory().insertStack(new ItemStack(it, 1));
-                    send(player, "§a[GUI] Given §f" + col + " Triangle§a!"); openMain(player, rp); return true;
+                    send(player, "§a[CB] Given §f" + col + " Triangle§a!"); openMain(player, rp); return true;
                 }
                 String newId = text.toLowerCase().replaceAll("[^a-z0-9_\\-]", "_");
                 if (newId.isEmpty())          { send(player, "§cInvalid ID."); openEditor(player, blockId, rp); return true; }
@@ -585,7 +592,7 @@ public class GuiManager {
                 SlotData upd = SlotManager.getById(newId);
                 NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("remove", d.index, blockId, null, null, 0, 0, "stone"));
                 NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("add", upd.index, newId, upd.displayName, upd.texture, upd.lightLevel, upd.hardness, upd.soundType, null, null, upd.animMeta));
-                send(player, "§a[CustomBlocks] Re-ID'd '§f" + blockId + "§a' → '§f" + newId + "§a'.");
+                send(player, "§a[CB] Re-ID'd '§f" + blockId + "§a' → '§f" + newId + "§a'.");
                 openEditor(player, newId, rp); return true;
             }
             case ADMIN_CUSTOM_TITLE -> {
@@ -1042,17 +1049,18 @@ public class GuiManager {
         AnimParams p = ANIM_PARAMS.getOrDefault(player.getUuid(), new AnimParams(10f, false, 1));
         float fps = p.fps(); boolean interp = p.interpolate(); int frames = p.frameCount();
         switch (slot) {
-            case 9  -> fps = Math.max(0.5f, fps - 10);
-            case 10 -> fps = Math.max(0.5f, fps - 1);
-            case 16 -> fps = Math.min(60f,  fps + 1);
-            case 17 -> fps = Math.min(60f,  fps + 10);
-            case 18 -> fps = 5f;
-            case 20 -> fps = 10f;
-            case 22 -> fps = 20f;
-            case 24 -> fps = 30f;
-            case 27 -> interp = !interp;
-            case 46 -> { applyAnimSettings(player, id, fps, interp, frames); ANIM_PARAMS.remove(player.getUuid()); STATES.remove(player.getUuid()); player.closeHandledScreen(); return; }
-            case 49 -> { ANIM_PARAMS.remove(player.getUuid()); STATES.remove(player.getUuid()); player.closeHandledScreen(); return; }
+            case 0  -> { openEditor(player, id, state.page()); return; }
+            case 19 -> { fps = Math.max(0.5f, fps - 5); playClick(player); }
+            case 20 -> { fps = Math.max(0.5f, fps - 1); playClick(player); }
+            case 24 -> { fps = Math.min(60f,  fps + 1); playClick(player); }
+            case 25 -> { fps = Math.min(60f,  fps + 5); playClick(player); }
+            case 28 -> { fps = 5f; playClick(player); }
+            case 29 -> { fps = 10f; playClick(player); }
+            case 30 -> { fps = 20f; playClick(player); }
+            case 31 -> { fps = 40f; playClick(player); }
+            case 40 -> { interp = !interp; playClick(player); }
+            case 45 -> { openEditor(player, id, state.page()); return; }
+            case 49 -> { applyAnimSettings(player, id, fps, interp, frames); ANIM_PARAMS.remove(player.getUuid()); openEditor(player, id, state.page()); return; }
             default -> { return; }
         }
         fps = Math.round(fps * 10f) / 10f;
@@ -1061,7 +1069,7 @@ public class GuiManager {
     }
 
     private static void applyAnimSettings(ServerPlayerEntity player, String id, float fps, boolean interp, int frameCount) {
-        if (!SlotManager.hasId(id)) return;
+        if (!SlotManager.hasId(id)) { playError(player); return; }
         int tickTime = Math.max(1, Math.round(20f / Math.max(0.5f, fps)));
         StringBuilder sb = new StringBuilder("{\"animation\":{");
         if (interp) sb.append("\"interpolate\":true,");
@@ -1076,11 +1084,14 @@ public class GuiManager {
         SlotManager.setAnimMeta(id, newMeta);
         SlotManager.saveAll();
         SlotData d = SlotManager.getById(id);
-        if (d == null) return;
+        if (d == null) { playError(player); return; }
+        
+        playSuccess(player);
         SlotUpdatePayload pkt = new SlotUpdatePayload("animsettings", d.index, id, d.displayName,
                 null, d.lightLevel, d.hardness, d.soundType, null, null, newMeta);
         NetworkManager.broadcastUpdate(player.getServer(), pkt);
-        send(player, "§a[CustomBlocks] Animation saved for '§f" + d.displayName + "§a'  §7(" + String.format("%.1f", fps) + " fps)");
+        NetworkManager.broadcastFullSync(player.getServer()); // The Golden Sync
+        ChatHelper.success(player, "The Temporal Flux of '§f" + d.displayName + "§a' has been stabilized! (" + String.format("%.1f", fps) + " fps)");
     }
 
     // ── Builders ──────────────────────────────────────────────────────────────
@@ -1129,9 +1140,9 @@ public class GuiManager {
     }
 
     private static SimpleInventory buildMaintenanceMenu(ServerPlayerEntity player) {
-        SimpleInventory inv = new SimpleInventory(27);
-        for(int i = 0; i < 27; i++) inv.setStack(i, glass());
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Main Menu", "§8(or press ESC)"));
+        SimpleInventory inv = new SimpleInventory(54);
+        for(int i = 0; i < 54; i++) inv.setStack(i, glass());
+        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Main Menu", "§8Return to the dashboard"));
 
         MinecraftServer server = player.getServer();
         long maxMem = Runtime.getRuntime().maxMemory() / 1024 / 1024;
@@ -1141,133 +1152,119 @@ public class GuiManager {
         int players = server == null ? 0 : server.getPlayerManager().getCurrentPlayerCount();
 
         // ── Row 1: The Status Dashboard ──────────────────────────────────────
-        inv.setStack(3, uiGlint(Items.CLOCK, "§b§lServer Performance",
+        inv.setStack(4, uiGlint(Items.KNOWLEDGE_BOOK, "§b§lServer Performance",
             "§7Avg Tick: §f" + String.format("%.1f", mspt) + "ms",
-            "§7TPS: §a" + String.format("%.1f", tps) + " §2/ 20.0"));
-
-        inv.setStack(4, uiGlint(Items.KNOWLEDGE_BOOK, "§d§lMemory Usage",
-            "§7Used: §f" + usedMem + "MB",
-            "§7Limit: §7" + maxMem + "MB"));
-
-        inv.setStack(5, uiGlint(Items.PLAYER_HEAD, "§e§lActive Connections",
+            "§7TPS: §a" + String.format("%.1f", tps) + " §2/ 20.0",
+            "§7Memory: §f" + usedMem + "§8/§7" + maxMem + "MB",
             "§7Players: §f" + players + " §7Online"));
 
-        String errColor = errorCount > 0 ? "§c" : "§a";
-        inv.setStack(6, errorCount > 0 
-            ? uiGlint(Items.OBSERVER, "§6§lInternal Error Meter", errColor + "Errors Caught: §l" + errorCount, "§7Diagnostic monitoring active.")
-            : ui(Items.OBSERVER, "§6§lInternal Error Meter", "§aNo errors detected.", "§7System integrity is §lOPTIMAL§7."));
-
         // ── Row 2: Tools ──────────────────────────────────────────────────────
-        inv.setStack(10, uiGlint(Items.PAINTING, "§a§lTab Icon Settings", "§7Change dynamic creative tab icon"));
-        inv.setStack(12, uiGlint(Items.DAMAGED_ANVIL, "§c§lIntegrity Scanner", "§7Analyze and fix §6Broken Blocks §7in real-time."));
-        inv.setStack(14, uiGlint(Items.BEACON, "§6§lResource Pack Host Config", "§7Change embedded web server port"));
-        inv.setStack(16, uiGlint(Items.PAPER, "§f§lExport Data", "§7Export JSON block structure data"));
+        inv.setStack(19, uiGlint(Items.PAINTING, "§a§lTab Icon Settings", "§7Change dynamic creative tab icon", "§b• Tip: §7Use a square PNG for best results"));
+        inv.setStack(21, uiGlint(Items.DAMAGED_ANVIL, "§c§lIntegrity Scanner", "§7Analyze and fix §6Broken Blocks §7in real-time.", "§b• Tip: §7Cleans up magenta/black textures"));
+        inv.setStack(23, uiGlint(Items.BEACON, "§6§lResource Pack Host Config", "§7Change embedded web server port", "§b• Tip: §7Port 0 disables the internal server"));
+        inv.setStack(25, uiGlint(Items.PAPER, "§f§lExport Data", "§7Export JSON block structure data", "§b• Tip: §7Found in config/customblocks/exports/"));
 
-        // ── Row 3: Status & Friend Test ──────────────────────────────────────
+        // ── Row 3: Slot Usage & Network ──────────────────────────────────────
         int used = SlotManager.usedSlots();
         int total = com.customblocks.CustomBlocksConfig.maxSlots;
-        inv.setStack(20, ui(Items.CHEST, "§e§lSlot Usage",
-            "§7Used: §f" + used + " §7/ §f" + total,
-            "§7Free: §a" + (total - used)));
+        inv.setStack(31, ui(Items.CHEST, "§e§lSlot Usage", "§7Used: §f" + used + " §7/ §f" + total, "§7Free: §a" + (total - used)));
 
         boolean httpUp = com.customblocks.network.ResourcePackServer.isRunning();
         int port = com.customblocks.network.ResourcePackServer.getPort();
         if (httpUp) {
-            inv.setStack(22, uiGlint(Items.ENDER_EYE, "§a§l✔ Friend Test — Server ONLINE",
-                "§7HTTP Pack Server: §aRunning §7on port §f" + port,
-                "§7Hash: §8" + (com.customblocks.network.ResourcePackServer.getHash() != null ? com.customblocks.network.ResourcePackServer.getHash().substring(0, 8) + "…" : "building…"),
+            inv.setStack(33, uiGlint(Items.ENDER_EYE, "§a§l✔ Network: ONLINE",
+                "§7HTTP Server: §aRunning §7on port §f" + port,
+                "§b• Tip: §7Share your public IP + Port with friends",
                 "§e§oClick to fetch your shareable URL!"));
         } else {
-            inv.setStack(22, ui(Items.BARRIER, "§c§l✖ Friend Test — Server OFFLINE",
-                "§7HTTP Pack Server: §cNot Running",
-                "§7Port: §f" + port + (port <= 0 ? " §c(disabled)" : ""),
-                "§8Set port > 0 in config to enable."));
+            inv.setStack(33, ui(Items.BARRIER, "§c§l✖ Network: OFFLINE", "§7HTTP Server: §cNot Running", "§b• Tip: §7Set port > 0 in config to enable"));
         }
 
-        inv.setStack(24, ui(Items.SPYGLASS, "§b§lMod Version",
-            "§7CustomBlocks §fv1.0.0",
-            "§7Fabric §f1.21.1"));
+        inv.setStack(40, ui(Items.SPYGLASS, "§b§lMod Information", "§7CustomBlocks §fv1.0.0", "§7Fabric §f1.21.1", "§8System integrity is §lOPTIMAL"));
 
+        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Main Menu"));
         return inv;
     }
 
     private static SimpleInventory buildHelpGui() {
-        SimpleInventory inv = new SimpleInventory(27);
-        for(int i = 0; i < 27; i++) inv.setStack(i, glass());
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Main Menu", "§8(or press ESC)"));
+        SimpleInventory inv = new SimpleInventory(54);
+        for(int i = 0; i < 54; i++) inv.setStack(i, glass());
+        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Main Menu", "§8Return to the dashboard"));
         
-        inv.setStack(10, uiGlint(Items.BOOK, "§e§lGUI Navigation", 
-            "§7ESC — go back one screen",
-            "§7Click items to interact",
-            "§7Main Menu → Sub-menus → Editors"));
-        inv.setStack(11, ui(Items.WRITABLE_BOOK, "§a§lBasic Commands",
-            "§7/cb gui §8— Open main menu",
-            "§7/cb create <id> §8— Create block",
-            "§7/cb list §8— List all blocks",
-            "§7/cb help §8— Full command list"));
-        inv.setStack(12, ui(Items.PAINTING, "§b§lTexture Tips",
-            "§7Accepts PNG, JPG, GIF, WebP URLs",
-            "§7Auto-converts to square PNG",
-            "§7GIF → animated block textures!",
-            "§7Discord CDN URLs work great"));
-        inv.setStack(14, ui(Items.CLOCK, "§d§lAnimation Workflow",
-            "§71. Upload a GIF as texture",
-            "§72. Open block editor → Animation",
-            "§73. Adjust FPS and interpolation",
-            "§8Supports APNG and animated WebP too"));
-        inv.setStack(15, ui(Items.ENDER_PEARL, "§5§lShape System",
-            "§712 built-in presets",
-            "§7Custom hitboxes (up to 16)",
-            "§8Left-click preset = new variant",
-            "§8Right-click preset = apply to block"));
-        inv.setStack(16, ui(Items.GOLDEN_PICKAXE, "§6§lUndo / Redo",
-            "§7All changes are undoable",
-            "§7Available from Main Menu",
-            "§8Undo stack persists per-player"));
+        inv.setStack(4, uiGlint(Items.ENCHANTED_BOOK, "§a§lInteractive Command Hub", "§7Master the CustomBlocks language", "§b• Tip: §7Most commands can be clicked here!"));
+
+        // ── Category: Essentials ───────────────────────────────────────────
+        inv.setStack(19, uiGlint(Items.CRAFTING_TABLE, "§eCreate a Block", "§7/cb create <id> <name> <url>", "§b• Tip: §7Click this to start creation in chat."));
+        inv.setStack(20, uiGlint(Items.NAME_TAG, "§eRename a Block", "§7/cb rename <id> <new name>", "§b• Tip: §7Use underscores _ for spaces."));
+        inv.setStack(21, uiGlint(Items.COMMAND_BLOCK, "§eChange block ID", "§7/cb reid <old_id> <new_id>", "§b• Tip: §7This updates all placements instantly."));
+
+        // ── Category: Design ───────────────────────────────────────────────
+        inv.setStack(23, uiGlint(Items.MAP, "§bChange Texture", "§7/cb retexture <id> <url>", "§b• Tip: §7Use animated GIFs for moving blocks!"));
+        inv.setStack(24, uiGlint(Items.AMETHYST_SHARD, "§bSet Face texture", "§7/cb setface <id> <face> <url>", "§b• Tip: §7Faces: north, south, east, west, up, down"));
+        inv.setStack(25, uiGlint(Items.STICK, "§bModify Hitbox", "§7/cb addshape <id> <coords>", "§b• Tip: §7Click this to learn about x1 y1 z1 x2 y2 z2"));
+
+        // ── Category: Utilities ────────────────────────────────────────────
+        inv.setStack(37, uiGlint(Items.GOLDEN_PICKAXE, "§6Undo Last Action", "§7/cb undo", "§b• Tip: §7Saves up to 20 recent changes."));
+        inv.setStack(38, uiGlint(Items.DIAMOND_PICKAXE, "§6Redo Last Undo", "§7/cb redo", "§b• Tip: §7Restores a change you just undid."));
+        inv.setStack(39, uiGlint(Items.RECOVERY_COMPASS, "§6List Broken Blocks", "§7/cb showbrokenblocks", "§b• Tip: §7Finds missing textures on your server."));
+        inv.setStack(40, uiGlint(Items.REPEATER, "§6Reload Mod", "§7/cb reload", "§b• Tip: §7Force-syncs textures to all players."));
+
+        inv.setStack(13, ui(Items.BOOK, "§d§lArtist Directive", 
+            "§71. Upload a high-res image URL",
+            "§72. Use §fBlock Design Studio §7to polish",
+            "§73. Add §fPhysics Boxes §7for shape",
+            "§b• Tip: §7The mod handles all technical heavy lifting."));
+
+        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Main Menu"));
         return inv;
     }
 
     private static SimpleInventory buildPropertiesGui(SlotData d) {
-        SimpleInventory inv = new SimpleInventory(27);
-        for(int i=0;i<27;i++) inv.setStack(i, glass());
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Editor","§8(or press ESC)"));
+        SimpleInventory inv = new SimpleInventory(54);
+        for(int i=0;i<54;i++) inv.setStack(i, glass());
+        inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Studio","§8Return to the block editor"));
         
         ItemStack disp = CustomBlocksMod.safeSlotItem(d.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(d.index)):ItemStack.EMPTY;
         disp.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§6§l"+d.displayName).styled(s->s.withItalic(false)));
         disp.set(DataComponentTypes.LORE, new LoreComponent(List.of(
-            lore("§7Light: §e"+d.lightLevel),
+            lore("§7Light Level: §e"+d.lightLevel),
             lore("§7Hardness: §f"+hardnessLabel(d.hardness)),
             lore("§7Collision: "+(d.noCollision?"§cOFF":"§aON"))
         )));
         inv.setStack(4, disp);
         
-        inv.setStack(10, ui(Items.QUARTZ,"§c◀ Light -1","§7Now: §e"+d.lightLevel));
-        inv.setStack(11, uiGlint(Items.AMETHYST_CLUSTER,"§e✦ Light: §f"+d.lightLevel,"§70=off • 7=torch • 14=sea lantern • 15=max"));
-        inv.setStack(12, ui(Items.GLOWSTONE_DUST,"§a▶ Light +1","§7Now: §e"+d.lightLevel));
+        inv.setStack(19, ui(Items.QUARTZ,"§c◀ Decrease Glow §8(-1)","§7Current: §e"+d.lightLevel, "§b• Tip: §7Light level 15 is max brightness"));
+        inv.setStack(20, uiGlint(Items.AMETHYST_CLUSTER,"§e✦ Light: §f"+d.lightLevel,"§70=off • 7=torch • 15=max", "§b• Tip: §7Matches Minecraft vanilla light values"));
+        inv.setStack(21, ui(Items.GLOWSTONE_DUST,"§a▶ Increase Glow §8(+1)","§7Current: §e"+d.lightLevel));
         
-        inv.setStack(14, ui(Items.FLINT,"§c◀ Hardness -","§7Now: §f"+hardnessLabel(d.hardness)));
-        inv.setStack(15, uiGlint(Items.NETHERITE_INGOT,"§b⚙ Hardness: §f"+hardnessLabel(d.hardness),"§7-1=Unbreakable • 0=Instant • 1.5=Default"));
-        inv.setStack(16, ui(Items.NETHERITE_SCRAP,"§a▶ Hardness +","§7Now: §f"+hardnessLabel(d.hardness)));
+        inv.setStack(23, ui(Items.FLINT,"§c◀ Softer §8(-)","§7Current: §f"+hardnessLabel(d.hardness), "§b• Tip: §7Hardness 0 breaks instantly"));
+        inv.setStack(24, uiGlint(Items.NETHERITE_INGOT,"§b⚙ Hardness: §f"+hardnessLabel(d.hardness),"§7-1=Bedrock • 0=Instant • 1.5=Stone", "§b• Tip: §7Determines how fast players mine this"));
+        inv.setStack(25, ui(Items.NETHERITE_SCRAP,"§a▶ Harder §8(+)","§7Current: §f"+hardnessLabel(d.hardness)));
 
-        inv.setStack(22, d.noCollision
-            ? uiGlint(Items.BARRIER,"§c⊘ Collision: §lOFF","§7Block has NO hitbox","§8Click to ENABLE collision")
-            : uiGlint(Items.SLIME_BLOCK,"§a✔ Collision: §lON","§7Block has normal collision","§8Click to DISABLE collision"));
+        inv.setStack(40, d.noCollision
+            ? uiGlint(Items.BARRIER,"§c⊘ Collision: §lOFF","§7Players can pass THROUGH this block","§8Click to §aENABLE §8hitbox")
+            : uiGlint(Items.SLIME_BLOCK,"§a✔ Collision: §lON","§7Block acts as a solid object","§8Click to §cDISABLE §8hitbox"));
         
+        inv.setStack(45, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Studio"));
         return inv;
     }
 
     private static SimpleInventory buildSoundMenu(SlotData d) {
-        SimpleInventory inv = new SimpleInventory(27);
-        for(int i=0;i<27;i++) inv.setStack(i, glass());
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Editor","§8(or press ESC)"));
+        SimpleInventory inv = new SimpleInventory(54);
+        for(int i=0;i<54;i++) inv.setStack(i, glass());
+        inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Studio","§8Return to the block editor"));
         
-        inv.setStack(10,soundItem(d,"stone",Items.STONE,"§fStone"));
-        inv.setStack(11,soundItem(d,"wood",Items.OAK_LOG,"§fWood"));
-        inv.setStack(12,soundItem(d,"grass",Items.GRASS_BLOCK,"§fGrass"));
-        inv.setStack(13,soundItem(d,"metal",Items.IRON_BLOCK,"§fMetal"));
-        inv.setStack(14,soundItem(d,"glass",Items.GLASS,"§fGlass"));
-        inv.setStack(15,soundItem(d,"sand",Items.SAND,"§fSand"));
-        inv.setStack(16,soundItem(d,"gravel",Items.GRAVEL,"§fGravel"));
+        inv.setStack(19,soundItem(d,"stone",Items.STONE,"§fStone"));
+        inv.setStack(20,soundItem(d,"wood",Items.OAK_LOG,"§fWood"));
+        inv.setStack(21,soundItem(d,"grass",Items.GRASS_BLOCK,"§fGrass"));
+        inv.setStack(22,soundItem(d,"metal",Items.IRON_BLOCK,"§fMetal"));
+        inv.setStack(23,soundItem(d,"glass",Items.GLASS,"§fGlass"));
+        inv.setStack(24,soundItem(d,"sand",Items.SAND,"§fSand"));
+        inv.setStack(25,soundItem(d,"gravel",Items.GRAVEL,"§fGravel"));
+
+        inv.setStack(31, ui(Items.NOTE_BLOCK, "§e§lAcoustic Profile", "§7Block: §f"+d.displayName, "§7Current Sound: §b"+d.soundType.toUpperCase(), "§b• Tip: §7This affects place, break, and step sounds."));
+
+        inv.setStack(45, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Studio"));
         return inv;
     }
 
@@ -1275,11 +1272,12 @@ public class GuiManager {
         SimpleInventory inv = new SimpleInventory(54);
         List<SlotData> blocks = brokenOnly ? brokenBlocks() : sortedBlocks();
         int total = blocks.size(), maxPage = total==0?0:Math.max(0,(total-1)/BLOCKS_PER_PAGE);
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Main Menu","§8(or press ESC)"));
+        inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Main Dashboard","§8Return to the main menu"));
         for (int i=1;i<=3;i++) inv.setStack(i,glass());
-        inv.setStack(4, ui(Items.ENCHANTED_BOOK,"§e§lChoose a Block to Edit",
-            "§7Click any block below to open its full editor",
-            "§8"+Math.min(BLOCKS_PER_PAGE,Math.max(0,total-page*BLOCKS_PER_PAGE))+" of §f"+total+" §8blocks  •  Page §f"+(page+1)+"§8/§f"+(maxPage+1)));
+        inv.setStack(4, ui(Items.ENCHANTED_BOOK,"§e§lSelect Block to Manage",
+            "§7Manage your creations from the list below",
+            "§8"+Math.min(BLOCKS_PER_PAGE,Math.max(0,total-page*BLOCKS_PER_PAGE))+" of §f"+total+" §8blocks  •  Page §f"+(page+1)+"§8/§f"+(maxPage+1),
+            "§b• Tip: §7Use the arrows at the bottom to flip pages"));
         for (int i=5;i<=8;i++) inv.setStack(i,glass());
         for (int i=9;i<=17;i++) inv.setStack(i, ui(Items.BLUE_STAINED_GLASS_PANE,"§r"));
         int start = page * BLOCKS_PER_PAGE;
@@ -1289,62 +1287,59 @@ public class GuiManager {
                 SlotData d = blocks.get(dataIdx);
                 ItemStack s = CustomBlocksMod.safeSlotItem(d.index)!=null ? new ItemStack(CustomBlocksMod.safeSlotItem(d.index)) : ItemStack.EMPTY;
                 s.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§f§l"+d.displayName).styled(st->st.withItalic(false)));
-                List<String> ll = new ArrayList<>(List.of("§7ID: §b"+d.customId,"§7Shape: §5"+d.shapeLabel()+" §8• §7Light: §e"+d.lightLevel,"§7Sound: §f"+d.soundType+" §8• §7Hard: §f"+hardnessLabel(d.hardness)));
-                List<String> tags=new ArrayList<>(); if(d.hasFaces())tags.add("§d⬡faces"); if(d.isAnimated())tags.add("§b⟳anim"); if(d.noCollision)tags.add("§c⊘nocol"); if(!tags.isEmpty())ll.add(String.join("  ",tags));
-                ll.add("§8§oClick to open editor");
+                List<String> ll = new ArrayList<>(List.of("§7Unique ID: §b"+d.customId,"§7Shape: §5"+d.shapeLabel()+" §8• §7Light: §e"+d.lightLevel,"§7Acoustics: §f"+d.soundType,"§b• Tip: §7Click to enter the Design Studio"));
+                List<String> tags=new ArrayList<>(); if(d.hasFaces())tags.add("§d⬡faces"); if(d.isAnimated())tags.add("§b⟳anim"); if(d.noCollision)tags.add("§c⊘hitbox"); if(!tags.isEmpty())ll.add(String.join("  ",tags));
                 s.set(DataComponentTypes.LORE, new LoreComponent(ll.stream().map(l->(Text)lore(l)).toList()));
                 inv.setStack(invSlot, s);
             } else { inv.setStack(invSlot, glass()); }
         }
         for (int i=36;i<=44;i++) inv.setStack(i, ui(Items.BLUE_STAINED_GLASS_PANE,"§r"));
-        inv.setStack(45, page>0 ? uiGlint(Items.ARROW,"§7◀ Previous Page","§8Page "+page+" / "+(maxPage+1)) : ui(Items.GRAY_STAINED_GLASS_PANE,"§8◀ First Page",""));
+        inv.setStack(45, page>0 ? uiGlint(Items.ARROW,"§7◀ Previous Page","§8Go to page "+page) : ui(Items.GRAY_STAINED_GLASS_PANE,"§8◀ First Page",""));
         for (int i=46;i<=48;i++) inv.setStack(i,glass());
         inv.setStack(49, ui(Items.PAPER,"§ePage §f"+(page+1)+" §7/ §f"+(maxPage+1),"§7Total: §f"+total+" blocks"));
         for (int i=50;i<=52;i++) inv.setStack(i,glass());
-        inv.setStack(53, page<maxPage ? uiGlint(Items.ARROW,"§7Next Page ▶","§8Page "+(page+2)+" / "+(maxPage+1)) : ui(Items.GRAY_STAINED_GLASS_PANE,"§8Last Page ▶",""));
+        inv.setStack(53, page<maxPage ? uiGlint(Items.ARROW,"§7Next Page ▶","§8Go to page "+(page+2)) : ui(Items.GRAY_STAINED_GLASS_PANE,"§8Last Page ▶",""));
         return inv;
     }
 
     private static SimpleInventory buildEditor(SlotData d, boolean confirmDelete) {
-        SimpleInventory inv = new SimpleInventory(36);
-        for(int i = 0; i < 36; i++) inv.setStack(i, glass());
+        SimpleInventory inv = new SimpleInventory(54);
+        for(int i = 0; i < 54; i++) inv.setStack(i, glass());
 
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Block List", "§8(or press ESC)"));
-        inv.setStack(2, uiGlint(Items.CHEST,"§a▶ Give 1x","§7Gives 1x §f"+d.displayName+" §7to you"));
+        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Block List", "§8Return to the selection grid"));
+        inv.setStack(2, uiGlint(Items.CHEST,"§a▶ Give 1x","§7Gives 1x §f"+d.displayName+" §7to you", "§b• Tip: §7Puts the block directly in your hotbar"));
         
         ItemStack disp = CustomBlocksMod.safeSlotItem(d.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(d.index)):ItemStack.EMPTY;
         disp.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§e§l"+d.displayName).styled(s->s.withItalic(false)));
         disp.set(DataComponentTypes.LORE, new LoreComponent(List.of(
-            lore("§7ID: §b"+d.customId),
-            lore("§7Shape: §5"+d.shapeLabel()),
-            lore("§7Light: §e"+d.lightLevel+"  §7Hard: §f"+hardnessLabel(d.hardness)),
-            lore("§7Sound: §f"+d.soundType),
-            lore("§7Collision: "+(d.noCollision?"§cOFF":"§aON")),
-            lore("§8Slot #"+d.index)
+            lore("§7Unique ID: §b"+d.customId),
+            lore("§7Current Shape: §5"+d.shapeLabel()),
+            lore("§7Light Level: §e"+d.lightLevel+"  §7Hardness: §f"+hardnessLabel(d.hardness)),
+            lore("§7Acoustics: §f"+d.soundType),
+            lore("§7Hitbox: "+(d.noCollision?"§cOFF":"§aON")),
+            lore("§8Database Slot #"+d.index)
         )));
         inv.setStack(4, disp);
-        inv.setStack(6, d.noCollision
-            ? uiGlint(Items.BARRIER,"§c⊘ Collision: §lOFF","§7Block has NO hitbox","§8Click to ENABLE collision")
-            : uiGlint(Items.SLIME_BLOCK,"§a✔ Collision: §lON","§7Block has normal collision","§8Click to DISABLE collision"));
-        inv.setStack(8, uiGlint(Items.MAP,"§b⬛ Retexture All Faces","§7Replace texture on ALL faces","§8Click → paste URL in chat"));
+        inv.setStack(8, uiGlint(Items.MAP,"§b§l⬛ Retexture Block","§7Update the main texture of this block","§b• Tip: §7Paste a URL from Imgur, Discord, etc."));
         
-        inv.setStack(10, uiGlint(Items.PAINTING, "§b⬛ Texture Editing", "§7Per-face textures & variants","§8Open full face editor"));
-        inv.setStack(12, uiGlint(Items.ENDER_PEARL, "§5⬡ Shape Editing", "§7Current: §b"+d.shapeLabel(),"§8Presets, custom boxes, collision"));
-        inv.setStack(14, uiGlint(Items.REDSTONE, "§6⚙ Properties", "§7Light: §e"+d.lightLevel+"  §7Hard: §f"+hardnessLabel(d.hardness),"§8Adjust glow & hardness"));
-        inv.setStack(16, uiGlint(Items.NOTE_BLOCK, "§e♫ Sounds", "§7Current: §f"+d.soundType,"§8Change block break/place sounds"));
+        inv.setStack(19, uiGlint(Items.PAINTING, "§d§l⬡ Face Mapping Forge", "§7Apply textures to individual faces","§b• Tip: §7Change Top, Bottom, or Side textures separately"));
+        inv.setStack(21, uiGlint(Items.ENDER_PEARL, "§5§l⬡ Shape Sculptor", "§7Presets, custom boxes, and collisions","§b• Tip: §7Make slabs, stairs, or custom hitboxes"));
+        inv.setStack(23, uiGlint(Items.REDSTONE, "§6§l⚙ Engine Properties", "§7Adjust light glow & mining hardness","§b• Tip: §7Adjust how the block feels in-world"));
+        inv.setStack(25, uiGlint(Items.NOTE_BLOCK, "§e§l♫ Acoustic Tuner", "§7Change placement & break sounds","§b• Tip: §7Simulate stone, glass, dirt, etc."));
         
-        inv.setStack(22, d.isAnimated()
-            ? uiGlint(Items.CLOCK, "§b⟳ Animation Settings", "§7This block is animated","§8Click to configure FPS/interpolation")
-            : ui(Items.GRAY_DYE, "§7⟳ Animation", "§8Not animated","§7Use an animated texture (GIF) to enable"));
+        inv.setStack(31, d.isAnimated()
+            ? uiGlint(Items.CLOCK, "§b§l⟳ Animation Settings", "§7This block is currently animated","§b• Tip: §7You can adjust frame speed (FPS) here")
+            : ui(Items.GRAY_DYE, "§7§l⟳ Animation", "§8No animation detected","§b• Tip: §7Animations are auto-enabled for GIF textures"));
         
-        inv.setStack(28, uiGlint(Items.NAME_TAG,"§e✎ Rename","§7Current: §f"+d.displayName,"§8Click → type in chat"));
-        inv.setStack(29, uiGlint(Items.COMMAND_BLOCK,"§b⇄ Re-ID","§7Current: §b"+d.customId,"§8Click → type in chat"));
-        inv.setStack(30, uiGlint(Items.COMPARATOR,"§e⧉ Duplicate","§7Creates a copy of this block","§8Click → type new ID"));
+        inv.setStack(37, uiGlint(Items.NAME_TAG,"§e§l✎ Rename Block","§7Current: §f"+d.displayName,"§b• Tip: §7This is the name everyone sees in the inventory"));
+        inv.setStack(39, uiGlint(Items.COMMAND_BLOCK,"§b§l⇄ Re-ID Block","§7Current: §b"+d.customId,"§b• Tip: §7Changing the unique ID updates all current builds"));
+        inv.setStack(41, uiGlint(Items.COMPARATOR,"§e§l⧉ Duplicate Block","§7Create an identical copy of this block","§b• Tip: §7Great for making similar block sets quickly"));
         
-        inv.setStack(34, confirmDelete
-            ? uiGlint(Items.BARRIER, "§4§l⚠ CLICK AGAIN TO CONFIRM DELETE","§cThis will permanently delete: §f"+d.customId,"§c(Use Undo in main menu to restore)")
-            : ui(Items.TNT, "§c§l⚠ Delete This Block","§7First click arms.  Second click deletes.","§8Undo available in main menu."));
+        inv.setStack(53, confirmDelete
+            ? uiGlint(Items.BARRIER, "§4§l⚠ CONFIRM DELETION","§cPermanently delete: §f"+d.customId,"§c§oClick again to confirm!")
+            : ui(Items.TNT, "§c§l⚠ Delete This Block","§7Removes the block from the server","§b• Tip: §7Can be undone via Main Menu if accidental"));
 
+        inv.setStack(45, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Block List"));
         return inv;
     }
 
@@ -1352,42 +1347,42 @@ public class GuiManager {
         SimpleInventory inv = new SimpleInventory(54);
         List<SlotData.ShapeBox> boxes = d.shapeBoxes!=null?d.shapeBoxes:List.of();
         Item[] pItems = {Items.GRASS_BLOCK,Items.SMOOTH_STONE_SLAB,Items.STONE_SLAB,Items.MOSS_CARPET,Items.COBBLESTONE_WALL,Items.COMPARATOR,Items.COMPARATOR,Items.OAK_TRAPDOOR,Items.OAK_TRAPDOOR,Items.OAK_FENCE,Items.OAK_STAIRS,Items.TALL_GRASS};
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Editor","§8(or press ESC)"));
+        inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Studio","§8Return to the block editor"));
         for (int i=1;i<=3;i++) inv.setStack(i,glass());
         ItemStack info = CustomBlocksMod.safeSlotItem(d.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(d.index)):ItemStack.EMPTY;
-        info.set(DataComponentTypes.CUSTOM_NAME,Text.literal("§e§l"+d.displayName).styled(s->s.withItalic(false)));
-        info.set(DataComponentTypes.LORE,new LoreComponent(List.of(lore("§7ID: §b"+d.customId),lore("§7Shape: §5"+d.shapeLabel()),lore("§7Custom boxes: §f"+boxes.size()+" §8/ 16"),lore("§7Collision: "+(d.noCollision?"§cOFF":"§aON")),lore("§8§o§nLeft-click§r§8§o preset = create NEW block with that shape"),lore("§8§o§nRight-click§r§8§o preset = apply shape to THIS block"))));
+        info.set(DataComponentTypes.CUSTOM_NAME,Text.literal("§5§lShape: "+d.displayName).styled(s->s.withItalic(false)));
+        info.set(DataComponentTypes.LORE,new LoreComponent(List.of(lore("§7Unique ID: §b"+d.customId),lore("§7Current: §5"+d.shapeLabel()),lore("§7Physics boxes: §f"+boxes.size()+" §8/ 16"),lore("§b• Tip: §7Custom hitboxes determine physical interaction"))));
         inv.setStack(4, info);
         for (int i=5;i<=7;i++) inv.setStack(i,glass());
-        inv.setStack(8, d.noCollision?uiGlint(Items.BARRIER,"§c⊘ Collision: §lOFF","§8Click to ENABLE"):uiGlint(Items.SLIME_BLOCK,"§a✔ Collision: §lON","§8Click to DISABLE"));
-        inv.setStack(9, ui(Items.BLUE_STAINED_GLASS_PANE,"§9── Shape Presets ──","§7§nLeft-click§r§7 = new block  •  §7§nRight-click§r§7 = apply here"));
+        inv.setStack(8, d.noCollision?uiGlint(Items.BARRIER,"§c⊘ Hitbox: §lOFF","§7Click to §aENABLE §8hitbox"):uiGlint(Items.SLIME_BLOCK,"§a✔ Hitbox: §lON","§7Click to §cDISABLE §8hitbox"));
+        inv.setStack(9, ui(Items.BLUE_STAINED_GLASS_PANE,"§9── Studio Presets ──","§7§nLeft-click§r§7 = Create variant  •  §7§nRight-click§r§7 = Apply to base"));
         for (int i=0; i<PRESET_NAMES.length && i<12; i++) {
             String p=PRESET_NAMES[i];
             List<SlotData.ShapeBox> presetBoxes = SlotManager.SHAPE_PRESETS.get(p);
             boolean act = (presetBoxes == null && !d.isShaped()) || (presetBoxes != null && presetBoxes.equals(boxes));
-            inv.setStack(10+i, act?uiGlint(pItems[Math.min(i,pItems.length-1)],"§a§l"+p.toUpperCase()+" §a✔","§aActive • §8Left=new block  Right=apply here"):ui(pItems[Math.min(i,pItems.length-1)],"§b"+cap(p),"§7Preset shape","§8Left-click=new block  •  Right-click=apply here"));
+            inv.setStack(10+i, act?uiGlint(pItems[Math.min(i,pItems.length-1)],"§a§l"+p.toUpperCase()+"","§aCurrently Active"):ui(pItems[Math.min(i,pItems.length-1)],"§b"+cap(p),"§7Preset shape","§b• Tip: §7Applies a standard Minecraft shape"));
         }
-        inv.setStack(22, uiGlint(Items.LIME_DYE,"§a➕ Add Custom Box","§7Click → type coords","§8Format: x1,y1,z1,x2,y2,z2  (0–16)","§8Up to 16 boxes"));
-        inv.setStack(23, ui(Items.ORANGE_DYE,"§6⊘ Clear All Boxes","§7Reset to full cube","§8Removes all custom shape boxes"));
+        inv.setStack(22, uiGlint(Items.LIME_DYE,"§a➕ Create Physics Box","§7Click to type coordinates in chat","§b• Tip: §7Syntax is x1 y1 z1 x2 y2 z2 (min 0, max 16)"));
+        inv.setStack(23, ui(Items.ORANGE_DYE,"§c⊘ Remove All Physics","§7Reset to a solid full cube","§b• Tip: §7Clears all custom hitboxes on this block"));
         for (int i=24;i<=26;i++) inv.setStack(i,glass());
-        inv.setStack(27, ui(Items.PURPLE_STAINED_GLASS_PANE,"§5── Custom Boxes §8(click = remove) ──","§7Defines the block's physical shape / hitbox"));
+        inv.setStack(27, ui(Items.PURPLE_STAINED_GLASS_PANE,"§5── Active Physics Boxes §8(click to delete) ──","§7Individual hitbox parts"));
         int bstart = boxPage*9;
-        for (int i=0;i<8&&(bstart+i)<boxes.size();i++) { SlotData.ShapeBox b=boxes.get(bstart+i); inv.setStack(28+i,ui(Items.STRUCTURE_VOID,"§e§lBox #"+(bstart+i),"§7"+b.toDisplayString(),"§8Click to remove")); }
+        for (int i=0;i<8&&(bstart+i)<boxes.size();i++) { SlotData.ShapeBox b=boxes.get(bstart+i); inv.setStack(28+i,ui(Items.STRUCTURE_VOID,"§e§lPhysics Box #"+(bstart+i),"§7"+b.toDisplayString(),"§c§oClick to DELETE this box")); }
         for (int s=28+Math.min(8,Math.max(0,boxes.size()-bstart));s<=35;s++) inv.setStack(s,glass());
         List<SlotData> variants = findShapeVariants(d.customId);
-        inv.setStack(36, ui(Items.LIME_STAINED_GLASS_PANE,"§a── Shape Variants §8(click to edit) ──","§7Blocks created from this block via presets","§8"+variants.size()+" variant(s)"));
+        inv.setStack(36, ui(Items.LIME_STAINED_GLASS_PANE,"§a── Multi-Shape Collection ──","§7Variant blocks based on this design"));
         for (int i=0;i<Math.min(8,variants.size());i++) {
             SlotData v=variants.get(i);
             ItemStack vs=CustomBlocksMod.safeSlotItem(v.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(v.index)):ItemStack.EMPTY;
             vs.set(DataComponentTypes.CUSTOM_NAME,Text.literal("§f§l"+v.displayName).styled(s->s.withItalic(false)));
-            vs.set(DataComponentTypes.LORE,new LoreComponent(List.of(lore("§7ID: §b"+v.customId),lore("§7Shape: §5"+v.shapeLabel()),lore("§8Click to open this variant's editor"))));
+            vs.set(DataComponentTypes.LORE,new LoreComponent(List.of(lore("§7ID: §b"+v.customId),lore("§7Shape: §5"+v.shapeLabel()),lore("§8Click to open this variant's studio"))));
             inv.setStack(37+i,vs);
         }
         for (int s=37+Math.min(8,variants.size());s<=44;s++) inv.setStack(s,glass());
         int tbp=boxes.isEmpty()?0:Math.max(0,(boxes.size()-1)/9);
-        inv.setStack(45,boxPage>0?uiGlint(Items.ARROW,"§7◀ Prev Boxes","§8Page "+boxPage):glass());
+        inv.setStack(45,boxPage>0?uiGlint(Items.ARROW,"§7◀ Previous Boxes","§8Page "+boxPage):glass());
         for(int i=46;i<=48;i++) inv.setStack(i,glass());
-        inv.setStack(49,ui(Items.PAPER,"§7Boxes §f"+(boxPage+1)+" §7/ §f"+(tbp+1),"§7Total: §f"+boxes.size()+" box(es)"));
+        inv.setStack(49,ui(Items.PAPER,"§7Page §f"+(boxPage+1)+" §7/ §f"+(tbp+1),"§7Total Boxes: §f"+boxes.size()));
         for(int i=50;i<=52;i++) inv.setStack(i,glass());
         inv.setStack(53,boxPage<tbp?uiGlint(Items.ARROW,"§7Next Boxes ▶","§8Page "+(boxPage+2)):glass());
         return inv;
@@ -1427,29 +1422,63 @@ public class GuiManager {
         return inv;
     }
 
+    // ── Sensory Feedback ──────────────────────────────────────────────────────
+    public static void playClick(ServerPlayerEntity p) { p.getServerWorld().playSound(null, p.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, net.minecraft.sound.SoundCategory.PLAYERS, 0.6f, 1.25f); }
+    public static void playSuccess(ServerPlayerEntity p) { p.getServerWorld().playSound(null, p.getBlockPos(), net.minecraft.sound.SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, net.minecraft.sound.SoundCategory.PLAYERS, 0.8f, 1.0f); p.getServerWorld().playSound(null, p.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_CLUSTER_STEP, net.minecraft.sound.SoundCategory.PLAYERS, 0.5f, 1.0f); }
+    public static void playError(ServerPlayerEntity p) { p.getServerWorld().playSound(null, p.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.7f); }
+
     private static SimpleInventory buildAnimGui(String id, float fps, boolean interp, int frameCount) {
         SimpleInventory inv = new SimpleInventory(54);
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
         SlotData d = SlotManager.getById(id);
         String blockName = d != null ? d.displayName : id;
         int ticks = Math.max(1, Math.round(20f / Math.max(0.5f, fps)));
-        inv.setStack(4, uiGlint(Items.PAPER, "§e§l" + blockName,
-            "§7Frames: §f" + frameCount, "§7Current FPS: §f" + String.format("%.1f", fps),
-            "§7" + ticks + " tick(s)/frame  §8(20 ticks = 1 sec)", "§7Interpolate: " + (interp ? "§aON" : "§cOFF")));
-        inv.setStack(9,  ui(Items.SPECTRAL_ARROW, "§c§l<< §r§c-10 fps"));
-        inv.setStack(10, ui(Items.ARROW, "§c§l<  §r§c-1 fps"));
-        inv.setStack(13, uiGlint(Items.CLOCK, "§e" + String.format("%.1f", fps) + " fps", "§7= " + ticks + " tick(s)/frame"));
-        inv.setStack(16, ui(Items.ARROW, "§a+1 fps  §l>"));
-        inv.setStack(17, ui(Items.SPECTRAL_ARROW, "§a+10 fps §l>>"));
-        inv.setStack(18, ui(Items.LIME_DYE, "§a5 fps  §8— Slow"));
-        inv.setStack(20, ui(Items.YELLOW_DYE, "§e10 fps §8— Normal"));
-        inv.setStack(22, ui(Items.GOLD_INGOT, "§620 fps §8— Fast"));
-        inv.setStack(24, ui(Items.BLAZE_ROD, "§c30 fps §8— Ultra"));
-        inv.setStack(27, interp
-            ? uiGlint(Items.LIME_WOOL, "§aInterpolate: ON", "§7Smooth transition between frames", "§8Click to toggle OFF")
-            : ui(Items.RED_WOOL, "§cInterpolate: OFF", "§7No smoothing between frames", "§8Click to toggle ON"));
-        inv.setStack(46, uiGlint(Items.EMERALD, "§a§lAPPLY SETTINGS", "§7Saves and broadcasts to all players"));
-        inv.setStack(49, ui(Items.BARRIER, "§c§lCLOSE", "§7Discard changes and close"));
+
+        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Studio", "§8Abandon current observations"));
+
+        inv.setStack(4, uiGlint(Items.NETHER_STAR, "§b§l▶ Chronos Animation Observatory",
+            "§7Analyzing Block: §f" + blockName,
+            "§7Detected Frames: §f" + frameCount,
+            "§7Effective Frequency: §b" + String.format("%.1f", fps) + " Hz"));
+
+        // ── Temporal Refinement ──────────────────────────────────────────────────
+        inv.setStack(19, ui(Items.OBSIDIAN, "§c§l« §r§cSlow Flux §8(-5 FPS)", "§7Decrease the temporal speed"));
+        inv.setStack(20, ui(Items.ARROW, "§c§l‹ §r§cMinor Reduction §8(-1 FPS)"));
+
+        inv.setStack(22, uiGlint(Items.ECHO_SHARD, "§e§lThe Chronos Crystal",
+            "§7Current Vibrations: §b" + String.format("%.1f", fps) + " FPS",
+            "§7Tick Delay: §f" + ticks + " §7ticks per frame",
+            "",
+            "§3§o\"Harness the crystal's pulse to stabilize\"",
+            "§3§o\"the block's existence in your world.\""));
+
+        inv.setStack(24, ui(Items.ARROW, "§a+1 FPS §l›", "§7Minor Increase"));
+        inv.setStack(25, ui(Items.GOLD_INGOT, "§a+5 FPS §l»", "§7Accelerate Flux"));
+
+        // ── Frequency Nodes (Presets) ───────────────────────────────────────────
+        inv.setStack(28, ui(Items.AMETHYST_SHARD, "§d5 FPS Node", "§7Cinematic temporal flow"));
+        inv.setStack(29, ui(Items.AMETHYST_SHARD, "§d10 FPS Node", "§7Harmonized temporal flow"));
+        inv.setStack(30, ui(Items.AMETHYST_CLUSTER, "§b20 FPS Node", "§7Vanilla temporal flow"));
+        inv.setStack(31, ui(Items.AMETHYST_CLUSTER, "§b40 FPS Node", "§7Overclocked temporal flow"));
+
+        // ── Chronos Shifting (Interpolation) ───────────────────────────────────
+        inv.setStack(40, interp
+            ? uiGlint(Items.CRYING_OBSIDIAN, "§d§lSmooth Chronos Shifting: §6ACTIVE",
+                "§7Blends temporal frames together flawlessly.",
+                "§3§oIdeal for water, magmatic, or energy blocks.",
+                "§8Click to §cTERMINATE §8shifting")
+            : ui(Items.OBSIDIAN, "§7§lSmooth Chronos Shifting: §8INACTIVE",
+                "§7Sharp transitions between temporal states.",
+                "§3§oIdeal for pixel art and legacy textures.",
+                "§8Click to §6ACTIVATE §8shifting"));
+
+        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Studio"));
+        inv.setStack(49, uiGlint(Items.DRAGON_EGG, "§6§l👑 EXECUTE GLOBAL SYNC",
+            "§7Finalize temporal adjustments and",
+            "§7broadcast the resonance to all players.",
+            "",
+            "§e§lClick to stabilize reality."));
+
         return inv;
     }
 

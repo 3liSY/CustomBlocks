@@ -29,9 +29,10 @@ public final class SlotData {
 
     // ── Shape box record ─────────────────────────────────────────────────────
     public record ShapeBox(float x1, float y1, float z1, float x2, float y2, float z2) {
-        public static ShapeBox parse(String csv) {
-            String[] p = csv.split(",");
-            if (p.length != 6) throw new IllegalArgumentException("Expected 6 comma-separated floats: " + csv);
+        public static ShapeBox parse(String input) {
+            // Split by comma OR space (handles multiple spaces/delimiters gracefully)
+            String[] p = input.trim().split("[,\\s]+");
+            if (p.length != 6) throw new IllegalArgumentException("Expected 6 values (x1 y1 z1 x2 y2 z2): " + input);
             return new ShapeBox(
                     Float.parseFloat(p[0].trim()), Float.parseFloat(p[1].trim()), Float.parseFloat(p[2].trim()),
                     Float.parseFloat(p[3].trim()), Float.parseFloat(p[4].trim()), Float.parseFloat(p[5].trim()));
