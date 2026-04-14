@@ -140,4 +140,10 @@ public class ResourcePackServer {
             return "127.0.0.1";
         }
     }
+
+    public static String getPackUrl(net.minecraft.server.MinecraftServer server) {
+        String ip = getExternalIp();
+        int port = activePort() > 0 ? activePort() : getPort();
+        return "http://" + ip + ":" + port + "/pack.zip";
+    }
 }

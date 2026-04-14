@@ -226,7 +226,7 @@ public class GuiManager {
 
         inv.setStack(4, uiGlint(Items.COMPASS, "§b§lResource Hub",
             "§7Designs registered: §f" + SlotManager.usedSlots(),
-            "§7System Status: §aWorking Perfectly"));
+            "§7Status: §aWorking Perfectly"));
 
         inv.setStack(22, uiGlint(Items.RECOVERY_COMPASS, "§6§lQuick-Link Hub",
             "§7Click to §eShare §7the latest",
@@ -857,7 +857,7 @@ public class GuiManager {
         if(slot == 0) { openMain(player, 0); return; }
         if(slot == 10) openTabIconPicker(player, 0);
         else if(slot == 12) openBrokenBlocks(player, 0);
-        else if(slot == 14) openResourceCenter(player);
+        else if(slot == 14) openResourceHub(player);
         else if(slot == 16) { player.closeHandledScreen(); player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb export"); }
         else if(slot == 22) {
             // Friend Test — fetch external IP and display shareable URL
@@ -1162,8 +1162,8 @@ public class GuiManager {
 
         // ── Row 2: Tools ──────────────────────────────────────────────────────
         inv.setStack(19, uiGlint(Items.PAINTING, "§a§lTab Icon Settings", "§7Change dynamic creative tab icon", "§b• Tip: §7Use a square PNG for best results"));
-        inv.setStack(21, uiGlint(Items.DAMAGED_ANVIL, "§c§lBroken Texture Fixer", "§7Analyze and fix §6Broken Blocks §7in real-time.", "§b• Tip: §7Cleans up missing textures"));
-        inv.setStack(23, uiGlint(Items.BEACON, "§b§lResource Hub", "§7Manage the design pipeline & syncing", "§b• Tip: §7Ensure players can download your textures"));
+        inv.setStack(21, uiGlint(Items.DAMAGED_ANVIL, "§c§lIntegrity Scanner", "§7Analyze and fix §6Broken Blocks §7in real-time.", "§b• Tip: §7Cleans up magenta/black textures"));
+        inv.setStack(23, uiGlint(Items.BEACON, "§b§lTexture Sanctuary", "§7Manage the design pipeline & syncing", "§b• Tip: §7Ensure players can download your textures"));
         inv.setStack(25, uiGlint(Items.PAPER, "§f§lExport Data", "§7Export JSON block structure data", "§b• Tip: §7Found in config/customblocks/exports/"));
 
         // ── Row 3: Slot Usage & Network ──────────────────────────────────────
@@ -1173,11 +1173,11 @@ public class GuiManager {
 
         boolean httpUp = com.customblocks.network.ResourcePackServer.isRunning();
         if (httpUp) {
-            inv.setStack(33, uiGlint(Items.ENDER_EYE, "§a§l✔ System Status: ONLINE",
+            inv.setStack(33, uiGlint(Items.ENDER_EYE, "§a§l✔ Texture Pipeline: ONLINE",
                 "§7The design system is active.",
-                "§e§lWorking Perfectly"));
+                "§b• Tip: §7Click to manage sync & delivery"));
         } else {
-            inv.setStack(33, ui(Items.BARRIER, "§c§l✖ System Status: OFFLINE", "§7The design system is disconnected.", "§b• Tip: §7Check the Resource Hub"));
+            inv.setStack(33, ui(Items.BARRIER, "§c§l✖ Texture Pipeline: OFFLINE", "§7The design system is disconnected.", "§b• Tip: §7Enable in the sanctuary"));
         }
 
         inv.setStack(40, ui(Items.SPYGLASS, "§b§lMod Information", "§7CustomBlocks §fv1.0.0", "§7Fabric §f1.21.1", "§8System integrity is §lOPTIMAL"));
@@ -1585,5 +1585,5 @@ public class GuiManager {
     }
     static ItemStack uiGlint(Item item, String name, String... lore) { ItemStack s=ui(item,name,lore); s.set(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE,true); return s; }
     static Text lore(String t) { return Text.literal(t).styled(s->s.withItalic(false)); }
-    static ItemStack glass()   { return ui(Items.GRAY_STAINED_GLASS_PANE," "); }
+    static ItemStack glass()   { return ui(Items.GRAY_STAINED_GLASS_PANE,"§r"); }
 }
