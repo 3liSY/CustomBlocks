@@ -282,9 +282,25 @@ public class GuiManager {
     public static List<SlotData> brokenBlocks() {
         List<SlotData> list = new ArrayList<>();
         for (SlotData d : sortedBlocks()) {
-            if (d.texture != null && ImageProcessor.isBrokenTexture(d.texture)) {
+            // Case 1: No texture at all
+            if (d.texture == null || d.texture.length == 0) {
                 list.add(d);
+                continue;
             }
+            // Case 2: Main texture is broken (checkerboard / pure black)
+            if (ImageProcessor.isBrokenTexture(d.texture)) {
+                list.add(d);
+                continue;
+            }
+            // Case 3: Any individual face texture is broken
+            boolean faceBroken = false;
+            for (byte[] faceTex : d.faceTextures.values()) {
+                if (ImageProcessor.isBrokenTexture(faceTex)) {
+                    faceBroken = true;
+                    break;
+                }
+            }
+            if (faceBroken) list.add(d);
         }
         return list;
     }

@@ -645,25 +645,37 @@ public final class ImageProcessor {
      * Checks if a texture is mostly alternating magenta (#FF00FF) and black (#000000).
      */
     public static boolean isBrokenTexture(byte[] pngBytes) {
+        if (pngBytes == null || pngBytes.length == 0) return true;
         try {
             BufferedImage img = ImageIO.read(new ByteArrayInputStream(pngBytes));
-            if (img == null) return false;
+            if (img == null) return true;
             int w = img.getWidth(), h = img.getHeight();
-            int brokenPixels = 0;
-            int totalPixels = w * h;
+            int magentaPixels = 0;   // pure magenta (255,0,255) — the MC missing texture color
+            int blackPixels   = 0;   // pure black (0,0,0)
+            int totalPixels   = w * h;
+            if (totalPixels == 0) return true;
             for (int y = 0; y < h; y++) {
                 for (int x = 0; x < w; x++) {
                     int argb = img.getRGB(x, y);
+                    int a = (argb >> 24) & 0xFF;
                     int r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
-                    if ((r == 255 && g == 0 && b == 255) || (r == 0 && g == 0 && b == 0)) {
-                        brokenPixels++;
+                    if (a < 10) continue; // skip fully transparent pixels
+                    if (r >= 240 && g <= 15 && b >= 240) {
+                        magentaPixels++;
+                    } else if (r <= 15 && g <= 15 && b <= 15) {
+                        blackPixels++;
                     }
                 }
             }
-            return brokenPixels > (totalPixels * 0.9);
+            // Classic MC missing-texture checkerboard: magenta + black squares
+            int checkerboard = magentaPixels + blackPixels;
+            if (magentaPixels > 0 && checkerboard > (totalPixels * 0.4)) return true;
+            // Fully black texture (failed download or cleared texture)
+            if (blackPixels > (totalPixels * 0.95)) return true;
+            return false;
         } catch (Exception e) {
             com.customblocks.gui.GuiManager.logError();
-            return false;
+            return true; // if we can't even read it, it's broken
         }
     }
 
