@@ -172,7 +172,7 @@ public class ServerPackGenerator {
         uv.add(0f); uv.add(0f); uv.add(16f); uv.add(16f);
         faceObj.add("uv", uv);
         faceObj.addProperty("texture", "#" + FACE_TO_MC.get(cbFaceName));
-        faceObj.addProperty("cullface", mcFaceName);
+        // Strict culling removed for custom shapes to fix black-out rendering bugs
         faces.add(mcFaceName, faceObj);
     }
 

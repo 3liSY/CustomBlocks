@@ -220,42 +220,25 @@ public class GuiManager {
             Text.literal("§b§l✦ §r§fServer Maintenance")));
     }
 
-    private static SimpleInventory buildResourceCenter(ServerPlayerEntity player) {
+    private static SimpleInventory buildResourceHub(ServerPlayerEntity player) {
         SimpleInventory inv = new SimpleInventory(54);
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
 
-        String ip = com.customblocks.network.ResourcePackServer.getExternalIp();
-        int activePort = com.customblocks.network.ResourcePackServer.isRunning() ? com.customblocks.network.ResourcePackServer.activePort() : -1;
-        String statusText = activePort > 0 ? "§aLIVE" : "§cOFFLINE - Port Conflict";
-        String statusColor = activePort > 0 ? "§a" : "§c";
-        
-        String url = activePort > 0 ? "http://" + ip + ":" + activePort + "/pack.zip" : "§7[Waiting for open door]";
+        inv.setStack(4, uiGlint(Items.COMPASS, "§b§lResource Hub",
+            "§7Designs registered: §f" + SlotManager.usedSlots(),
+            "§7System Status: §aWorking Perfectly"));
 
-        inv.setStack(4, uiGlint(Items.BEACON, "§b§lTexture Sanctuary",
-            "§7Manage your asset distribution pipeline.",
-            "§8System integrity: " + statusColor + (activePort > 0 ? "OPTIMAL" : "CRITICAL")));
+        inv.setStack(22, uiGlint(Items.RECOVERY_COMPASS, "§6§lQuick-Link Hub",
+            "§7Click to §eShare §7the latest",
+            "§7designs with your friends."));
 
-        inv.setStack(20, uiGlint(activePort > 0 ? Items.REPEATER : Items.LEVER, "§e§lCommunication Door",
-            "§7Active Port: §f" + (activePort > 0 ? activePort : "Blocked"),
-            "§7(Standard: 8080)",
+        inv.setStack(24, uiGlint(Items.NETHER_STAR, "§a§lFORCE SYNC",
+            "§7Updates all players with the",
+            "§7latest designs instantly.",
             "",
-            "§b• Tip: §7If blocked, the mod will",
-            "§7auto-fallback to other doors.",
-            "§e§oStatus: " + statusText));
+            "§e§lClick to broadcast."));
 
-        inv.setStack(22, ui(Items.COMPASS, "§f§lYour Global Address",
-            "§7Other players will use this to sync:",
-            "§b" + url,
-            "",
-            "§8Status: " + (activePort > 0 ? "§aBroadcasting..." : "§cStopped")));
-
-        inv.setStack(24, uiGlint(Items.NETHER_STAR, "§a§lSYNC NOW",
-            "§7Force all players to re-read textures.",
-            "§7Use this after manual asset changes.",
-            "",
-            "§e§l▶ CLICK TO SYNC ALL PLAYERS"));
-
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Maintenance"));
+        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Main"));
         return inv;
     }
 
@@ -299,12 +282,12 @@ public class GuiManager {
             Text.literal("§b§l▶ §r§fChoose Tab Icon §7(ESC = back)")));
     }
 
-    public static void openResourceCenter(ServerPlayerEntity player) {
+    public static void openResourceHub(ServerPlayerEntity player) {
         pushBackStack(player.getUuid());
         STATES.put(player.getUuid(), GuiState.resourceCenter());
         openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildResourceCenter(player)),
-            Text.literal("§b§l✦ §r§fTexture Sanctuary")));
+            (s, pi, p) -> new CbScreenHandler(s, pi, buildResourceHub(player)),
+            Text.literal("§b§l✦ §r§fResource Hub")));
     }
 
     public static void openBrokenBlocks(ServerPlayerEntity player) { openBrokenBlocks(player, 0); }
@@ -340,7 +323,7 @@ public class GuiManager {
                 case PROPERTIES_MENU -> openPropertiesGui(player, state.editingId(), state.page());
                 case SOUND_MENU -> openSoundMenu(player, state.editingId(), state.page());
                 case TAB_ICON_MENU -> openTabIconPicker(player, state.page());
-                case RESOURCE_CENTER -> openResourceCenter(player);
+                case RESOURCE_CENTER -> openResourceHub(player);
                 case ANIM_GUI -> openAnimGui(player, state.editingId());
                 default -> openMain(player, 0);
             }
@@ -362,7 +345,7 @@ public class GuiManager {
                 case PICKER       -> handlePickerClick(player, state, slot, false);
                 case PICKER_BROKEN-> handlePickerClick(player, state, slot, true);
                 case TAB_ICON_MENU-> handleTabIconMenuClick(player, state, slot);
-                case RESOURCE_CENTER -> handleResourceCenterClick(player, state, slot);
+                case RESOURCE_CENTER -> handleResourceHubClick(player, state, slot);
                 case EDITOR       -> handleEditorClick(player, state, slot, button);
                 case FACE_EDITOR  -> handleFaceEditorClick(player, state, slot, button);
                 case SHAPE_EDITOR -> handleShapeEditorClick(player, state, slot, button);
@@ -621,23 +604,18 @@ public class GuiManager {
 
     // ── Click handlers ────────────────────────────────────────────────────────
 
-    private static void handleResourceCenterClick(ServerPlayerEntity player, GuiState state, int slot) {
+    private static void handleResourceHubClick(ServerPlayerEntity player, GuiState state, int slot) {
         playClick(player);
-        switch (slot) {
-            case 0, 45 -> openMaintenanceMenu(player);
-            case 20 -> { // Change Port
-                int nextPort = CustomBlocksConfig.resourcePackPort == 8080 ? 24454 : 8080;
-                CustomBlocksConfig.resourcePackPort = nextPort;
-                CustomBlocksConfig.save();
-                com.customblocks.network.ResourcePackServer.stop();
-                com.customblocks.network.ResourcePackServer.start();
-                send(player, "§a[Pipeline] Door ID set to " + nextPort + ". Rebooting pipeline...");
-                openResourceCenter(player);
-            }
-            case 24 -> { // Force Sync (Push)
-                player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb rp push");
-                openResourceCenter(player);
-            }
+        if (slot == 45) { openMaintenanceMenu(player); return; }
+        if (slot == 22) { // Copy Link
+            String url = com.customblocks.network.ResourcePackServer.getPackUrl(player.getServer());
+            player.closeHandledScreen();
+            player.sendMessage(Text.literal("§0§l[§b§lCB§0§l] §fShare this link with friends: §b§n" + url).styled(s -> s.withUnderline(true)), false);
+        }
+        if (slot == 24) { // Force Sync
+            NetworkManager.broadcastFullSync(player.getServer());
+            send(player, "§a[System] Force-syncing all clients...");
+            openResourceHub(player);
         }
     }
 
@@ -1184,8 +1162,8 @@ public class GuiManager {
 
         // ── Row 2: Tools ──────────────────────────────────────────────────────
         inv.setStack(19, uiGlint(Items.PAINTING, "§a§lTab Icon Settings", "§7Change dynamic creative tab icon", "§b• Tip: §7Use a square PNG for best results"));
-        inv.setStack(21, uiGlint(Items.DAMAGED_ANVIL, "§c§lIntegrity Scanner", "§7Analyze and fix §6Broken Blocks §7in real-time.", "§b• Tip: §7Cleans up magenta/black textures"));
-        inv.setStack(23, uiGlint(Items.BEACON, "§b§lTexture Sanctuary", "§7Manage the design pipeline & syncing", "§b• Tip: §7Ensure players can download your textures"));
+        inv.setStack(21, uiGlint(Items.DAMAGED_ANVIL, "§c§lBroken Texture Fixer", "§7Analyze and fix §6Broken Blocks §7in real-time.", "§b• Tip: §7Cleans up missing textures"));
+        inv.setStack(23, uiGlint(Items.BEACON, "§b§lResource Hub", "§7Manage the design pipeline & syncing", "§b• Tip: §7Ensure players can download your textures"));
         inv.setStack(25, uiGlint(Items.PAPER, "§f§lExport Data", "§7Export JSON block structure data", "§b• Tip: §7Found in config/customblocks/exports/"));
 
         // ── Row 3: Slot Usage & Network ──────────────────────────────────────
@@ -1195,11 +1173,11 @@ public class GuiManager {
 
         boolean httpUp = com.customblocks.network.ResourcePackServer.isRunning();
         if (httpUp) {
-            inv.setStack(33, uiGlint(Items.ENDER_EYE, "§a§l✔ Texture Pipeline: ONLINE",
+            inv.setStack(33, uiGlint(Items.ENDER_EYE, "§a§l✔ System Status: ONLINE",
                 "§7The design system is active.",
-                "§b• Tip: §7Click to manage sync & delivery"));
+                "§e§lWorking Perfectly"));
         } else {
-            inv.setStack(33, ui(Items.BARRIER, "§c§l✖ Texture Pipeline: OFFLINE", "§7The design system is disconnected.", "§b• Tip: §7Enable in the sanctuary"));
+            inv.setStack(33, ui(Items.BARRIER, "§c§l✖ System Status: OFFLINE", "§7The design system is disconnected.", "§b• Tip: §7Check the Resource Hub"));
         }
 
         inv.setStack(40, ui(Items.SPYGLASS, "§b§lMod Information", "§7CustomBlocks §fv1.0.0", "§7Fabric §f1.21.1", "§8System integrity is §lOPTIMAL"));
@@ -1607,5 +1585,5 @@ public class GuiManager {
     }
     static ItemStack uiGlint(Item item, String name, String... lore) { ItemStack s=ui(item,name,lore); s.set(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE,true); return s; }
     static Text lore(String t) { return Text.literal(t).styled(s->s.withItalic(false)); }
-    static ItemStack glass()   { return ui(Items.GRAY_STAINED_GLASS_PANE,"§r"); }
+    static ItemStack glass()   { return ui(Items.GRAY_STAINED_GLASS_PANE," "); }
 }
