@@ -242,6 +242,62 @@ public class GuiManager {
         return inv;
     }
 
+    public static void openAssistantControl(ServerPlayerEntity player) {
+        pushBackStack(player.getUuid());
+        STATES.put(player.getUuid(), GuiState.assistantControl());
+        openScreen(player, new SimpleNamedScreenHandlerFactory(
+            (s, pi, px) -> new CbScreenHandler(s, pi, buildAssistantControl(player)),
+            Text.literal("§b§l✦ §r§fAssistant Control")));
+    }
+
+    private static SimpleInventory buildAssistantControl(ServerPlayerEntity player) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+
+        boolean active = com.customblocks.assistant.AssistantManager.isSpawned();
+        boolean following = com.customblocks.assistant.AssistantManager.isFollowing();
+
+        inv.setStack(4, uiGlint(Items.PLAYER_HEAD, "§b§lThe Helper",
+            "§7Status: " + (active ? "§aActive" : "§cHidden"),
+            "§7Following: " + (following ? "§aYes" : "§7No")));
+
+        inv.setStack(20, uiGlint(active ? Items.ENDER_EYE : Items.ENDER_PEARL, 
+            active ? "§a§l✔ Assistant: ACTIVE" : "§c§l✖ Assistant: HIDDEN",
+            "§7Click to toggle the Helper's presence."));
+
+        inv.setStack(22, uiGlint(following ? Items.RECOVERY_COMPASS : Items.COMPASS, 
+            "§e§lOrder: " + (following ? "FOLLOWING" : "STAYING"),
+            "§7Click to toggle Follow/Wait mode."));
+
+        inv.setStack(24, uiGlint(Items.NETHER_STAR, "§6§lSanity Scan",
+            "§7The Helper will hunt for §cBroken Blocks.",
+            "",
+            "§b• Immersive: §7He will walk and point."));
+
+        inv.setStack(31, uiGlint(Items.PAINTING, "§f§lHelper Identity",
+            "§7Current Name: §b" + CustomBlocksConfig.helperName,
+            "§7Current Skin: §b" + CustomBlocksConfig.helperSkin,
+            "",
+            "§e§l▶ Click to change Name"));
+
+        // --- Row 5: Skin Presets ---
+        String[] skins = {"Architect", "Engineer", "Watcher", "Cyber", "Royal", "Guard", "Phantom"};
+        for (int i = 0; i < skins.length; i++) {
+            inv.setStack(37 + i, customHeadByUsername(skins[i], "§b§lPreset: §f" + skins[i], "§7Click to assume this identity."));
+        }
+
+        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Main"));
+        return inv;
+    }
+
+    private static ItemStack customHeadByUsername(String user, String name, String... lore) {
+        ItemStack s = new ItemStack(Items.PLAYER_HEAD);
+        s.set(DataComponentTypes.CUSTOM_NAME, Text.literal(name).styled(st -> st.withItalic(false)));
+        if(lore.length > 0){ List<Text> ll = new ArrayList<>(); for(String l:lore)ll.add(lore(l)); s.set(DataComponentTypes.LORE, new LoreComponent(ll)); }
+        s.set(DataComponentTypes.PROFILE, new net.minecraft.component.type.ProfileComponent(java.util.Optional.of(user), java.util.Optional.empty(), new com.mojang.authlib.properties.PropertyMap()));
+        return s;
+    }
+
 
     public static void openHelpGui(ServerPlayerEntity player) {
         pushBackStack(player.getUuid());
@@ -324,6 +380,7 @@ public class GuiManager {
                 case SOUND_MENU -> openSoundMenu(player, state.editingId(), state.page());
                 case TAB_ICON_MENU -> openTabIconPicker(player, state.page());
                 case RESOURCE_CENTER -> openResourceHub(player);
+                case ASSISTANT_CONTROL -> openAssistantControl(player);
                 case ANIM_GUI -> openAnimGui(player, state.editingId());
                 default -> openMain(player, 0);
             }
@@ -346,6 +403,7 @@ public class GuiManager {
                 case PICKER_BROKEN-> handlePickerClick(player, state, slot, true);
                 case TAB_ICON_MENU-> handleTabIconMenuClick(player, state, slot);
                 case RESOURCE_CENTER -> handleResourceHubClick(player, state, slot);
+                case ASSISTANT_CONTROL -> handleAssistantControlClick(player, state, slot);
                 case EDITOR       -> handleEditorClick(player, state, slot, button);
                 case FACE_EDITOR  -> handleFaceEditorClick(player, state, slot, button);
                 case SHAPE_EDITOR -> handleShapeEditorClick(player, state, slot, button);
@@ -591,6 +649,16 @@ public class GuiManager {
                 openEditor(player, newId, rp); return true;
             }
             case ADMIN_CUSTOM_TITLE -> {
+                if ("helper_name".equals(blockId)) {
+                    CustomBlocksConfig.helperName = text;
+                    CustomBlocksConfig.save();
+                    if (com.customblocks.assistant.AssistantManager.isSpawned()) {
+                        // Manager will refresh on next tick or manually
+                         send(player, "§0§l[§b§lHelper§0§l] §fCall me '§b" + text + "§f' from now on. §a✔");
+                    }
+                    openAssistantControl(player);
+                    return true;
+                }
                 send(player, "§7[CustomBlocks] Action cancelled.");
                 openMain(player, 0);
                 return true;
@@ -616,6 +684,55 @@ public class GuiManager {
             NetworkManager.broadcastFullSync(player.getServer());
             send(player, "§a[System] Force-syncing all clients...");
             openResourceHub(player);
+        }
+    }
+
+    private static void handleAssistantControlClick(ServerPlayerEntity player, GuiState state, int slot) {
+        playClick(player);
+        if (slot == 45) { openMain(player, 0); return; }
+        
+        if (slot == 20) { // Toggle Spawn
+            if (com.customblocks.assistant.AssistantManager.isSpawned()) {
+                com.customblocks.assistant.AssistantManager.hide();
+                send(player, "§0§l[§b§lHelper§0§l] §7Sanctuary beckons. §c✖");
+            } else {
+                com.customblocks.assistant.AssistantManager.spawn(player.getServer(), (net.minecraft.server.world.ServerWorld)player.getWorld(), player.getX(), player.getY(), player.getZ());
+                send(player, "§0§l[§b§lHelper§0§l] §fAt your service, Architect! §a✔");
+            }
+            openAssistantControl(player);
+        }
+        if (slot == 22) { // Toggle Follow
+            boolean f = !com.customblocks.assistant.AssistantManager.isFollowing();
+            com.customblocks.assistant.AssistantManager.setFollowing(f, player.getUuid());
+            send(player, "§0§l[§b§lHelper§0§l] §fFollowing: " + (f ? "§bYes" : "§7No"));
+            openAssistantControl(player);
+        }
+        if (slot == 24) { // Beast Mode / Sanity Scan
+            player.closeHandledScreen();
+            com.customblocks.assistant.AssistantManager.runSanityScan(player);
+            return;
+        }
+        if (slot == 31) { // Identity
+             player.closeHandledScreen();
+             send(player, "§0§l[§b§lHelper§0§l] §fPlease type a new name in chat (or §ccancel§f):");
+             PENDING.put(player.getUuid(), new PendingInput(InputAction.ADMIN_CUSTOM_TITLE, "helper_name", null, null, null, 0));
+             return;
+        }
+
+        // --- Row 5: Skin Library Presets ---
+        if (slot >= 37 && slot <= 43) {
+            String[] skins = {"Architect", "Engineer", "Watcher", "Cyber", "Royal", "Guard", "Phantom"};
+            int si = slot - 37;
+            if (si < skins.length) {
+                CustomBlocksConfig.helperSkin = skins[si];
+                CustomBlocksConfig.save();
+                send(player, "§0§l[§b§lHelper§0§l] §fIdentity assumed: §b" + skins[si] + " §a✔");
+                if (com.customblocks.assistant.AssistantManager.isSpawned()) {
+                    // Respawn to update skin (Fake players usually need respawn for skin change)
+                    com.customblocks.assistant.AssistantManager.spawn(player.getServer(), (net.minecraft.server.world.ServerWorld)player.getWorld(), player.getX(), player.getY(), player.getZ());
+                }
+                openAssistantControl(player);
+            }
         }
     }
 
@@ -858,6 +975,7 @@ public class GuiManager {
         if(slot == 10) openTabIconPicker(player, 0);
         else if(slot == 12) openBrokenBlocks(player, 0);
         else if(slot == 14) openResourceHub(player);
+        else if(slot == 25) openAssistantControl(player);
         else if(slot == 16) { player.closeHandledScreen(); player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb export"); }
         else if(slot == 22) {
             // Friend Test — fetch external IP and display shareable URL
@@ -1162,9 +1280,9 @@ public class GuiManager {
 
         // ── Row 2: Tools ──────────────────────────────────────────────────────
         inv.setStack(19, uiGlint(Items.PAINTING, "§a§lTab Icon Settings", "§7Change dynamic creative tab icon", "§b• Tip: §7Use a square PNG for best results"));
-        inv.setStack(21, uiGlint(Items.DAMAGED_ANVIL, "§c§lIntegrity Scanner", "§7Analyze and fix §6Broken Blocks §7in real-time.", "§b• Tip: §7Cleans up magenta/black textures"));
-        inv.setStack(23, uiGlint(Items.BEACON, "§b§lTexture Sanctuary", "§7Manage the design pipeline & syncing", "§b• Tip: §7Ensure players can download your textures"));
-        inv.setStack(25, uiGlint(Items.PAPER, "§f§lExport Data", "§7Export JSON block structure data", "§b• Tip: §7Found in config/customblocks/exports/"));
+        inv.setStack(21, uiGlint(Items.DAMAGED_ANVIL, "§c§lBroken Texture Fixer", "§7Analyze and fix §6Broken Blocks §7in real-time.", "§b• Tip: §7Cleans up missing textures"));
+        inv.setStack(23, uiGlint(Items.BEACON, "§b§lResource Hub", "§7Manage the design pipeline & syncing", "§b• Tip: §7Ensure players can download your textures"));
+        inv.setStack(25, uiGlint(Items.PLAYER_HEAD, "§e§lAssistant Hub", "§7Manage your Royal Helper", "§b• Tip: §7Toggle presence & behaviors"));
 
         // ── Row 3: Slot Usage & Network ──────────────────────────────────────
         int used = SlotManager.usedSlots();

@@ -61,6 +61,16 @@ public final class CustomBlocksConfig {
     /** Debounce time for initial join burst (ms). */
     public static volatile long joinDebounceMs = 4000;
 
+    // ── Assistant NPC (The Helper) ───────────────────────────────────────────
+    /** Whether the helper is currently spawned in the world. */
+    public static volatile boolean helperEnabled = false;
+    /** The helper's display name. */
+    public static volatile String helperName = "The Helper";
+    /** The helper's skin (Minecraft username or texture URL). */
+    public static volatile String helperSkin = "Architect";
+    /** Whether the live status hologram is visible. */
+    public static volatile boolean helperHologram = true;
+
     // ── Public API ───────────────────────────────────────────────────────────
 
     public static void setResourcePackPort(int port) {
@@ -95,6 +105,10 @@ public final class CustomBlocksConfig {
             resourcePackPort      = getInt(root, "resourcePackPort", resourcePackPort);
             reloadDebounceMs      = getLong(root, "reloadDebounceMs", reloadDebounceMs);
             joinDebounceMs        = getLong(root, "joinDebounceMs", joinDebounceMs);
+            helperEnabled         = getBool(root, "helperEnabled", helperEnabled);
+            helperName            = getString(root, "helperName", helperName);
+            helperSkin            = getString(root, "helperSkin", helperSkin);
+            helperHologram        = getBool(root, "helperHologram", helperHologram);
 
             // Clamp values
             maxSlots              = Math.max(1, Math.min(8192, maxSlots));
@@ -139,6 +153,10 @@ public final class CustomBlocksConfig {
             root.addProperty("resourcePackPort", resourcePackPort);
             root.addProperty("reloadDebounceMs", reloadDebounceMs);
             root.addProperty("joinDebounceMs", joinDebounceMs);
+            root.addProperty("helperEnabled", helperEnabled);
+            root.addProperty("helperName", helperName);
+            root.addProperty("helperSkin", helperSkin);
+            root.addProperty("helperHologram", helperHologram);
             Path tempFile = dir.resolve(CONFIG_FILE + ".tmp");
             Files.writeString(tempFile, GSON.toJson(root), StandardCharsets.UTF_8);
             java.nio.file.Files.move(tempFile, file,
@@ -161,6 +179,10 @@ public final class CustomBlocksConfig {
 
     private static String getString(JsonObject obj, String key, String def) {
         return obj.has(key) ? obj.get(key).getAsString() : def;
+    }
+
+    private static boolean getBool(JsonObject obj, String key, boolean def) {
+        return obj.has(key) ? obj.get(key).getAsBoolean() : def;
     }
 
     private CustomBlocksConfig() {} // static-only

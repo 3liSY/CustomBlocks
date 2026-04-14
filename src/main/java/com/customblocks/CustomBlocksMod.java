@@ -22,6 +22,8 @@ import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.fabricmc.fabric.api.event.player.UseEntityCallback;
+import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.minecraft.block.AbstractBlock;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.item.Item;
@@ -32,6 +34,7 @@ import net.minecraft.registry.Registry;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import org.slf4j.Logger;
@@ -116,6 +119,7 @@ public class CustomBlocksMod implements ModInitializer {
         // ── Chat intercept ───────────────────────────────────────────────────
         ServerMessageEvents.ALLOW_CHAT_MESSAGE.register((message, sender, params) -> {
             String content = message.getContent().getString();
+            if (com.customblocks.assistant.AssistantManager.handleChatCommand(sender, content)) return false;
             if (GuiManager.handleChatInput(sender, content)) return false;
             return !RectangleToolItem.handleChatInput(sender, content);
         });
@@ -214,10 +218,33 @@ public class CustomBlocksMod implements ModInitializer {
             GuiManager.onPlayerDisconnect(handler.player.getUuid());
         });
 
-        // ── Server tick → drip-feed network + session cleanup ────────────────
         ServerTickEvents.END_SERVER_TICK.register(server -> {
+            com.customblocks.assistant.AssistantManager.tick(server);
             NetworkManager.onServerTick(server);
             RectangleToolItem.tickSessionCleanup();
+        });
+
+        // ── Assistant Interaction (Right-Click NPC) ──────────────────────────
+        UseEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
+            if (entity instanceof com.customblocks.assistant.AssistantEntity) {
+                if (!world.isClient) GuiManager.openAssistantControl((ServerPlayerEntity)player);
+                return net.minecraft.util.ActionResult.SUCCESS;
+            }
+            return net.minecraft.util.ActionResult.PASS;
+        });
+
+        // ── Assistant Diamond Command (Go Here) ──────────────────────────────
+        UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
+            if (!world.isClient && player.getStackInHand(hand).isOf(Items.DIAMOND)) {
+                if (com.customblocks.assistant.AssistantManager.isSpawned()) {
+                    net.minecraft.util.math.BlockPos pos = hitResult.getBlockPos().offset(hitResult.getSide());
+                    com.customblocks.assistant.AssistantManager.setFollowing(false, null);
+                    // Tell manager to move entity (teleport for now, update to pathfinding later)
+                    // AssistantManager.orderMoveTo(pos); 
+                    player.sendMessage(Text.literal("§0§l[§b§lHelper§0§l] §fMoving to position, Architect. §a✔"), false);
+                }
+            }
+            return net.minecraft.util.ActionResult.PASS;
         });
 
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
