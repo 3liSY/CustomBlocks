@@ -226,36 +226,36 @@ public class GuiManager {
 
         String ip = com.customblocks.network.ResourcePackServer.getExternalIp();
         int activePort = com.customblocks.network.ResourcePackServer.isRunning() ? com.customblocks.network.ResourcePackServer.activePort() : -1;
-        String statusText = activePort > 0 ? "§aLIVE" : "§cOFFLINE - Port Conflict";
+        String statusText = activePort > 0 ? "§aREADY" : "§cOFFLINE - Port Conflict";
         String statusColor = activePort > 0 ? "§a" : "§c";
         
-        String url = activePort > 0 ? "http://" + ip + ":" + activePort + "/pack.zip" : "§7[Waiting for open door]";
+        String url = activePort > 0 ? "http://" + ip + ":" + activePort + "/pack.zip" : "§7[Locked]";
 
-        inv.setStack(4, uiGlint(Items.BEACON, "§b§lTexture Sanctuary",
-            "§7Manage your asset distribution pipeline.",
-            "§8System integrity: " + statusColor + (activePort > 0 ? "OPTIMAL" : "CRITICAL")));
+        inv.setStack(4, uiGlint(Items.BEACON, "§b§lResource Hub",
+            "§7Manage your texture distribution system.",
+            "§8Mod Status: " + statusColor + (activePort > 0 ? "Working Perfectly" : "Action Required")));
 
-        inv.setStack(20, uiGlint(activePort > 0 ? Items.REPEATER : Items.LEVER, "§e§lCommunication Door",
-            "§7Active Port: §f" + (activePort > 0 ? activePort : "Blocked"),
+        inv.setStack(20, uiGlint(activePort > 0 ? Items.REPEATER : Items.LEVER, "§e§lSystem Port",
+            "§7The 'Door' used for data: §f" + (activePort > 0 ? activePort : "Blocked"),
             "§7(Standard: 8080)",
             "",
             "§b• Tip: §7If blocked, the mod will",
-            "§7auto-fallback to other doors.",
+            "§7auto-choose a different port.",
             "§e§oStatus: " + statusText));
 
-        inv.setStack(22, ui(Items.COMPASS, "§f§lYour Global Address",
-            "§7Other players will use this to sync:",
-            "§b" + url,
+        inv.setStack(22, ui(Items.COMPASS, "§f§lYour Texture Link",
+            "§7Friends need this link to see your textures.",
+            "§bClick to get link in chat.",
             "",
-            "§8Status: " + (activePort > 0 ? "§aBroadcasting..." : "§cStopped")));
+            "§8Status: " + (activePort > 0 ? "§aOnline & Broadcasting" : "§cStopped")));
 
-        inv.setStack(24, uiGlint(Items.NETHER_STAR, "§a§lSYNC NOW",
-            "§7Force all players to re-read textures.",
-            "§7Use this after manual asset changes.",
+        inv.setStack(24, uiGlint(Items.NETHER_STAR, "§a§lSYNC ALL",
+            "§7Force update textures for all players.",
+            "§7Use this after changing block images.",
             "",
-            "§e§l▶ CLICK TO SYNC ALL PLAYERS"));
+            "§e§l▶ CLICK TO SYNC EVERYONE"));
 
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Maintenance"));
+        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Settings"));
         return inv;
     }
 
@@ -304,7 +304,7 @@ public class GuiManager {
         STATES.put(player.getUuid(), GuiState.resourceCenter());
         openScreen(player, new SimpleNamedScreenHandlerFactory(
             (s, pi, p) -> new CbScreenHandler(s, pi, buildResourceCenter(player)),
-            Text.literal("§b§l✦ §r§fTexture Sanctuary")));
+            Text.literal("§b§l✦ §r§fResource Hub")));
     }
 
     public static void openBrokenBlocks(ServerPlayerEntity player) { openBrokenBlocks(player, 0); }
@@ -317,7 +317,7 @@ public class GuiManager {
         final int fp = page;
         openScreen(player, new SimpleNamedScreenHandlerFactory(
             (s, pi, p) -> new CbScreenHandler(s, pi, buildPicker(fp, true)),
-            Text.literal("§6§l✦ §r§fIntegrity Scanner")));
+            Text.literal("§6§l✦ §r§fBroken Texture Fixer")));
     }
 
     public static List<SlotData> brokenBlocks() {
@@ -631,8 +631,25 @@ public class GuiManager {
                 CustomBlocksConfig.save();
                 com.customblocks.network.ResourcePackServer.stop();
                 com.customblocks.network.ResourcePackServer.start();
-                send(player, "§a[Pipeline] Door ID set to " + nextPort + ". Rebooting pipeline...");
+                send(player, "§a[Pipeline] System Port changed to " + nextPort + ". Rebooting...");
                 openResourceCenter(player);
+            }
+            case 22 -> { // Share Address (Compass)
+                player.closeHandledScreen();
+                String ip = com.customblocks.network.ResourcePackServer.getExternalIp();
+                int port = com.customblocks.network.ResourcePackServer.activePort();
+                if (port <= 0) {
+                    ChatHelper.error(player, "The bridge is broken! Open a port first.");
+                    return;
+                }
+                String url = "http://" + ip + ":" + port + "/pack.zip";
+                
+                player.sendMessage(Text.literal("§b§l✦ §r§eYour Texture Link: ")
+                    .append(Text.literal("§b§n" + url)
+                        .styled(s -> s.withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.OPEN_URL, url))
+                                     .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, Text.literal("§eClick to copy/open"))))), false);
+                
+                ChatHelper.success(player, "Link sent to your chat. Copy and send it to friends!");
             }
             case 24 -> { // Force Sync (Push)
                 player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb rp push");
@@ -810,15 +827,18 @@ public class GuiManager {
                 send(player,"§a[GUI] Collision: §f"+(upd.noCollision?"§cOFF":"§aON")); refreshEditorInPlace(player, id, rp);
             }
             case 8  -> { PENDING.put(uuid,new PendingInput(InputAction.RETEXTURE_URL,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §ePaste image URL for ALL faces of '§f"+id+"§e' (or §ccancel§e):"); }
-            case 10 -> openFaceEditor(player, id, rp);
-            case 12 -> openShapeEditor(player, id, rp);
-            case 14 -> openPropertiesGui(player, id, rp);
-            case 16 -> openSoundMenu(player, id, rp);
-            case 22 -> { if (d.isAnimated()) openAnimGui(player, id); }
-            case 28 -> { PENDING.put(uuid,new PendingInput(InputAction.RENAME_TEXT,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new name for '§f"+id+"§e' (or §ccancel§e):"); }
-            case 29 -> { PENDING.put(uuid,new PendingInput(InputAction.REID_TEXT,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new ID for '§f"+id+"§e' (a-z 0-9 _ -) (or §ccancel§e):"); }
-            case 30 -> { PENDING.put(uuid,new PendingInput(InputAction.CREATE_ID,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new ID to duplicate '§f"+id+"§e' into (or §ccancel§e):"); }
-            case 34 -> {
+            
+            // Fixed mappings: match buildEditor slots (19, 21, 23, 25)
+            case 19 -> openFaceEditor(player, id, rp);
+            case 21 -> openShapeEditor(player, id, rp);
+            case 23 -> openPropertiesGui(player, id, rp);
+            case 25 -> openSoundMenu(player, id, rp);
+            case 31 -> { if (d.isAnimated()) openAnimGui(player, id); }
+            
+            case 37 -> { PENDING.put(uuid,new PendingInput(InputAction.RENAME_TEXT,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new name for '§f"+id+"§e' (or §ccancel§e):"); }
+            case 39 -> { PENDING.put(uuid,new PendingInput(InputAction.REID_TEXT,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new ID for '§f"+id+"§e' (a-z 0-9 _ -) (or §ccancel§e):"); }
+            case 41 -> { PENDING.put(uuid,new PendingInput(InputAction.CREATE_ID,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new ID to duplicate '§f"+id+"§e' into (or §ccancel§e):"); }
+            case 53 -> {
                 if (state.confirmDelete()) {
                     UndoManager.pushUndoDeletion(id, d.deepCopy(), uuid); SlotManager.remove(id); SlotManager.saveAll();
                     NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("remove", d.index, id, null, null, 0, 0, "stone"));
@@ -841,38 +861,39 @@ public class GuiManager {
     }
 
     private static void handleShapeEditorClick(ServerPlayerEntity player, GuiState state, int slot, int button) {
-        String id = state.editingId(); int rp = state.page(); int boxPage = state.shapeBoxPage();
+        String id = state.editingId(); int rp = state.page();
         SlotData d = SlotManager.getById(id);
         if (d == null) { openMain(player, rp); return; }
-        List<SlotData.ShapeBox> boxes = d.shapeBoxes != null ? new ArrayList<>(d.shapeBoxes) : new ArrayList<>();
-        UUID uuid = player.getUuid();
+        playClick(player);
 
-        if (slot == 0) { openEditor(player,id,rp); return; }
-        if (slot == 8) {
-            UndoManager.pushUndoMutation(id, d, "setcollision", uuid); SlotManager.setCollision(id,!d.noCollision); SlotManager.saveAll();
-            SlotData upd = SlotManager.getById(id);
-            NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setcollision",upd.index,id,null,null,0,0,"stone",null,upd.noCollision?"false":"true"));
-            send(player,"§a[Shape] Collision: §f"+(upd.noCollision?"§cOFF":"§aON")); reopenShapeEditor(player,id,rp,boxPage); return;
+        if (slot == 45) { openEditor(player, id, rp); return; }
+
+        // Map slots to presets
+        String preset = switch(slot) {
+            case 10 -> "full";
+            case 11 -> "slab";
+            case 12 -> "thin";
+            case 13 -> "carpet";
+            case 19 -> "pillar";
+            case 20 -> "small";
+            case 21 -> "micro";
+            case 22 -> "pane";
+            case 28 -> "trapdoor";
+            case 29 -> "fence";
+            case 30 -> "stairs";
+            case 31 -> "cross";
+            default -> null;
+        };
+
+        if (preset != null) {
+            java.util.UUID uuid = player.getUuid();
+            UndoManager.pushUndoMutation(id, d, "setshape", uuid);
+            SlotManager.setShape(id, com.customblocks.core.SlotManager.SHAPE_PRESETS.get(preset));
+            SlotManager.saveAll();
+            NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setshape", d.index, id, null, null, 0, 0, "stone", null, preset));
+            send(player, "§a[GUI] Shape set to §f" + preset);
+            openShapeEditor(player, id, rp);
         }
-        if (slot >= 10 && slot <= 21) {
-            int pi = slot - 10;
-            if (pi < PRESET_NAMES.length) {
-                if (button == 1) applyPresetToCurrent(player,d,id,PRESET_NAMES[pi],rp,boxPage);
-                else             createShapeVariant(player,d,id,PRESET_NAMES[pi],rp,boxPage);
-            }
-            return;
-        }
-        if (slot == 22) { PENDING.put(uuid, new PendingInput(InputAction.ADDSHAPE_COORDS,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[Shape] §eType coords (or §ccancel§e): §7x1,y1,z1,x2,y2,z2  §8(0–16)"); return; }
-        if (slot == 23) { UndoManager.pushUndoMutation(id, d, "clearshape", uuid); SlotManager.setShape(id, null); SlotManager.saveAll(); broadcastShape(player.getServer(),SlotManager.getById(id)); send(player,"§a[Shape] Cleared — full cube."); reopenShapeEditor(player,id,rp,0); return; }
-        if (slot >= 28 && slot <= 35) {
-            int boxIdx = boxPage*9 + (slot-28);
-            if (boxIdx < boxes.size()) { UndoManager.pushUndoMutation(id, d, "removeshape", uuid); SlotManager.removeBox(id,boxIdx); SlotManager.saveAll(); broadcastShape(player.getServer(),SlotManager.getById(id)); send(player,"§a[Shape] Removed box #"+boxIdx+"."); int np=Math.min(boxPage,Math.max(0,(boxes.size()-2)/9)); reopenShapeEditor(player,id,rp,np); }
-            return;
-        }
-        List<SlotData> variants = findShapeVariants(id);
-        if (slot >= 37 && slot <= 44) { int vi=slot-37; if(vi<variants.size()) openEditor(player,variants.get(vi).customId,rp); return; }
-        if (slot==45 && boxPage>0) { reopenShapeEditor(player,id,rp,boxPage-1); return; }
-        if (slot==53) { int maxPg=Math.max(0,(boxes.size()-1)/9); if(boxPage<maxPg) reopenShapeEditor(player,id,rp,boxPage+1); }
     }
 
     private static void handleMaintenanceClick(ServerPlayerEntity player, GuiState state, int slot) {
@@ -1166,7 +1187,7 @@ public class GuiManager {
     private static SimpleInventory buildMaintenanceMenu(ServerPlayerEntity player) {
         SimpleInventory inv = new SimpleInventory(54);
         for(int i = 0; i < 54; i++) inv.setStack(i, glass());
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Main Menu", "§8Return to the dashboard"));
+        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Main Menu", "§8Exit settings"));
 
         MinecraftServer server = player.getServer();
         long maxMem = Runtime.getRuntime().maxMemory() / 1024 / 1024;
@@ -1183,26 +1204,26 @@ public class GuiManager {
             "§7Players: §f" + players + " §7Online"));
 
         // ── Row 2: Tools ──────────────────────────────────────────────────────
-        inv.setStack(19, uiGlint(Items.PAINTING, "§a§lTab Icon Settings", "§7Change dynamic creative tab icon", "§b• Tip: §7Use a square PNG for best results"));
-        inv.setStack(21, uiGlint(Items.DAMAGED_ANVIL, "§c§lIntegrity Scanner", "§7Analyze and fix §6Broken Blocks §7in real-time.", "§b• Tip: §7Cleans up magenta/black textures"));
-        inv.setStack(23, uiGlint(Items.BEACON, "§b§lTexture Sanctuary", "§7Manage the design pipeline & syncing", "§b• Tip: §7Ensure players can download your textures"));
-        inv.setStack(25, uiGlint(Items.PAPER, "§f§lExport Data", "§7Export JSON block structure data", "§b• Tip: §7Found in config/customblocks/exports/"));
+        inv.setStack(19, uiGlint(Items.PAINTING, "§a§lTab Icon Settings", "§7Change your main creative tab icon"));
+        inv.setStack(21, uiGlint(Items.DAMAGED_ANVIL, "§c§lBroken Texture Fixer", "§7Scan and fix blocks with missing images."));
+        inv.setStack(23, uiGlint(Items.BEACON, "§b§lResource Hub", "§7Manage texture delivery & ports."));
+        inv.setStack(25, uiGlint(Items.PAPER, "§f§lExport Data", "§7Save your block data to a JSON file."));
 
         // ── Row 3: Slot Usage & Network ──────────────────────────────────────
         int used = SlotManager.usedSlots();
         int total = com.customblocks.CustomBlocksConfig.maxSlots;
-        inv.setStack(31, ui(Items.CHEST, "§e§lSlot Usage", "§7Used: §f" + used + " §7/ §f" + total, "§7Free: §a" + (total - used)));
+        inv.setStack(31, ui(Items.CHEST, "§e§lBlock Slots", "§7Used: §f" + used + " §7/ §f" + total, "§7Free: §a" + (total - used)));
 
         boolean httpUp = com.customblocks.network.ResourcePackServer.isRunning();
         if (httpUp) {
-            inv.setStack(33, uiGlint(Items.ENDER_EYE, "§a§l✔ Texture Pipeline: ONLINE",
-                "§7The design system is active.",
-                "§b• Tip: §7Click to manage sync & delivery"));
+            inv.setStack(33, uiGlint(Items.ENDER_EYE, "§a§l✔ Mod Status: WORKING",
+                "§7The texture system is healthy.",
+                "§bClick to manage settings."));
         } else {
-            inv.setStack(33, ui(Items.BARRIER, "§c§l✖ Texture Pipeline: OFFLINE", "§7The design system is disconnected.", "§b• Tip: §7Enable in the sanctuary"));
+            inv.setStack(33, ui(Items.BARRIER, "§c§l✖ Mod Status: OFFLINE", "§7The texture system is disconnected.", "§bClick to enable in Resource Hub"));
         }
 
-        inv.setStack(40, ui(Items.SPYGLASS, "§b§lMod Information", "§7CustomBlocks §fv1.0.0", "§7Fabric §f1.21.1", "§8System integrity is §lOPTIMAL"));
+        inv.setStack(40, ui(Items.SPYGLASS, "§b§lMod Version Info", "§7CustomBlocks §fv1.0.0", "§7Fabric §f1.21.1", "§8All systems: Working Perfectly"));
 
         inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Main Menu"));
         return inv;
@@ -1375,48 +1396,36 @@ public class GuiManager {
         return inv;
     }
 
-    private static SimpleInventory buildShapeEditor(SlotData d, int boxPage) {
+    private static SimpleInventory buildShapeEditor(SlotData d, int page) {
         SimpleInventory inv = new SimpleInventory(54);
-        List<SlotData.ShapeBox> boxes = d.shapeBoxes!=null?d.shapeBoxes:List.of();
-        Item[] pItems = {Items.GRASS_BLOCK,Items.SMOOTH_STONE_SLAB,Items.STONE_SLAB,Items.MOSS_CARPET,Items.COBBLESTONE_WALL,Items.COMPARATOR,Items.COMPARATOR,Items.OAK_TRAPDOOR,Items.OAK_TRAPDOOR,Items.OAK_FENCE,Items.OAK_STAIRS,Items.TALL_GRASS};
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Studio","§8Return to the block editor"));
-        for (int i=1;i<=3;i++) inv.setStack(i,glass());
-        ItemStack info = CustomBlocksMod.safeSlotItem(d.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(d.index)):ItemStack.EMPTY;
-        info.set(DataComponentTypes.CUSTOM_NAME,Text.literal("§5§lShape: "+d.displayName).styled(s->s.withItalic(false)));
-        info.set(DataComponentTypes.LORE,new LoreComponent(List.of(lore("§7Unique ID: §b"+d.customId),lore("§7Current: §5"+d.shapeLabel()),lore("§7Physics boxes: §f"+boxes.size()+" §8/ 16"),lore("§b• Tip: §7Custom hitboxes determine physical interaction"))));
-        inv.setStack(4, info);
-        for (int i=5;i<=7;i++) inv.setStack(i,glass());
-        inv.setStack(8, d.noCollision?uiGlint(Items.BARRIER,"§c⊘ Hitbox: §lOFF","§7Click to §aENABLE §8hitbox"):uiGlint(Items.SLIME_BLOCK,"§a✔ Hitbox: §lON","§7Click to §cDISABLE §8hitbox"));
-        inv.setStack(9, ui(Items.BLUE_STAINED_GLASS_PANE,"§9── Studio Presets ──","§7§nLeft-click§r§7 = Create variant  •  §7§nRight-click§r§7 = Apply to base"));
-        for (int i=0; i<PRESET_NAMES.length && i<12; i++) {
-            String p=PRESET_NAMES[i];
-            List<SlotData.ShapeBox> presetBoxes = SlotManager.SHAPE_PRESETS.get(p);
-            boolean act = (presetBoxes == null && !d.isShaped()) || (presetBoxes != null && presetBoxes.equals(boxes));
-            inv.setStack(10+i, act?uiGlint(pItems[Math.min(i,pItems.length-1)],"§a§l"+p.toUpperCase()+"","§aCurrently Active"):ui(pItems[Math.min(i,pItems.length-1)],"§b"+cap(p),"§7Preset shape","§b• Tip: §7Applies a standard Minecraft shape"));
-        }
-        inv.setStack(22, uiGlint(Items.LIME_DYE,"§a➕ Create Physics Box","§7Click to type coordinates in chat","§b• Tip: §7Syntax is x1 y1 z1 x2 y2 z2 (min 0, max 16)"));
-        inv.setStack(23, ui(Items.ORANGE_DYE,"§c⊘ Remove All Physics","§7Reset to a solid full cube","§b• Tip: §7Clears all custom hitboxes on this block"));
-        for (int i=24;i<=26;i++) inv.setStack(i,glass());
-        inv.setStack(27, ui(Items.PURPLE_STAINED_GLASS_PANE,"§5── Active Physics Boxes §8(click to delete) ──","§7Individual hitbox parts"));
-        int bstart = boxPage*9;
-        for (int i=0;i<8&&(bstart+i)<boxes.size();i++) { SlotData.ShapeBox b=boxes.get(bstart+i); inv.setStack(28+i,ui(Items.STRUCTURE_VOID,"§e§lPhysics Box #"+(bstart+i),"§7"+b.toDisplayString(),"§c§oClick to DELETE this box")); }
-        for (int s=28+Math.min(8,Math.max(0,boxes.size()-bstart));s<=35;s++) inv.setStack(s,glass());
-        List<SlotData> variants = findShapeVariants(d.customId);
-        inv.setStack(36, ui(Items.LIME_STAINED_GLASS_PANE,"§a── Multi-Shape Collection ──","§7Variant blocks based on this design"));
-        for (int i=0;i<Math.min(8,variants.size());i++) {
-            SlotData v=variants.get(i);
-            ItemStack vs=CustomBlocksMod.safeSlotItem(v.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(v.index)):ItemStack.EMPTY;
-            vs.set(DataComponentTypes.CUSTOM_NAME,Text.literal("§f§l"+v.displayName).styled(s->s.withItalic(false)));
-            vs.set(DataComponentTypes.LORE,new LoreComponent(List.of(lore("§7ID: §b"+v.customId),lore("§7Shape: §5"+v.shapeLabel()),lore("§8Click to open this variant's studio"))));
-            inv.setStack(37+i,vs);
-        }
-        for (int s=37+Math.min(8,variants.size());s<=44;s++) inv.setStack(s,glass());
-        int tbp=boxes.isEmpty()?0:Math.max(0,(boxes.size()-1)/9);
-        inv.setStack(45,boxPage>0?uiGlint(Items.ARROW,"§7◀ Previous Boxes","§8Page "+boxPage):glass());
-        for(int i=46;i<=48;i++) inv.setStack(i,glass());
-        inv.setStack(49,ui(Items.PAPER,"§7Page §f"+(boxPage+1)+" §7/ §f"+(tbp+1),"§7Total Boxes: §f"+boxes.size()));
-        for(int i=50;i<=52;i++) inv.setStack(i,glass());
-        inv.setStack(53,boxPage<tbp?uiGlint(Items.ARROW,"§7Next Boxes ▶","§8Page "+(boxPage+2)):glass());
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+
+        inv.setStack(4, uiGlint(Items.CHISEL != null ? Items.CHISEL : Items.GOLDEN_PICKAXE, "§5§lShape Sculptor", 
+            "§7Current: §f" + d.shapeLabel(), "§8Choose a preset or design your own."));
+
+        // ── Preset Groups ──────────────────────────────────────────────────
+        // Basic Layers
+        inv.setStack(10, ui(Items.STONE, "§f§lFull Cube", "§7Reset to standard block."));
+        inv.setStack(11, ui(Items.SMOOTH_STONE_SLAB, "§f§lSlab", "§7Standard 8-pixel height."));
+        inv.setStack(12, ui(Items.DAYLIGHT_DETECTOR, "§f§lThin Layer", "§7Flat 4-pixel height."));
+        inv.setStack(13, ui(Items.WHITE_CARPET, "§f§lCarpet", "§7Ultra-thin 1-pixel height."));
+
+        // Structural
+        inv.setStack(19, ui(Items.DEEPSLATE_WALL, "§f§lPillar", "§7Solid 8x8 center pillar."));
+        inv.setStack(20, ui(Items.PLAYER_HEAD, "§f§lSmall Box", "§7Small centered 12x12x12."));
+        inv.setStack(21, ui(Items.GOLD_NUGGET, "§f§lMicro Block", "§7Tiny 8x8x8 centered cube."));
+        inv.setStack(22, ui(Items.GLASS_PANE, "§f§lGlass Pane", "§7Vertical 2-pixel thin panel."));
+
+        // Detail Shapes
+        inv.setStack(28, ui(Items.OAK_TRAPDOOR, "§f§lTrapdoor", "§7Standard 3-pixel trapdoor."));
+        inv.setStack(29, ui(Items.OAK_FENCE, "§f§lFence", "§7Centered 4x4 fence post."));
+        inv.setStack(30, ui(Items.STONE_STAIRS, "§f§lStairs", "§7Dynamic stair-step shape."));
+        inv.setStack(31, ui(Items.POPPY, "§f§lCross", "§7Diagonal 'X' shape (like flowers)."));
+
+        // ── Actions ────────────────────────────────────────────────────────
+        inv.setStack(40, uiGlint(Items.MAP, "§6§lManual Sculpting", "§7Coming soon: Build your", "§7own boxes pixel-by-pixel!"));
+        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Editor"));
+        
         return inv;
     }
 

@@ -302,42 +302,7 @@ public class CustomBlockCommand {
                         if (p != null) GuiManager.openResourceCenter(p);
                         else ctx.getSource().sendError(Text.literal("Player only."));
                         return 1;
-                    })
-                    .then(CommandManager.literal("setport")
-                        .executes(ctx -> {
-                            ServerPlayerEntity p = ctx.getSource().getPlayer();
-                            if (p != null) GuiManager.openResourceCenter(p);
-                            else ctx.getSource().sendError(Text.literal("Player only."));
-                            return 1;
-                        })
-                        .then(CommandManager.argument("port", IntegerArgumentType.integer(0, 65535))
-                            .executes(ctx -> {
-                                int port = IntegerArgumentType.getInteger(ctx, "port");
-                                CustomBlocksConfig.resourcePackPort = port;
-                                CustomBlocksConfig.save();
-                                com.customblocks.network.ResourcePackServer.stop();
-                                com.customblocks.network.ResourcePackServer.start();
-                                ctx.getSource().sendMessage(Text.literal("§a[CustomBlocks] Pipeline door set to " + port));
-                                return 1;
-                            })))
-                    .then(CommandManager.literal("push")
-                        .executes(ctx -> {
-                            String hash = com.customblocks.network.ResourcePackServer.getHash();
-                            if (hash == null) {
-                                ctx.getSource().sendError(Text.literal("§cTexture pipeline is still warming up... try again in a second."));
-                                return 0;
-                            }
-                            int port = CustomBlocksConfig.resourcePackPort;
-                            String serverIp = com.customblocks.network.ResourcePackServer.getExternalIp();
-                            String url = "http://" + serverIp + ":" + port + "/pack.zip";
-                            for (ServerPlayerEntity p : ctx.getSource().getServer().getPlayerManager().getPlayerList()) {
-                                p.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.common.ResourcePackSendS2CPacket(
-                                    java.util.UUID.randomUUID(), url, hash, true, java.util.Optional.of(Text.literal("§b§lCustomBlocks §r§7- Downloading latest designs..."))
-                                ));
-                            }
-                            ctx.getSource().sendMessage(Text.literal("§0§l[§b§lCB§0§l] §aTextures pushed to all players! §7(URL: " + url + ")"));
-                            return 1;
-                        })))
+                    }))
 
                 // ── rp (Alias) ────────────────────────────────────────────────
                 .then(CommandManager.literal("rp")
@@ -346,18 +311,7 @@ public class CustomBlockCommand {
                         if (p != null) GuiManager.openResourceCenter(p);
                         else ctx.getSource().sendError(Text.literal("Player only."));
                         return 1;
-                    })
-                    .then(CommandManager.literal("setport")
-                        .executes(ctx -> {
-                            ServerPlayerEntity p = ctx.getSource().getPlayer();
-                            if (p != null) GuiManager.openResourceCenter(p);
-                            return 1;
-                        }))
-                    .then(CommandManager.literal("push")
-                        .executes(ctx -> {
-                            ctx.getSource().getServer().getCommandManager().executeWithPrefix(ctx.getSource(), "cb resourcepack push");
-                            return 1;
-                        })))
+                    }))
 
                 // ── setshape ─────────────────────────────────────────────────
                 .then(CommandManager.literal("setshape")
