@@ -227,6 +227,20 @@ public final class SlotManager {
                 LOGGER.info("[CustomBlocks] No slot data file found, starting fresh.");
                 return;
             }
+
+            // ── Rotating backup: keep last 3 copies ─────────────────────
+            try {
+                Path bak3 = dir.resolve("slots.bak3.json");
+                Path bak2 = dir.resolve("slots.bak2.json");
+                Path bak1 = dir.resolve("slots.bak1.json");
+                if (Files.exists(bak2)) Files.move(bak2, bak3, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                if (Files.exists(bak1)) Files.move(bak1, bak2, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                Files.copy(file, bak1, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                LOGGER.info("[CustomBlocks] Backup saved to slots.bak1.json");
+            } catch (Exception bakEx) {
+                LOGGER.warn("[CustomBlocks] Could not create backup: {}", bakEx.getMessage());
+            }
+
             String json = Files.readString(file, StandardCharsets.UTF_8);
             JsonObject root = JsonParser.parseString(json).getAsJsonObject();
 
