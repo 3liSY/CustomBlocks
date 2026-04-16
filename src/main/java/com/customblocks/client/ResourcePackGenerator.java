@@ -62,19 +62,23 @@ public class ResourcePackGenerator {
 
                 // ── Default (all-faces) texture ────────────────────────────────
                 File texDest = new File(assets, "textures/block/" + slotKey + ".png");
+                File mcmetaDest = new File(assets, "textures/block/" + slotKey + ".png.mcmeta");
                 if (data != null && data.texture != null && data.texture.length > 0) {
-                    if (!texDest.exists() || texDest.length() != data.texture.length)
-                        writePng(data.texture, texDest);
+                    // Always write — the old size-guard was unreliable because
+                    // NativeImage re-encoding changes file size unpredictably.
+                    writePng(data.texture, texDest);
                     // Write animation mcmeta for animated (GIF) textures
-                    if (data.isAnimated()) {
-                        File mcmeta = new File(assets, "textures/block/" + slotKey + ".png.mcmeta");
-                        try (java.io.FileWriter fw = new java.io.FileWriter(mcmeta, java.nio.charset.StandardCharsets.UTF_8)) {
+                    if (data.isAnimated() && data.animMeta != null) {
+                        try (java.io.FileWriter fw = new java.io.FileWriter(mcmetaDest, java.nio.charset.StandardCharsets.UTF_8)) {
                             fw.write(data.animMeta);
                         }
+                    } else {
+                        // Clean up stale mcmeta from a previously-animated texture
+                        if (mcmetaDest.exists()) mcmetaDest.delete();
                     }
                 } else {
-                    if (!texDest.exists())
-                        Files.write(texDest.toPath(), PLACEHOLDER_PNG);
+                    Files.write(texDest.toPath(), PLACEHOLDER_PNG);
+                    if (mcmetaDest.exists()) mcmetaDest.delete();
                 }
 
                 // ── Per-face textures ─────────────────────────────────────────
@@ -84,28 +88,45 @@ public class ResourcePackGenerator {
                         byte[] faceBytes = face.getValue();
                         File faceDest = new File(assets,
                                 "textures/block/" + slotKey + "_" + faceKey + ".png");
-                        if (!faceDest.exists() || faceDest.length() != faceBytes.length)
-                            writePng(faceBytes, faceDest);
+                        // Always write — no stale size-guard
+                        writePng(faceBytes, faceDest);
                         // Auto-detect animated face: if height > width, it's a vertical frame strip
+                        File faceMcmeta = new File(assets,
+                                "textures/block/" + slotKey + "_" + faceKey + ".png.mcmeta");
                         try {
                             java.awt.image.BufferedImage faceImg =
                                 javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(faceBytes));
                             if (faceImg != null && faceImg.getHeight() > faceImg.getWidth()) {
-                                int fw = faceImg.getWidth(), fh = faceImg.getHeight();
-                                int frames = fh / fw;
-                                File mcmeta = new File(assets,
-                                    "textures/block/" + slotKey + "_" + faceKey + ".png.mcmeta");
+                                int faceW = faceImg.getWidth(), faceH = faceImg.getHeight();
+                                int frames = faceH / faceW;
+                                // Royal Standard: Object format {"index":i,"time":t} — raw indices cause stacked images
                                 StringBuilder sb = new StringBuilder("{\"animation\":{\"interpolate\":true,\"frames\":[");
                                 for (int fi = 0; fi < frames; fi++) {
                                     if (fi > 0) sb.append(",");
-                                    sb.append(fi);
+                                    sb.append("{\"index\":").append(fi).append(",\"time\":5}");
                                 }
                                 sb.append("]}}");
-                                try (java.io.FileWriter fw2 = new java.io.FileWriter(mcmeta, java.nio.charset.StandardCharsets.UTF_8)) {
+                                try (java.io.FileWriter fw2 = new java.io.FileWriter(faceMcmeta, java.nio.charset.StandardCharsets.UTF_8)) {
                                     fw2.write(sb.toString());
                                 }
+                            } else {
+                                // Not animated — clean up stale mcmeta
+                                if (faceMcmeta.exists()) faceMcmeta.delete();
                             }
-                        } catch (Exception ignored) {}
+                        } catch (Exception ignored) {
+                            if (faceMcmeta.exists()) faceMcmeta.delete();
+                        }
+                    }
+                    // Legacy texture stitching: for faces WITHOUT overrides,
+                    // write a copy of the main texture so each face has its own file.
+                    if (data.texture != null && data.texture.length > 0) {
+                        for (String face : SlotData.FACE_KEYS) {
+                            if (!data.faceTextures.containsKey(face)) {
+                                File inheritDest = new File(assets,
+                                        "textures/block/" + slotKey + "_" + face + ".png");
+                                writePng(data.texture, inheritDest);
+                            }
+                        }
                     }
                 }
 
@@ -164,17 +185,14 @@ public class ResourcePackGenerator {
                     }
                     bm.add("elements", elements);
                 } else if (data != null && data.hasFaces()) {
-                    // cube — explicit texture ref per face; missing faces fall back to default
+                    // cube — explicit texture ref per face; legacy stitching ensures every
+                    // face references its own file so corruption of one doesn't cascade.
                     bm.addProperty("parent", "minecraft:block/cube");
                     JsonObject tex = new JsonObject();
                     tex.addProperty("particle", MOD_ID + ":block/" + slotKey);
                     for (String face : SlotData.FACE_KEYS) {
                         String mcFace = FACE_TO_MC.get(face);
-                        if (data.faceTextures.containsKey(face)) {
-                            tex.addProperty(mcFace, MOD_ID + ":block/" + slotKey + "_" + face);
-                        } else {
-                            tex.addProperty(mcFace, MOD_ID + ":block/" + slotKey);
-                        }
+                        tex.addProperty(mcFace, MOD_ID + ":block/" + slotKey + "_" + face);
                     }
                     bm.add("textures", tex);
                 } else {

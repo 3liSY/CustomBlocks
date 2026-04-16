@@ -100,6 +100,16 @@ public class ServerPackGenerator {
                                 }
                             } catch (Exception ignored) {}
                         }
+                        // Legacy texture stitching: for faces WITHOUT overrides,
+                        // write a copy of the main texture so each face has its own file.
+                        if (data.texture != null && data.texture.length > 0) {
+                            for (String face : SlotData.FACE_KEYS) {
+                                if (!data.faceTextures.containsKey(face)) {
+                                    String inheritPath = "assets/" + MOD_ID + "/textures/block/" + slotKey + "_" + face + ".png";
+                                    addZipEntry(zos, inheritPath, data.texture);
+                                }
+                            }
+                        }
                     }
 
                     // Blockstate
@@ -142,16 +152,13 @@ public class ServerPackGenerator {
                         }
                         bm.add("elements", elements);
                     } else if (data != null && data.hasFaces()) {
+                        // Legacy stitching: every face references its own file.
                         bm.addProperty("parent", "minecraft:block/cube");
                         JsonObject tex = new JsonObject();
                         tex.addProperty("particle", MOD_ID + ":block/" + slotKey);
                         for (String face : SlotData.FACE_KEYS) {
                             String mcFace = FACE_TO_MC.get(face);
-                            if (data.faceTextures.containsKey(face)) {
-                                tex.addProperty(mcFace, MOD_ID + ":block/" + slotKey + "_" + face);
-                            } else {
-                                tex.addProperty(mcFace, MOD_ID + ":block/" + slotKey);
-                            }
+                            tex.addProperty(mcFace, MOD_ID + ":block/" + slotKey + "_" + face);
                         }
                         bm.add("textures", tex);
                     } else {

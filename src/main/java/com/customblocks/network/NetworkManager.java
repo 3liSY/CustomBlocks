@@ -117,9 +117,43 @@ public final class NetworkManager {
         if (queue != null) queue.clear();
     }
 
-    /** Called when a player joins — sends full sync. */
+    /** Called when a player joins — sends full sync + mandatory resource pack. */
     public static void onPlayerJoin(ServerPlayerEntity player) {
         sendFullSync(player);
+
+        // ── Mandatory Resource Pack Enforcement ──────────────────────────────
+        // Delayed by 40 ticks (2 seconds) to ensure the HTTP server has the pack
+        // ZIP ready. Uses Minecraft's native sendResourcePackUrl API.
+        if (com.customblocks.CustomBlocksConfig.rpEnforceOnJoin
+                && ResourcePackServer.isRunning()
+                && ResourcePackServer.activePort() > 0) {
+            player.getServer().execute(() -> {
+                // Schedule on a slight delay so the pack ZIP is built
+                final java.util.UUID playerId = player.getUuid();
+                new Thread(() -> {
+                    try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
+                    player.getServer().execute(() -> {
+                        // Verify player is still online
+                        ServerPlayerEntity p = player.getServer().getPlayerManager().getPlayer(playerId);
+                        if (p == null) return;
+                        String url = ResourcePackServer.getPackUrl(p.getServer());
+                        String hash = ResourcePackServer.getHash();
+                        if (hash == null) hash = "";
+                        net.minecraft.network.packet.s2c.common.ResourcePackSendS2CPacket packet =
+                                new net.minecraft.network.packet.s2c.common.ResourcePackSendS2CPacket(
+                                        java.util.UUID.randomUUID(),
+                                        url,
+                                        hash,
+                                        true, // required
+                                        java.util.Optional.of(net.minecraft.text.Text.literal(
+                                                com.customblocks.CustomBlocksConfig.rpPromptMessage))
+                                );
+                        p.networkHandler.sendPacket(packet);
+                        LOGGER.info("[CustomBlocks] Sent mandatory resource pack to {}", p.getName().getString());
+                    });
+                }, "CustomBlocks-RPSend").start();
+            });
+        }
     }
 
     // ── Internal ─────────────────────────────────────────────────────────────

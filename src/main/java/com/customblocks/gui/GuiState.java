@@ -87,6 +87,10 @@ public record GuiState(
         return new GuiState(GuiMode.ASSISTANT_CONTROL, null, 0, false, 0, false);
     }
 
+    public static GuiState bulkDelete(int page) {
+        return new GuiState(GuiMode.BULK_DELETE, null, page, false, 0, false);
+    }
+
     // ── Mutation (returns new instance) ──────────────────────────────────────
 
     public GuiState withConfirmDelete(boolean confirm) {

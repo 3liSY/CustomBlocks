@@ -108,6 +108,21 @@ public class CustomBlockCommand {
                                 StringArgumentType.getString(ctx, "id"),
                                 StringArgumentType.getString(ctx, "newid"))))))
 
+                // ── exportblock ─────────────────────────────────────────────
+                .then(CommandManager.literal("exportblock")
+                    .executes(ctx -> usage(ctx.getSource(), "exportblock"))
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .executes(ctx -> cmdExportBlock(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "id")))))
+
+                // ── importblock ─────────────────────────────────────────────
+                .then(CommandManager.literal("importblock")
+                    .executes(ctx -> usage(ctx.getSource(), "importblock"))
+                    .then(CommandManager.argument("code", StringArgumentType.greedyString())
+                        .executes(ctx -> cmdImportBlock(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "code")))))
+
                 // ── retexture ───────────────────────────────────────────────
                 .then(CommandManager.literal("retexture")
                     .executes(ctx -> usage(ctx.getSource(), "retexture"))
@@ -322,6 +337,15 @@ public class CustomBlockCommand {
                             .executes(ctx -> cmdSetShape(ctx.getSource(),
                                 StringArgumentType.getString(ctx, "id"),
                                 StringArgumentType.getString(ctx, "shape"))))))
+
+                .then(CommandManager.literal("addshape")
+                    .executes(ctx -> usage(ctx.getSource(), "addshape"))
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("coords", StringArgumentType.greedyString())
+                            .executes(ctx -> cmdAddShape(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "id"),
+                                StringArgumentType.getString(ctx, "coords"))))))
 
                 .then(CommandManager.literal("removeshape")
                     .executes(ctx -> usage(ctx.getSource(), "removeshape"))
@@ -542,6 +566,85 @@ public class CustomBlockCommand {
             src.sendError(Text.literal("§c[CustomBlocks] Not found: " + String.join(", ", notFound)));
         }
         return deleted.isEmpty() ? 0 : 1;
+    }
+
+    private static int cmdExportBlock(ServerCommandSource src, String id) {
+        SlotData d = SlotManager.getById(id.toLowerCase());
+        if (d == null) {
+            ChatHelper.error(src, "Block ID not found.");
+            return 0;
+        }
+        com.google.gson.JsonObject obj = new com.google.gson.JsonObject();
+        obj.addProperty("customId", d.customId);
+        obj.addProperty("displayName", d.displayName);
+        obj.addProperty("light", d.lightLevel);
+        obj.addProperty("hard", d.hardness);
+        obj.addProperty("sound", d.soundType);
+        if (d.animMeta != null) obj.addProperty("anim", d.animMeta);
+        if (d.noCollision) obj.addProperty("ncol", true);
+        if (d.isShaped()) {
+            com.google.gson.JsonArray boxes = new com.google.gson.JsonArray();
+            for (SlotData.ShapeBox box : d.shapeBoxes) boxes.add(box.toSerialString());
+            obj.add("shape", boxes);
+        }
+        String json = obj.toString();
+        String b64 = java.util.Base64.getEncoder().encodeToString(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String code = "CB!" + b64;
+        
+        ChatHelper.success(src, "Export code for '" + d.customId + "':");
+        net.minecraft.text.MutableText msg = net.minecraft.text.Text.literal("§b§n" + code)
+            .styled(s -> s.withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.COPY_TO_CLIPBOARD, code))
+                          .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, net.minecraft.text.Text.literal("§eClick to copy to clipboard"))));
+        src.sendMessage(msg);
+        return 1;
+    }
+
+    private static int cmdImportBlock(ServerCommandSource src, String code) {
+        if (!code.startsWith("CB!")) {
+            ChatHelper.error(src, "Invalid code format. Must start with CB!");
+            return 0;
+        }
+        try {
+            String b64 = code.substring(3);
+            String json = new String(java.util.Base64.getDecoder().decode(b64), java.nio.charset.StandardCharsets.UTF_8);
+            com.google.gson.JsonObject obj = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
+            
+            String id = obj.get("customId").getAsString();
+            String name = obj.has("displayName") ? obj.get("displayName").getAsString() : id;
+            if (SlotManager.hasId(id)) id = id + "_imp";
+            
+            SlotData d = SlotManager.assign(id, name, null);
+            if (d == null) {
+                ChatHelper.error(src, "Import failed: No free slots.");
+                return 0;
+            }
+            
+            int light = obj.has("light") ? obj.get("light").getAsInt() : 0;
+            float hard = obj.has("hard") ? obj.get("hard").getAsFloat() : 1.5f;
+            String sound = obj.has("sound") ? obj.get("sound").getAsString() : "stone";
+            SlotManager.setProperties(id, light, hard, sound);
+            if (obj.has("anim")) SlotManager.setAnimMeta(id, obj.get("anim").getAsString());
+            if (obj.has("ncol") && obj.get("ncol").getAsBoolean()) SlotManager.setCollision(id, false);
+            
+            if (obj.has("shape")) {
+                java.util.List<SlotData.ShapeBox> shapeBoxes = new java.util.ArrayList<>();
+                for (com.google.gson.JsonElement el : obj.getAsJsonArray("shape")) {
+                    try { shapeBoxes.add(SlotData.ShapeBox.parse(el.getAsString())); } catch (Exception ignored) {}
+                }
+                if (!shapeBoxes.isEmpty()) SlotManager.setShape(id, shapeBoxes);
+            }
+            
+            SlotData finalData = SlotManager.getById(id);
+            SlotManager.saveAll();
+            NetworkManager.broadcastUpdate(src.getServer(), new SlotUpdatePayload(
+                    "add", finalData.index, finalData.customId, finalData.displayName,
+                    null, finalData.lightLevel, finalData.hardness, finalData.soundType));
+            ChatHelper.success(src, "Imported '" + id + "'. Use '/cb retexture " + id + " <url>' to apply texture.");
+            return 1;
+        } catch (Exception e) {
+            ChatHelper.error(src, "Error decoding block: " + e.getMessage());
+            return 0;
+        }
     }
 
     private static int cmdRename(ServerCommandSource src, String id, String newName) {

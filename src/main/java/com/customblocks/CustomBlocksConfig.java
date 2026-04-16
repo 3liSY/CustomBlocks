@@ -61,6 +61,14 @@ public final class CustomBlocksConfig {
     /** Debounce time for initial join burst (ms). */
     public static volatile long joinDebounceMs = 4000;
 
+    // ── Resource Pack Enforcement ─────────────────────────────────────────
+    /** Whether to send the resource pack as mandatory on player join. */
+    public static volatile boolean rpEnforceOnJoin = true;
+    /** Branded prompt message shown when the RP download dialog appears. */
+    public static volatile String rpPromptMessage = "§b§lCustomBlocks §7requires a resource pack to display custom blocks.";
+    /** Kick message shown to players who decline the resource pack. */
+    public static volatile String rpKickMessage = "§cYou must accept the CustomBlocks resource pack to play on this server.";
+
     // ── Assistant NPC (The Helper) ───────────────────────────────────────────
     /** Whether the helper is currently spawned in the world. */
     public static volatile boolean helperEnabled = false;
@@ -109,6 +117,9 @@ public final class CustomBlocksConfig {
             helperName            = getString(root, "helperName", helperName);
             helperSkin            = getString(root, "helperSkin", helperSkin);
             helperHologram        = getBool(root, "helperHologram", helperHologram);
+            rpEnforceOnJoin       = getBool(root, "rpEnforceOnJoin", rpEnforceOnJoin);
+            rpPromptMessage       = getString(root, "rpPromptMessage", rpPromptMessage);
+            rpKickMessage         = getString(root, "rpKickMessage", rpKickMessage);
 
             // Clamp values
             maxSlots              = Math.max(1, Math.min(8192, maxSlots));
@@ -157,6 +168,9 @@ public final class CustomBlocksConfig {
             root.addProperty("helperName", helperName);
             root.addProperty("helperSkin", helperSkin);
             root.addProperty("helperHologram", helperHologram);
+            root.addProperty("rpEnforceOnJoin", rpEnforceOnJoin);
+            root.addProperty("rpPromptMessage", rpPromptMessage);
+            root.addProperty("rpKickMessage", rpKickMessage);
             Path tempFile = dir.resolve(CONFIG_FILE + ".tmp");
             Files.writeString(tempFile, GSON.toJson(root), StandardCharsets.UTF_8);
             java.nio.file.Files.move(tempFile, file,

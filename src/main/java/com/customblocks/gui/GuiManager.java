@@ -82,6 +82,7 @@ public class GuiManager {
     private static final Map<UUID, PendingInput>   PENDING  = new ConcurrentHashMap<>();
     private static final Set<UUID> REOPENING_SCREENS        = ConcurrentHashMap.newKeySet();
     private static final Map<UUID, CbScreenHandler> HANDLERS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Set<String>> BULK_DELETE_SELECTIONS = new ConcurrentHashMap<>();
 
     private static final float[] HARD_CYCLE      = { -1f, 0f, 0.5f, 1.5f, 3f, 5f, 10f, 50f };
     private static final int     BLOCKS_PER_PAGE = 18;
@@ -153,6 +154,7 @@ public class GuiManager {
         PENDING.remove(uuid);
         HANDLERS.remove(uuid);
         ANIM_PARAMS.remove(uuid);
+        BULK_DELETE_SELECTIONS.remove(uuid);
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -392,6 +394,7 @@ public class GuiManager {
                 case RESOURCE_CENTER -> openResourceHub(player);
                 case ASSISTANT_CONTROL -> openAssistantControl(player);
                 case ANIM_GUI -> openAnimGui(player, state.editingId());
+                case BULK_DELETE -> openBulkDelete(player, state.page());
                 default -> openMain(player, 0);
             }
         } finally {
@@ -420,8 +423,10 @@ public class GuiManager {
                 case MAINTENANCE_MENU -> handleMaintenanceClick(player, state, slot);
                 case HELP_MENU      -> handleHelpClick(player, state, slot);
                 case TOOLS_GUI      -> handleToolsClick(player, state, slot);
+                case PROPERTIES_MENU -> handlePropertiesClick(player, state, slot);
                 case SOUND_MENU     -> handleSoundClick(player, state, slot);
                 case ANIM_GUI       -> handleAnimGuiClick(player, state, slot);
+                case BULK_DELETE     -> handleBulkDeleteClick(player, state, slot);
             }
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] GUI Command Error: {}", e.getMessage(), e);
@@ -574,10 +579,13 @@ public class GuiManager {
             case RENAME_TEXT -> {
                 SlotData d = SlotManager.getById(blockId);
                 if (d == null) { openMain(player, rp); return true; }
+                String convertedText = text.replace("_"," ").replace("&", "§");
+                if (convertedText.length() > 100) convertedText = convertedText.substring(0, 100);
                 UndoManager.pushUndoMutation(blockId, d, "rename", player.getUuid());
-                SlotManager.rename(blockId, text.replace("_"," ")); SlotManager.saveAll();
-                NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("rename", d.index, blockId, text.replace("_"," "), null, 0, 0, "stone"));
-                send(player, "§a[CB] Renamed to '§f" + text + "§a'.");
+                SlotManager.rename(blockId, convertedText); SlotManager.saveAll();
+                NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("rename", d.index, blockId, convertedText, null, 0, 0, "stone"));
+                send(player, "§a[CB] Renamed to '§f" + convertedText + "§a'.");
+                player.getServerWorld().playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_ANVIL_USE, net.minecraft.sound.SoundCategory.MASTER, 1f, 1f);
                 openEditor(player, blockId, rp); return true;
             }
             case SETTABICON_URL -> {
@@ -878,6 +886,7 @@ public class GuiManager {
                 applyRedoEntry(player, entry);
                 refreshScreen(player, buildMain(player, state.page()));
             }
+            case 24 -> openBulkDelete(player, 0);
         }
     }
 
@@ -958,25 +967,41 @@ public class GuiManager {
         if (d == null) { openMain(player, rp); return; }
         UUID uuid = player.getUuid();
         switch (slot) {
-            case 0  -> openEditorPicker(player, rp);
+            case 0, 45 -> openEditorPicker(player, rp);
             case 2  -> { player.getInventory().insertStack(CustomBlocksMod.safeSlotItem(d.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(d.index),1):ItemStack.EMPTY); send(player,"§a[GUI] Given 1x §f"+d.displayName); openEditor(player,id,rp); }
-            case 6  -> {
-                UndoManager.pushUndoMutation(id, d, "setcollision", uuid); SlotManager.setCollision(id,!d.noCollision); SlotManager.saveAll();
-                SlotData upd = SlotManager.getById(id);
-                NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setcollision",upd.index,id,null,null,0,0,"stone",null,upd.noCollision?"false":"true"));
-                send(player,"§a[GUI] Collision: §f"+(upd.noCollision?"§cOFF":"§aON")); refreshEditorInPlace(player, id, rp);
-            }
             case 8  -> { PENDING.put(uuid,new PendingInput(InputAction.RETEXTURE_URL,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §ePaste image URL for ALL faces of '§f"+id+"§e' (or §ccancel§e):"); }
-            case 10 -> openFaceEditor(player, id, rp);
-            case 12 -> openShapeEditor(player, id, rp);
-            case 14 -> openPropertiesGui(player, id, rp);
-            case 16 -> openSoundMenu(player, id, rp);
             case 17 -> { PENDING.put(uuid, new PendingInput(InputAction.WEB_LINK_CAST, id, null, null, null, rp)); closeForPrompt(player); send(player, "§0§l[§b§lCB§0§l] §ePaste the §fWeb-Link URL§e to cast onto this block (or §ccancel§e):"); }
-            case 22 -> { if (d.isAnimated()) openAnimGui(player, id); }
-            case 28 -> { PENDING.put(uuid,new PendingInput(InputAction.RENAME_TEXT,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new name for '§f"+id+"§e' (or §ccancel§e):"); }
-            case 29 -> { PENDING.put(uuid,new PendingInput(InputAction.REID_TEXT,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new ID for '§f"+id+"§e' (a-z 0-9 _ -) (or §ccancel§e):"); }
-            case 30 -> { PENDING.put(uuid,new PendingInput(InputAction.CREATE_ID,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new ID to duplicate '§f"+id+"§e' into (or §ccancel§e):"); }
-            case 34 -> {
+            case 19 -> openFaceEditor(player, id, rp);
+            case 21 -> openShapeEditor(player, id, rp);
+            case 23 -> openPropertiesGui(player, id, rp);
+            case 25 -> openSoundMenu(player, id, rp);
+            case 31 -> { if (d.isAnimated()) openAnimGui(player, id); }
+            case 37 -> { PENDING.put(uuid,new PendingInput(InputAction.RENAME_TEXT,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new name for '§f"+id+"§e' (or §ccancel§e):"); }
+            case 39 -> { PENDING.put(uuid,new PendingInput(InputAction.REID_TEXT,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new ID for '§f"+id+"§e' (a-z 0-9 _ -) (or §ccancel§e):"); }
+            case 41 -> { PENDING.put(uuid,new PendingInput(InputAction.CREATE_ID,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new ID to duplicate '§f"+id+"§e' into (or §ccancel§e):"); }
+            case 43 -> {
+                // Share button — export block code to chat
+                com.google.gson.JsonObject obj = new com.google.gson.JsonObject();
+                obj.addProperty("customId", d.customId);
+                obj.addProperty("displayName", d.displayName);
+                obj.addProperty("light", d.lightLevel);
+                obj.addProperty("hard", d.hardness);
+                obj.addProperty("sound", d.soundType);
+                if (d.animMeta != null) obj.addProperty("anim", d.animMeta);
+                if (d.noCollision) obj.addProperty("ncol", true);
+                if (d.isShaped() && d.shapeBoxes != null) {
+                    com.google.gson.JsonArray boxes = new com.google.gson.JsonArray();
+                    for (SlotData.ShapeBox box : d.shapeBoxes) boxes.add(box.toSerialString());
+                    obj.add("shape", boxes);
+                }
+                String code = "CB!" + java.util.Base64.getEncoder().encodeToString(obj.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                player.sendMessage(Text.literal("§a[CB] Share code for '§f" + d.displayName + "§a':"), false);
+                player.sendMessage(Text.literal("§b§n" + code).styled(s -> s
+                    .withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.COPY_TO_CLIPBOARD, code))
+                    .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, Text.literal("§eClick to copy to clipboard")))), false);
+                playSuccess(player);
+            }
+            case 53 -> {
                 if (state.confirmDelete()) {
                     UndoManager.pushUndoDeletion(id, d.deepCopy(), uuid); SlotManager.remove(id); SlotManager.saveAll();
                     NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("remove", d.index, id, null, null, 0, 0, "stone"));
@@ -1279,6 +1304,149 @@ public class GuiManager {
         ChatHelper.success(player, "The Temporal Flux of '§f" + d.displayName + "§a' has been stabilized! (" + String.format("%.1f", fps) + " fps)");
     }
 
+    // ── Bulk Delete GUI ────────────────────────────────────────────────────────
+
+    public static void openBulkDelete(ServerPlayerEntity player, int page) {
+        int total = sortedBlocks().size();
+        int max = total == 0 ? 0 : Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
+        page = Math.max(0, Math.min(page, max));
+        pushBackStack(player.getUuid());
+        STATES.put(player.getUuid(), GuiState.bulkDelete(page));
+        Set<String> selected = BULK_DELETE_SELECTIONS.computeIfAbsent(player.getUuid(), k -> ConcurrentHashMap.newKeySet());
+        final int fp = page;
+        openScreen(player, new SimpleNamedScreenHandlerFactory(
+            (s, pi, p) -> new CbScreenHandler(s, pi, buildBulkDeleteGui(fp, selected)),
+            Text.literal("§c§l⚠ §r§fBulk Delete §8— Select blocks to remove")));
+    }
+
+    private static SimpleInventory buildBulkDeleteGui(int page, Set<String> selected) {
+        SimpleInventory inv = new SimpleInventory(54);
+        List<SlotData> blocks = sortedBlocks();
+        int total = blocks.size(), maxPage = total == 0 ? 0 : Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+
+        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Cancel", "§8Abort bulk delete — no changes"));
+        inv.setStack(4, uiGlint(Items.TNT, "§c§l⚠ Bulk Delete Mode",
+            "§7Selected: §f" + selected.size() + " §7/ §f" + total + " blocks",
+            "§7Click blocks below to toggle selection",
+            "§e§lSelected blocks will be §c§lDELETED§e§l on confirm"));
+        inv.setStack(8, uiGlint(Items.LIME_DYE, "§a§lSelect All (This Page)",
+            "§7Selects all blocks on this page"));
+
+        for (int i = 9; i <= 17; i++) inv.setStack(i, ui(Items.RED_STAINED_GLASS_PANE, "§r"));
+
+        int start = page * BLOCKS_PER_PAGE;
+        for (int i = 0; i < BLOCKS_PER_PAGE; i++) {
+            int invSlot = 18 + i, dataIdx = start + i;
+            if (dataIdx < blocks.size()) {
+                SlotData d = blocks.get(dataIdx);
+                boolean sel = selected.contains(d.customId);
+                ItemStack s = sel
+                    ? uiGlint(Items.LIME_STAINED_GLASS_PANE, "§a§l✔ " + d.displayName,
+                        "§7ID: §b" + d.customId, "§a§lSELECTED — click to deselect")
+                    : (CustomBlocksMod.safeSlotItem(d.index) != null
+                        ? new ItemStack(CustomBlocksMod.safeSlotItem(d.index))
+                        : new ItemStack(Items.GRAY_DYE));
+                if (!sel) {
+                    s.set(net.minecraft.component.DataComponentTypes.CUSTOM_NAME,
+                        Text.literal("§f" + d.displayName).styled(st -> st.withItalic(false)));
+                    s.set(net.minecraft.component.DataComponentTypes.LORE, new LoreComponent(List.of(
+                        lore("§7ID: §b" + d.customId),
+                        lore("§8Click to select for deletion"))));
+                }
+                inv.setStack(invSlot, s);
+            }
+        }
+
+        for (int i = 36; i <= 44; i++) inv.setStack(i, ui(Items.RED_STAINED_GLASS_PANE, "§r"));
+
+        inv.setStack(45, page > 0
+            ? uiGlint(Items.ARROW, "§7◀ Previous Page", "§8Go to page " + page)
+            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8◀ First Page", ""));
+        inv.setStack(47, ui(Items.ORANGE_DYE, "§6Deselect All", "§7Clears all selections"));
+        inv.setStack(49, ui(Items.PAPER, "§ePage §f" + (page + 1) + " §7/ §f" + (maxPage + 1),
+            "§7Selected: §c" + selected.size() + " §7blocks"));
+        inv.setStack(51, selected.isEmpty()
+            ? ui(Items.GRAY_STAINED_GLASS_PANE, "§8Confirm Delete", "§7Select blocks first")
+            : uiGlint(Items.BARRIER, "§4§l⚠ CONFIRM DELETE §c(" + selected.size() + ")",
+                "§cPermanently delete §f" + selected.size() + "§c block(s)",
+                "§c§oClick to execute — undo available"));
+        inv.setStack(53, page < maxPage
+            ? uiGlint(Items.ARROW, "§7Next Page ▶", "§8Go to page " + (page + 2))
+            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Last Page ▶", ""));
+
+        return inv;
+    }
+
+    private static void handleBulkDeleteClick(ServerPlayerEntity player, GuiState state, int slot) {
+        int page = state.page();
+        Set<String> selected = BULK_DELETE_SELECTIONS.computeIfAbsent(player.getUuid(), k -> ConcurrentHashMap.newKeySet());
+
+        if (slot == 0) {
+            BULK_DELETE_SELECTIONS.remove(player.getUuid());
+            openMain(player, 0);
+            return;
+        }
+        if (slot == 8) {
+            List<SlotData> blocks = sortedBlocks();
+            int start = page * BLOCKS_PER_PAGE;
+            for (int i = 0; i < BLOCKS_PER_PAGE && start + i < blocks.size(); i++) {
+                selected.add(blocks.get(start + i).customId);
+            }
+            refreshScreen(player, buildBulkDeleteGui(page, selected));
+            return;
+        }
+        if (slot >= 18 && slot <= 35) {
+            List<SlotData> blocks = sortedBlocks();
+            int idx = page * BLOCKS_PER_PAGE + (slot - 18);
+            if (idx < blocks.size()) {
+                String id = blocks.get(idx).customId;
+                if (!selected.remove(id)) selected.add(id);
+            }
+            refreshScreen(player, buildBulkDeleteGui(page, selected));
+            return;
+        }
+        if (slot == 45 && page > 0) {
+            STATES.put(player.getUuid(), GuiState.bulkDelete(page - 1));
+            refreshScreen(player, buildBulkDeleteGui(page - 1, selected));
+            return;
+        }
+        if (slot == 47) {
+            selected.clear();
+            refreshScreen(player, buildBulkDeleteGui(page, selected));
+            return;
+        }
+        if (slot == 51 && !selected.isEmpty()) {
+            UUID uuid = player.getUuid();
+            MinecraftServer server = player.getServer();
+            int count = 0;
+            for (String id : new ArrayList<>(selected)) {
+                SlotData d = SlotManager.getById(id);
+                if (d != null) {
+                    UndoManager.pushUndoDeletion(id, d.deepCopy(), uuid);
+                    SlotManager.remove(id);
+                    NetworkManager.broadcastUpdate(server, new SlotUpdatePayload("remove", d.index, id, null, null, 0, 0, "stone"));
+                    count++;
+                }
+            }
+            if (count > 0) SlotManager.saveAll();
+            send(player, "§a[GUI] Bulk deleted §f" + count + "§a block(s). Use Undo to restore.");
+            BULK_DELETE_SELECTIONS.remove(uuid);
+            player.getServerWorld().playSound(null, player.getBlockPos(),
+                net.minecraft.sound.SoundEvents.BLOCK_ANVIL_USE, net.minecraft.sound.SoundCategory.MASTER, 1f, 0.7f);
+            openMain(player, 0);
+            return;
+        }
+        if (slot == 53) {
+            int total = sortedBlocks().size();
+            int maxPage = total == 0 ? 0 : Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
+            if (page < maxPage) {
+                STATES.put(player.getUuid(), GuiState.bulkDelete(page + 1));
+                refreshScreen(player, buildBulkDeleteGui(page + 1, selected));
+            }
+        }
+    }
+
     // ── Builders ──────────────────────────────────────────────────────────────
 
     private static SimpleInventory buildToolsGui(ServerPlayerEntity player) {
@@ -1320,6 +1488,7 @@ public class GuiManager {
         inv.setStack(21, undoSz > 0 ? uiGlint(Items.GOLDEN_PICKAXE, "§6§l↩ UNDO §e("+undoSz+")", "§7Click to undo last action") : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Undo (Empty)", ""));
         inv.setStack(22, uiGlint(Items.EMERALD, "§a§l+ Create New Block", "§7Click to create a new custom block", "§8Type an ID in chat"));
         inv.setStack(23, redoSz > 0 ? uiGlint(Items.DIAMOND_PICKAXE, "§b§l↪ REDO §3("+redoSz+")", "§7Click to redo last undone action") : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Redo (Empty)", ""));
+        inv.setStack(24, uiGlint(Items.LAVA_BUCKET, "§c§l⚠ Bulk Delete", "§7Select and delete multiple blocks", "§b• Tip: §7Includes undo support"));
 
         return inv;
     }
@@ -1528,6 +1697,7 @@ public class GuiManager {
         inv.setStack(37, uiGlint(Items.NAME_TAG,"§e§l✎ Rename Block","§7Current: §f"+d.displayName,"§b• Tip: §7This is the name everyone sees in the inventory"));
         inv.setStack(39, uiGlint(Items.COMMAND_BLOCK,"§b§l⇄ Re-ID Block","§7Current: §b"+d.customId,"§b• Tip: §7Changing the unique ID updates all current builds"));
         inv.setStack(41, uiGlint(Items.COMPARATOR,"§e§l⧉ Duplicate Block","§7Create an identical copy of this block","§b• Tip: §7Great for making similar block sets quickly"));
+        inv.setStack(43, uiGlint(Items.ENDER_EYE,"§b§l⤴ Share Block","§7Export a shareable code to chat","§b• Tip: §7Others can import with /cb importblock"));
         
         inv.setStack(53, confirmDelete
             ? uiGlint(Items.BARRIER, "§4§l⚠ CONFIRM DELETION","§cPermanently delete: §f"+d.customId,"§c§oClick again to confirm!")
