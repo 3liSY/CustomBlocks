@@ -63,7 +63,7 @@ public final class CustomBlocksConfig {
 
     // ── Resource Pack Enforcement ─────────────────────────────────────────
     /** Whether to send the resource pack as mandatory on player join. */
-    public static volatile boolean rpEnforceOnJoin = true;
+    public static volatile boolean rpEnforceOnJoin = false;
     /** Branded prompt message shown when the RP download dialog appears. */
     public static volatile String rpPromptMessage = "§b§lCustomBlocks §7requires a resource pack to display custom blocks.";
     /** Kick message shown to players who decline the resource pack. */
