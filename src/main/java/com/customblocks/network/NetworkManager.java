@@ -154,9 +154,14 @@ public final class NetworkManager {
                         String url = ResourcePackServer.getPackUrl(p.getServer());
                         String hash = ResourcePackServer.getHash();
                         if (hash == null) hash = "";
+                        // Stable UUID from hash — Minecraft caches accepted packs by UUID,
+                        // so using a hash-derived ID skips the prompt if the pack hasn't changed.
+                        java.util.UUID packUuid = hash != null && !hash.isEmpty()
+                                ? java.util.UUID.nameUUIDFromBytes(hash.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                                : java.util.UUID.randomUUID();
                         net.minecraft.network.packet.s2c.common.ResourcePackSendS2CPacket packet =
                                 new net.minecraft.network.packet.s2c.common.ResourcePackSendS2CPacket(
-                                        java.util.UUID.randomUUID(),
+                                        packUuid,
                                         url,
                                         hash,
                                         true, // required

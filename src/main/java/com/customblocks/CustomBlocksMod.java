@@ -258,6 +258,11 @@ public class CustomBlocksMod implements ModInitializer {
         CustomBlockCommand.register();
         SlotManager.loadAll();
 
+        // Regenerate the server resource pack now that slot data is loaded.
+        // ResourcePackServer.start() runs before loadAll(), so the initial
+        // pack ZIP is empty — this rebuild populates it with real textures.
+        ResourcePackServer.updatePack();
+
         LOGGER.info("[CustomBlocks] Initialized. {} slot(s) loaded, maxSlots={}.",
                 SlotManager.usedSlots(), maxSlots);
     }
