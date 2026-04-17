@@ -63,6 +63,16 @@ public final class SlotData {
                     int lightLevel, float hardness, String soundType,
                     Map<String, byte[]> faceTextures, String animMeta,
                     List<ShapeBox> shapeBoxes, boolean noCollision) {
+        this(index, customId, displayName, texture, lightLevel, hardness, soundType,
+                faceTextures, animMeta, shapeBoxes, noCollision,
+                texture != null && com.customblocks.ImageProcessor.isBrokenTexture(texture));
+    }
+
+    /** Internal constructor — accepts precomputed isBroken to avoid redundant PNG decoding. */
+    SlotData(int index, String customId, String displayName, byte[] texture,
+             int lightLevel, float hardness, String soundType,
+             Map<String, byte[]> faceTextures, String animMeta,
+             List<ShapeBox> shapeBoxes, boolean noCollision, boolean precomputedBroken) {
         this.index        = index;
         this.customId     = customId;
         this.displayName  = displayName;
@@ -84,9 +94,8 @@ public final class SlotData {
 
         // Deep-copy shape boxes
         this.shapeBoxes = shapeBoxes != null ? List.copyOf(shapeBoxes) : null;
-        
-        // Caching broken texture status and lowercase name
-        this.isBroken = this.texture != null && com.customblocks.ImageProcessor.isBrokenTexture(this.texture);
+
+        this.isBroken = precomputedBroken;
         this.displayNameLower = this.displayName != null ? this.displayName.toLowerCase() : "";
     }
 
@@ -113,12 +122,12 @@ public final class SlotData {
 
     public SlotData withDisplayName(String name) {
         return new SlotData(index, customId, name, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision);
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken);
     }
 
     public SlotData withCustomId(String newId) {
         return new SlotData(index, newId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision);
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken);
     }
 
     public SlotData withTexture(byte[] tex) {
@@ -128,67 +137,67 @@ public final class SlotData {
 
     public SlotData withLightLevel(int level) {
         return new SlotData(index, customId, displayName, texture, level, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision);
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken);
     }
 
     public SlotData withHardness(float h) {
         return new SlotData(index, customId, displayName, texture, lightLevel, h,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision);
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken);
     }
 
     public SlotData withSoundType(String sound) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                sound, faceTextures, animMeta, shapeBoxes, noCollision);
+                sound, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken);
     }
 
     public SlotData withAnimMeta(String meta) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, meta, shapeBoxes, noCollision);
+                soundType, faceTextures, meta, shapeBoxes, noCollision, this.isBroken);
     }
 
     public SlotData withShapeBoxes(List<ShapeBox> boxes) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, boxes, noCollision);
+                soundType, faceTextures, animMeta, boxes, noCollision, this.isBroken);
     }
 
     public SlotData withNoCollision(boolean nc) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, nc);
+                soundType, faceTextures, animMeta, shapeBoxes, nc, this.isBroken);
     }
 
     public SlotData withFaceTexture(String face, byte[] tex) {
         Map<String, byte[]> newFaces = new ConcurrentHashMap<>(faceTextures);
         newFaces.put(face, tex.clone());
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, newFaces, animMeta, shapeBoxes, noCollision);
+                soundType, newFaces, animMeta, shapeBoxes, noCollision, this.isBroken);
     }
 
     public SlotData withoutFaceTexture(String face) {
         Map<String, byte[]> newFaces = new ConcurrentHashMap<>(faceTextures);
         newFaces.remove(face);
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, newFaces, animMeta, shapeBoxes, noCollision);
+                soundType, newFaces, animMeta, shapeBoxes, noCollision, this.isBroken);
     }
 
     public SlotData withClearedFaces() {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, Collections.emptyMap(), animMeta, shapeBoxes, noCollision);
+                soundType, Collections.emptyMap(), animMeta, shapeBoxes, noCollision, this.isBroken);
     }
 
     public SlotData withIndex(int newIndex) {
         return new SlotData(newIndex, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision);
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken);
     }
 
     public SlotData withProperties(int light, float hard, String sound) {
         return new SlotData(index, customId, displayName, texture, light, hard,
-                sound, faceTextures, animMeta, shapeBoxes, noCollision);
+                sound, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken);
     }
 
     /** Full deep copy — same as constructing from all fields. */
     public SlotData deepCopy() {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision);
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken);
     }
 
     @Override

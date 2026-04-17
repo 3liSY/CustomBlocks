@@ -107,6 +107,10 @@ public record GuiState(
         return new GuiState(GuiMode.CONFIG_GUI, null, 0, false, 0, false);
     }
 
+    public static GuiState helpCategory(int category) {
+        return new GuiState(GuiMode.HELP_CATEGORY, null, category, false, 0, false);
+    }
+
     // ── Mutation (returns new instance) ──────────────────────────────────────
 
     public GuiState withConfirmDelete(boolean confirm) {

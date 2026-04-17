@@ -279,14 +279,6 @@ public class CustomBlockCommand {
                         return 1;
                     }))
 
-                .then(CommandManager.literal("magic")
-                    .executes(ctx -> {
-                        ServerPlayerEntity p = ctx.getSource().getPlayer();
-                        if (p != null) GuiManager.openMagicItemsGui(p);
-                        else ctx.getSource().sendError(Text.literal("Player only."));
-                        return 1;
-                    }))
-
                 // ── editor — works with or without ID ──────────────────────
                 .then(CommandManager.literal("editor")
                     .executes(ctx -> cmdEditorPicker(ctx.getSource()))
@@ -310,8 +302,8 @@ public class CustomBlockCommand {
                             return 1;
                         })))
 
-                // ── helper ───────────────────────────────────────────────────
-                .then(CommandManager.literal("helper")
+                // ── ai (merged helper + assistant GUI) ──────────────────────
+                .then(CommandManager.literal("ai")
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
                         if (p != null) GuiManager.openAssistantControl(p);
@@ -332,15 +324,6 @@ public class CustomBlockCommand {
                         .executes(ctx -> cmdHelperScan(ctx.getSource())))
                     .then(CommandManager.literal("status")
                         .executes(ctx -> cmdHelperStatus(ctx.getSource()))))
-
-                // ── ai (shortcut to Assistant Control GUI) ──────────────────
-                .then(CommandManager.literal("ai")
-                    .executes(ctx -> {
-                        ServerPlayerEntity p = ctx.getSource().getPlayer();
-                        if (p != null) GuiManager.openAssistantControl(p);
-                        else ctx.getSource().sendError(Text.literal("Player only."));
-                        return 1;
-                    }))
 
                 // ── config ───────────────────────────────────────────────────
                 .then(CommandManager.literal("config")
@@ -560,6 +543,8 @@ public class CustomBlockCommand {
         if (s.animMeta != null) SlotManager.setAnimMeta(newId, s.animMeta);
         for (var e : s.faceTextures.entrySet())
             SlotManager.setFaceTexture(newId, e.getKey(), e.getValue().clone());
+        if (s.isShaped()) SlotManager.setShape(newId, new java.util.ArrayList<>(s.shapeBoxes));
+        if (s.noCollision) SlotManager.setCollision(newId, false);
 
         UndoManager.pushUndoCreate(newId, getPlayerUuid(src));
         SlotManager.saveAll();
@@ -633,17 +618,26 @@ public class CustomBlockCommand {
                     faces.addProperty(fe.getKey(), java.util.Base64.getEncoder().encodeToString(fe.getValue()));
                 obj.add("faces", faces);
             }
-            byte[] jsonBytes = obj.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-            try (java.util.zip.GZIPOutputStream gz = new java.util.zip.GZIPOutputStream(baos)) { gz.write(jsonBytes); }
-            String code = "CB2!" + java.util.Base64.getEncoder().encodeToString(baos.toByteArray());
+            String jsonStr = obj.toString();
 
-            ChatHelper.success(src, "Export code for '" + d.customId + "':");
-            src.sendMessage(Text.literal("§7Import with: §b/cb importblock <code>"));
+            // Save to server-side file and generate short hash code
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] hashBytes = md.digest(jsonStr.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hexSb = new StringBuilder();
+            for (int i = 0; i < 6; i++) hexSb.append(String.format("%02x", hashBytes[i]));
+            String hash = hexSb.toString();
+
+            java.nio.file.Path exportDir = java.nio.file.Path.of("config/customblocks/exports");
+            java.nio.file.Files.createDirectories(exportDir);
+            java.nio.file.Files.writeString(exportDir.resolve(hash + ".json"), jsonStr, java.nio.charset.StandardCharsets.UTF_8);
+
+            String code = "CB3!" + hash;
+            ChatHelper.success(src, "Export code for '§f" + d.customId + "§a':");
+            src.sendMessage(Text.literal("§7Import with: §b/cb importblock " + code));
             net.minecraft.text.MutableText msg = Text.literal("§b§n" + code)
                 .styled(s -> s
                     .withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.COPY_TO_CLIPBOARD, code))
-                    .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, Text.literal("§eClick to copy"))));
+                    .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, Text.literal("§eClick to copy code"))));
             src.sendMessage(msg);
             return 1;
         } catch (Exception e) {
@@ -653,13 +647,21 @@ public class CustomBlockCommand {
     }
 
     private static int cmdImportBlock(ServerCommandSource src, String code) {
-        if (!code.startsWith("CB!") && !code.startsWith("CB2!")) {
-            ChatHelper.error(src, "Invalid code format. Must start with CB! or CB2!");
+        if (!code.startsWith("CB!") && !code.startsWith("CB2!") && !code.startsWith("CB3!")) {
+            ChatHelper.error(src, "Invalid code format. Must start with CB!, CB2! or CB3!");
             return 0;
         }
         try {
             String json;
-            if (code.startsWith("CB2!")) {
+            if (code.startsWith("CB3!")) {
+                String hash = code.substring(4).trim();
+                java.nio.file.Path exportFile = java.nio.file.Path.of("config/customblocks/exports", hash + ".json");
+                if (!java.nio.file.Files.exists(exportFile)) {
+                    ChatHelper.error(src, "Export file not found for code '" + code + "'. Was it exported on this server?");
+                    return 0;
+                }
+                json = java.nio.file.Files.readString(exportFile, java.nio.charset.StandardCharsets.UTF_8);
+            } else if (code.startsWith("CB2!")) {
                 byte[] compressed = java.util.Base64.getDecoder().decode(code.substring(4));
                 try (java.util.zip.GZIPInputStream gz = new java.util.zip.GZIPInputStream(new java.io.ByteArrayInputStream(compressed));
                      java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
@@ -1667,6 +1669,7 @@ public class CustomBlockCommand {
     }
 
     private static int cmdReload(ServerCommandSource src) {
+        SlotManager.flushSave();
         SlotManager.loadAll();
         CustomBlocksMod.broadcastFullSync(src.getServer());
         ChatHelper.success(src, "Reloaded all blocks and synced to all players.");

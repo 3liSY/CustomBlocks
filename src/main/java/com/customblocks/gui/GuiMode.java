@@ -24,5 +24,6 @@ public enum GuiMode {
     SEARCH_PICKER,
     MAGIC_ITEMS,
     UNDO_PICKER,
-    CONFIG_GUI
+    CONFIG_GUI,
+    HELP_CATEGORY
 }

@@ -450,6 +450,7 @@ public class GuiManager {
                 case MAGIC_ITEMS -> openMagicItemsGui(player);
                 case CONFIG_GUI -> openConfigGui(player);
                 case UNDO_PICKER -> openUndoPicker(player, state.page());
+                case HELP_CATEGORY -> openHelpCategory(player, state.page());
                 default -> openMain(player, 0);
             }
         } finally {
@@ -486,6 +487,7 @@ public class GuiManager {
                 case MAGIC_ITEMS    -> handleMagicItemsClick(player, state, slot);
                 case CONFIG_GUI     -> handleConfigGuiClick(player, state, slot);
                 case UNDO_PICKER    -> handleUndoPickerClick(player, state, slot);
+                case HELP_CATEGORY  -> handleHelpCategoryClick(player, state, slot);
             }
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] GUI Command Error: {}", e.getMessage(), e);
@@ -777,6 +779,7 @@ public class GuiManager {
                         case "downloadTimeoutSeconds" -> CustomBlocksConfig.downloadTimeoutSeconds = Math.max(1, Math.min(120, Integer.parseInt(text)));
                         case "texturePayloadsPerTick" -> CustomBlocksConfig.texturePayloadsPerTick = Math.max(1, Math.min(50, Integer.parseInt(text)));
                         case "resourcePackPort" -> CustomBlocksConfig.resourcePackPort = Math.max(0, Math.min(65535, Integer.parseInt(text)));
+                        case "reloadDebounceMs" -> CustomBlocksConfig.reloadDebounceMs = Math.max(500, Math.min(10000, Long.parseLong(text)));
                         case "helperName" -> CustomBlocksConfig.helperName = text;
                         case "rpPromptMessage" -> CustomBlocksConfig.rpPromptMessage = text;
                         case "rpKickMessage" -> CustomBlocksConfig.rpKickMessage = text;
@@ -992,6 +995,7 @@ public class GuiManager {
         inv.setStack(23, numItem("Download Timeout", CustomBlocksConfig.downloadTimeoutSeconds, "HTTP download timeout in seconds"));
         inv.setStack(24, numItem("Payloads/Tick", CustomBlocksConfig.texturePayloadsPerTick, "Texture packets sent per server tick"));
         inv.setStack(25, numItem("RP Port", CustomBlocksConfig.resourcePackPort, "HTTP resource pack server port (0=disabled)"));
+        inv.setStack(26, numItem("Reload Debounce", CustomBlocksConfig.reloadDebounceMs, "Debounce time for RP rebuilds (ms)"));
         // Row 3: Strings
         inv.setStack(28, strItem("Helper Name", CustomBlocksConfig.helperName, "Display name for the assistant NPC"));
         inv.setStack(29, strItem("RP Prompt", truncate(CustomBlocksConfig.rpPromptMessage, 30), "Message shown when RP download starts"));
@@ -1032,6 +1036,7 @@ public class GuiManager {
             case 23 -> configPrompt(player, "downloadTimeoutSeconds", "Download Timeout (1-120):");
             case 24 -> configPrompt(player, "texturePayloadsPerTick", "Payloads/Tick (1-50):");
             case 25 -> configPrompt(player, "resourcePackPort", "RP Port (0=disabled):");
+            case 26 -> configPrompt(player, "reloadDebounceMs", "Reload Debounce (ms, 500-10000):");
             // Strings
             case 28 -> configPrompt(player, "helperName", "Helper Name:");
             case 29 -> configPrompt(player, "rpPromptMessage", "RP Prompt Message:");
@@ -1484,7 +1489,34 @@ public class GuiManager {
     }
 
     private static void handleHelpClick(ServerPlayerEntity player, GuiState state, int slot) {
-        if (slot == 0 || slot == 45) openMain(player, 0);
+        switch (slot) {
+            case 0, 45 -> openMain(player, 0);
+            case 11 -> openHelpCategory(player, 1);
+            case 13 -> openHelpCategory(player, 2);
+            case 15 -> openHelpCategory(player, 3);
+            case 20 -> openHelpCategory(player, 4);
+            case 22 -> openHelpCategory(player, 5);
+        }
+    }
+
+    public static void openHelpCategory(ServerPlayerEntity player, int category) {
+        pushBackStack(player.getUuid());
+        STATES.put(player.getUuid(), GuiState.helpCategory(category));
+        String title = switch (category) {
+            case 1 -> "§e§l✦ §r§fCreating Blocks";
+            case 2 -> "§b§l✦ §r§fTextures & Design";
+            case 3 -> "§5§l✦ §r§fShapes & Collision";
+            case 4 -> "§6§l✦ §r§fUtilities & Commands";
+            case 5 -> "§a§l✦ §r§fServer & Data";
+            default -> "§f§lHelp";
+        };
+        openScreen(player, new SimpleNamedScreenHandlerFactory(
+            (s, pi, p) -> new CbScreenHandler(s, pi, buildHelpCategory(category)),
+            Text.literal(title)));
+    }
+
+    private static void handleHelpCategoryClick(ServerPlayerEntity player, GuiState state, int slot) {
+        if (slot == 0 || slot == 45) openHelpGui(player);
     }
 
     private static void handlePropertiesClick(ServerPlayerEntity player, GuiState state, int slot) {
@@ -1699,7 +1731,6 @@ public class GuiManager {
         SlotUpdatePayload pkt = new SlotUpdatePayload("animsettings", d.index, id, d.displayName,
                 null, d.lightLevel, d.hardness, d.soundType, null, null, newMeta);
         NetworkManager.broadcastUpdate(player.getServer(), pkt);
-        NetworkManager.broadcastFullSync(player.getServer()); // The Golden Sync
         ChatHelper.success(player, "Animation speed updated for '§f" + d.displayName + "§a' (" + String.format("%.1f", fps) + " fps)");
     }
 
@@ -1960,39 +1991,93 @@ public class GuiManager {
 
         inv.setStack(4, uiGlint(Items.ENCHANTED_BOOK, "§a§lHelp & Commands",
             "§7Browse commands by category.",
-            "§8Click any item for more details."));
+            "§8Click a category below to see details."));
 
-        // ── Category 1: Creation ─────────────────────────────────────────
-        inv.setStack(10, uiGlint(Items.WRITABLE_BOOK, "§e§lCreating Blocks", "§7Commands to create and manage blocks"));
-        inv.setStack(19, uiGlint(Items.CRAFTING_TABLE, "§eCreate", "§7/cb create <id> <name> <url>", "§8Creates a new custom block from a texture URL."));
-        inv.setStack(20, uiGlint(Items.NAME_TAG, "§eRename", "§7/cb rename <id> <new name>", "§8Changes the display name of a block."));
-        inv.setStack(21, uiGlint(Items.COMMAND_BLOCK, "§eRe-ID", "§7/cb reid <old_id> <new_id>", "§8Changes the internal ID. Updates all placed blocks."));
+        inv.setStack(11, uiGlint(Items.EMERALD, "§e§lCreating Blocks",
+            "§7Create, rename, delete, and duplicate blocks.",
+            "§8Click to view commands →"));
+        inv.setStack(13, uiGlint(Items.PAINTING, "§b§lTextures & Design",
+            "§7Retexture, per-face painting, GIF animation.",
+            "§8Click to view commands →"));
+        inv.setStack(15, uiGlint(Items.ANVIL, "§5§lShapes & Collision",
+            "§7Custom shapes, collision, and geometry.",
+            "§8Click to view commands →"));
+        inv.setStack(20, uiGlint(Items.REDSTONE, "§6§lUtilities & Commands",
+            "§7Undo, redo, tools, diagnostics.",
+            "§8Click to view commands →"));
+        inv.setStack(22, uiGlint(Items.ENDER_CHEST, "§a§lServer & Data",
+            "§7Export, import, reload, config.",
+            "§8Click to view commands →"));
 
-        // ── Category 2: Textures ─────────────────────────────────────────
-        inv.setStack(13, uiGlint(Items.PAINTING, "§b§lTextures & Animation", "§7Change how blocks look and animate"));
-        inv.setStack(22, uiGlint(Items.MAP, "§bRetexture", "§7/cb retexture <id> <url>", "§8Replaces the texture. GIFs auto-animate."));
-        inv.setStack(23, uiGlint(Items.AMETHYST_SHARD, "§bSet Face", "§7/cb setface <id> <face> <url>", "§8Set a specific face: north, south, up, down, etc."));
-        inv.setStack(24, uiGlint(Items.CLOCK, "§bAnimation", "§7Open the Block Editor to configure", "§8Adjust FPS, interpolation, and frame order."));
-
-        // ── Category 3: Shape ────────────────────────────────────────────
-        inv.setStack(16, uiGlint(Items.ENDER_EYE, "§5§lShape & Collision", "§7Control block geometry and physics"));
-        inv.setStack(25, uiGlint(Items.STICK, "§5Add Shape", "§7/cb addshape <id> <x1 y1 z1 x2 y2 z2>", "§8Adds a collision/outline box to the block."));
-        inv.setStack(26, uiGlint(Items.BARRIER, "§5Collision", "§7/cb sethardness <id> 0", "§8Set to 0 to make pass-through. Use -1 for unbreakable."));
-
-        // ── Category 4: Utilities ────────────────────────────────────────
-        inv.setStack(28, uiGlint(Items.GOLDEN_PICKAXE, "§6§lUtilities", "§7Undo, redo, diagnostics, and sync"));
-        inv.setStack(37, uiGlint(Items.GOLDEN_PICKAXE, "§6Undo", "§7/cb undo", "§8Reverts the last change you made."));
-        inv.setStack(38, uiGlint(Items.DIAMOND_PICKAXE, "§6Redo", "§7/cb redo", "§8Re-applies the last undone change."));
-        inv.setStack(39, uiGlint(Items.RECOVERY_COMPASS, "§6Find Broken", "§7/cb showbrokenblocks", "§8Lists all blocks with missing textures."));
-        inv.setStack(40, uiGlint(Items.REPEATER, "§6Reload", "§7/cb reload", "§8Force-syncs all data to connected players."));
-        inv.setStack(41, uiGlint(Items.COMPARATOR, "§6Config", "§7/cb config", "§8Opens the server configuration GUI."));
-
-        inv.setStack(49, ui(Items.KNOWLEDGE_BOOK, "§a§lQuick Tips",
+        inv.setStack(40, ui(Items.KNOWLEDGE_BOOK, "§a§lQuick Tips",
             "§71. Use high-resolution PNGs for best quality.",
             "§72. The Block Editor is the fastest way to customize.",
             "§73. Keep unique IDs short and descriptive."));
 
         inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
+        return inv;
+    }
+
+    private static SimpleInventory buildHelpCategory(int category) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Help"));
+
+        switch (category) {
+            case 1 -> { // Creating Blocks
+                inv.setStack(4, uiGlint(Items.EMERALD, "§e§lCreating Blocks"));
+                inv.setStack(10, uiGlint(Items.CRAFTING_TABLE, "§eCreate", "§7/cb create <id> <name> <url>", "§8Creates a new custom block from a texture URL.", "§8Optional: add size (16-256) before URL."));
+                inv.setStack(11, uiGlint(Items.NAME_TAG, "§eRename", "§7/cb rename <id> <new name>", "§8Changes the display name of a block."));
+                inv.setStack(12, uiGlint(Items.COMMAND_BLOCK, "§eRe-ID", "§7/cb reid <old_id> <new_id>", "§8Changes the internal ID.", "§8All placed blocks update automatically."));
+                inv.setStack(13, uiGlint(Items.CHEST, "§eDuplicate", "§7/cb dupe <id>", "§8Clones a block with all properties,", "§8textures, shapes, and animation."));
+                inv.setStack(14, uiGlint(Items.BARRIER, "§eDelete", "§7/cb delete <id>", "§8Permanently removes a block."));
+                inv.setStack(15, uiGlint(Items.TNT, "§eBulk Delete", "§7/cb bulkdelete <id1> <id2> ...", "§8Delete multiple blocks at once."));
+                inv.setStack(19, uiGlint(Items.DIAMOND, "§eGive", "§7/cb give <id> [amount] [player]", "§8Adds the block item to inventory."));
+            }
+            case 2 -> { // Textures & Design
+                inv.setStack(4, uiGlint(Items.PAINTING, "§b§lTextures & Design"));
+                inv.setStack(10, uiGlint(Items.MAP, "§bRetexture", "§7/cb retexture <id> [size] <url>", "§8Replaces the texture. GIFs auto-animate.", "§8Size: 16-256 (default 128)."));
+                inv.setStack(11, uiGlint(Items.AMETHYST_SHARD, "§bSet Face", "§7/cb setface <id> <face> [size] <url>", "§8Faces: north, south, east, west, top, bottom."));
+                inv.setStack(12, uiGlint(Items.GLASS, "§bClear Face", "§7/cb clearface <id> <face>", "§8Removes a per-face texture override."));
+                inv.setStack(13, uiGlint(Items.BUCKET, "§bClear All Faces", "§7/cb clearallfaces <id>", "§8Removes all face overrides at once."));
+                inv.setStack(14, uiGlint(Items.SPYGLASS, "§bResize", "§7/cb resize <id> <16-256>", "§8Rescales the stored texture."));
+                inv.setStack(15, uiGlint(Items.BRUSH, "§bEditor", "§7/cb editor [id]", "§8Opens the full block editor GUI."));
+                inv.setStack(19, uiGlint(Items.BLAZE_ROD, "§6Rainbow Rectangle", "§7/cb rectangle", "§8Right-click any block face to paint it.", "§8Shift+click = 256px quality."));
+                inv.setStack(20, uiGlint(Items.CLOCK, "§bAnimation", "§7Use GIF/WebP/APNG URLs in create or retexture.", "§8Animation speed is set in the Block Editor."));
+            }
+            case 3 -> { // Shapes & Collision
+                inv.setStack(4, uiGlint(Items.ANVIL, "§5§lShapes & Collision"));
+                inv.setStack(10, uiGlint(Items.IRON_INGOT, "§5Set Shape", "§7/cb setshape <id> <preset|coords>", "§8Presets: full, slab, thin, carpet, pillar,", "§8small, micro, pane, trapdoor, fence, stairs, cross."));
+                inv.setStack(11, uiGlint(Items.STICK, "§5Add Shape Box", "§7/cb addshape <id> <x1,y1,z1,x2,y2,z2>", "§8Adds a collision box (0-16 scale).", "§8Up to 16 boxes per block."));
+                inv.setStack(12, uiGlint(Items.SHEARS, "§5Remove Shape Box", "§7/cb removeshape <id> <index>", "§8Removes a specific box by index (0-based)."));
+                inv.setStack(13, uiGlint(Items.WATER_BUCKET, "§5Clear Shape", "§7/cb clearshape <id>", "§8Resets block to full cube."));
+                inv.setStack(14, uiGlint(Items.SLIME_BLOCK, "§5Set Collision", "§7/cb setcollision <id> <on|off>", "§8Toggle whether players can walk through."));
+                inv.setStack(15, uiGlint(Items.ENDER_EYE, "§5Shape Editor GUI", "§7/cb shapeeditor <id>", "§8Visual editor for block shapes."));
+            }
+            case 4 -> { // Utilities
+                inv.setStack(4, uiGlint(Items.REDSTONE, "§6§lUtilities & Commands"));
+                inv.setStack(10, uiGlint(Items.GOLDEN_PICKAXE, "§6Undo", "§7/cb undo [count]", "§8Reverts the last change(s) you made.", "§8Up to 20 steps."));
+                inv.setStack(11, uiGlint(Items.DIAMOND_PICKAXE, "§6Redo", "§7/cb redo [count]", "§8Re-applies undone changes."));
+                inv.setStack(12, uiGlint(Items.RECOVERY_COMPASS, "§6Find Broken", "§7/cb showbrokenblocks", "§8Lists all blocks with missing/broken textures."));
+                inv.setStack(13, uiGlint(Items.SUNFLOWER, "§6Set Glow", "§7/cb setglow <id> <0-15>", "§8Light emission. 0=off, 7=torch, 15=max."));
+                inv.setStack(14, uiGlint(Items.NETHERITE_INGOT, "§6Set Hardness", "§7/cb sethardness <id> <-1 to 50>", "§8Break speed. -1=bedrock, 0=instant."));
+                inv.setStack(15, uiGlint(Items.NOTE_BLOCK, "§6Set Sound", "§7/cb setsound <id> <type>", "§8Types: stone, wood, metal, glass, grass,", "§8sand, wool, gravel, snow, etc."));
+                inv.setStack(19, uiGlint(Items.BLACK_DYE, "§7Square Tool", "§7/cb square <black|yellow|green>", "§8Color-swap utility tool."));
+                inv.setStack(20, uiGlint(Items.ARROW, "§7Triangle Tool", "§7/cb triangle <black|yellow|green>", "§8Color triangle utility tool."));
+            }
+            case 5 -> { // Server & Data
+                inv.setStack(4, uiGlint(Items.ENDER_CHEST, "§a§lServer & Data"));
+                inv.setStack(10, uiGlint(Items.WRITABLE_BOOK, "§aExport Block", "§7/cb exportblock <id>", "§8Generates a short code to share a block."));
+                inv.setStack(11, uiGlint(Items.BOOK, "§aImport Block", "§7/cb importblock <code>", "§8Imports a block from an export code."));
+                inv.setStack(12, uiGlint(Items.CHEST, "§aExport List", "§7/cb export", "§8Exports all blocks to a JSON file."));
+                inv.setStack(13, uiGlint(Items.HOPPER, "§aImport Folder", "§7/cb importfolder", "§8Bulk-imports from config/customblocks/import/."));
+                inv.setStack(14, uiGlint(Items.REPEATER, "§aReload", "§7/cb reload", "§8Reloads all data and syncs to players."));
+                inv.setStack(15, uiGlint(Items.COMPARATOR, "§aConfig", "§7/cb config", "§8Opens the server configuration GUI."));
+                inv.setStack(19, uiGlint(Items.PLAYER_HEAD, "§aAI / Helper", "§7/cb ai [spawn|hide|come|stay|tp|scan|status]", "§8Manage the assistant helper entity."));
+                inv.setStack(20, uiGlint(Items.NETHER_STAR, "§aMagic Items", "§7/cb magicitems", "§8Opens the magic items GUI."));
+                inv.setStack(21, uiGlint(Items.COMPASS, "§aResource Pack", "§7/cb rp", "§8Resource pack management hub."));
+            }
+        }
         return inv;
     }
 

@@ -402,8 +402,9 @@ public final class ImageProcessor {
             BufferedImage strip = new BufferedImage(frameSize, frameSize * frames.size(), BufferedImage.TYPE_INT_ARGB);
             Graphics2D gStrip = strip.createGraphics();
             gStrip.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-            gStrip.setColor(Color.BLACK);
+            gStrip.setComposite(java.awt.AlphaComposite.Clear);
             gStrip.fillRect(0, 0, frameSize, frameSize * frames.size());
+            gStrip.setComposite(java.awt.AlphaComposite.SrcOver);
 
             for (int i = 0; i < frames.size(); i++) {
                 gStrip.drawImage(frames.get(i), 0, i * frameSize, frameSize, frameSize, null);
@@ -486,17 +487,17 @@ public final class ImageProcessor {
             float magentaRatio = (float) magentaPixels / totalPixels;
             float blackRatio   = (float) blackPixels / totalPixels;
             
-            // Standard MC missing-texture check
-            if (magentaRatio > 0.1 && (magentaRatio + blackRatio) > 0.45) return true;
+            // Standard MC missing-texture check (magenta+black checkerboard)
+            if (magentaRatio > 0.20 && (magentaRatio + blackRatio) > 0.75) return true;
             // High-concentration magenta (export failure)
-            if (magentaRatio > 0.3) return true;
-            // Near-total black (download failure)
-            if (blackRatio > 0.92) return true;
+            if (magentaRatio > 0.5) return true;
+            // Near-total black (download failure — only flag near-100% black)
+            if (blackRatio > 0.98) return true;
             
             return false;
         } catch (Exception e) {
             com.customblocks.gui.GuiManager.logError();
-            return true;
+            return false;
         }
     }
 
