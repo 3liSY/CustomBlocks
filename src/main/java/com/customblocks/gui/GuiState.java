@@ -91,6 +91,22 @@ public record GuiState(
         return new GuiState(GuiMode.BULK_DELETE, null, page, false, 0, false);
     }
 
+    public static GuiState searchPicker(int page) {
+        return new GuiState(GuiMode.SEARCH_PICKER, null, page, false, 0, false);
+    }
+
+    public static GuiState magicItems() {
+        return new GuiState(GuiMode.MAGIC_ITEMS, null, 0, false, 0, false);
+    }
+
+    public static GuiState undoPicker(int page) {
+        return new GuiState(GuiMode.UNDO_PICKER, null, page, false, 0, false);
+    }
+
+    public static GuiState configGui() {
+        return new GuiState(GuiMode.CONFIG_GUI, null, 0, false, 0, false);
+    }
+
     // ── Mutation (returns new instance) ──────────────────────────────────────
 
     public GuiState withConfirmDelete(boolean confirm) {

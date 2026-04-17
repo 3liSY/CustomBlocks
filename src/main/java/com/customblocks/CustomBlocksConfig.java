@@ -63,7 +63,7 @@ public final class CustomBlocksConfig {
 
     // ── Resource Pack Enforcement ─────────────────────────────────────────
     /** Whether to send the resource pack as mandatory on player join. */
-    public static volatile boolean rpEnforceOnJoin = false;
+    public static volatile boolean rpEnforceOnJoin = true;
     /** Branded prompt message shown when the RP download dialog appears. */
     public static volatile String rpPromptMessage = "§b§lCustomBlocks §7requires a resource pack to display custom blocks.";
     /** Kick message shown to players who decline the resource pack. */
@@ -73,7 +73,7 @@ public final class CustomBlocksConfig {
     /** Whether the helper is currently spawned in the world. */
     public static volatile boolean helperEnabled = false;
     /** The helper's display name. */
-    public static volatile String helperName = "The Helper";
+    public static volatile String helperName = "CustomBlocks Helper";
     /** The helper's skin (Minecraft username or texture URL). */
     public static volatile String helperSkin = "Architect";
     /** Whether the live status hologram is visible. */

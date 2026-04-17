@@ -270,6 +270,30 @@ public final class UndoManager {
         PLAYER_REDO.remove(playerUuid);
     }
 
+    public static synchronized List<UndoEntry> getUndoEntries(UUID playerUuid, int max) {
+        String mode = CustomBlocksConfig.undoMode;
+        Deque<UndoEntry> stack;
+        if ("per_player".equals(mode)) stack = PLAYER_UNDO.get(playerUuid);
+        else if ("global".equals(mode)) stack = GLOBAL_UNDO;
+        else { stack = PLAYER_UNDO.get(playerUuid); if (stack == null || stack.isEmpty()) stack = GLOBAL_UNDO; }
+        if (stack == null) return List.of();
+        List<UndoEntry> result = new ArrayList<>();
+        for (UndoEntry e : stack) { result.add(e); if (result.size() >= max) break; }
+        return result;
+    }
+
+    public static synchronized List<UndoEntry> getRedoEntries(UUID playerUuid, int max) {
+        String mode = CustomBlocksConfig.undoMode;
+        Deque<UndoEntry> stack;
+        if ("per_player".equals(mode)) stack = PLAYER_REDO.get(playerUuid);
+        else if ("global".equals(mode)) stack = GLOBAL_REDO;
+        else { stack = PLAYER_REDO.get(playerUuid); if (stack == null || stack.isEmpty()) stack = GLOBAL_REDO; }
+        if (stack == null) return List.of();
+        List<UndoEntry> result = new ArrayList<>();
+        for (UndoEntry e : stack) { result.add(e); if (result.size() >= max) break; }
+        return result;
+    }
+
     // ── Internal ─────────────────────────────────────────────────────────────
 
     private static void pushTo(Deque<UndoEntry> stack, UndoEntry entry, int maxDepth) {

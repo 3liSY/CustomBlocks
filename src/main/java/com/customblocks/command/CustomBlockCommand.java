@@ -214,42 +214,32 @@ public class CustomBlockCommand {
 
                 // ── undo ────────────────────────────────────────────────────
                 .then(CommandManager.literal("undo")
-                    .executes(ctx -> cmdUndo(ctx.getSource())))
+                    .executes(ctx -> cmdUndo(ctx.getSource()))
+                    .then(CommandManager.argument("count", IntegerArgumentType.integer(1, 50))
+                        .executes(ctx -> cmdUndoN(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "count")))))
 
                 // ── redo ────────────────────────────────────────────────────
                 .then(CommandManager.literal("redo")
-                    .executes(ctx -> cmdRedo(ctx.getSource())))
+                    .executes(ctx -> cmdRedo(ctx.getSource()))
+                    .then(CommandManager.argument("count", IntegerArgumentType.integer(1, 50))
+                        .executes(ctx -> cmdRedoN(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "count")))))
 
                 // (givesquare/givetriangle/giverectangle removed — use /cb square, /cb triangle, /cb rectangle)
 
-                // ── dupe / duplicate ────────────────────────────────────────
+                // ── dupe / duplicate (one-click clone) ───────────────────────
                 .then(CommandManager.literal("dupe")
                     .executes(ctx -> usage(ctx.getSource(), "dupe"))
                     .then(CommandManager.argument("sourceId", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
-                        .then(CommandManager.argument("newId", StringArgumentType.word())
-                            .executes(ctx -> cmdDupe(ctx.getSource(),
-                                StringArgumentType.getString(ctx, "sourceId"),
-                                StringArgumentType.getString(ctx, "newId"), null))
-                            .then(CommandManager.argument("newname", StringArgumentType.greedyString())
-                                .executes(ctx -> cmdDupe(ctx.getSource(),
-                                    StringArgumentType.getString(ctx, "sourceId"),
-                                    StringArgumentType.getString(ctx, "newId"),
-                                    StringArgumentType.getString(ctx, "newname")))))))
+                        .executes(ctx -> cmdDupe(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "sourceId")))))
 
                 .then(CommandManager.literal("duplicate")
                     .executes(ctx -> usage(ctx.getSource(), "dupe"))
                     .then(CommandManager.argument("sourceId", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
-                        .then(CommandManager.argument("newId", StringArgumentType.word())
-                            .executes(ctx -> cmdDupe(ctx.getSource(),
-                                StringArgumentType.getString(ctx, "sourceId"),
-                                StringArgumentType.getString(ctx, "newId"), null))
-                            .then(CommandManager.argument("newname", StringArgumentType.greedyString())
-                                .executes(ctx -> cmdDupe(ctx.getSource(),
-                                    StringArgumentType.getString(ctx, "sourceId"),
-                                    StringArgumentType.getString(ctx, "newId"),
-                                    StringArgumentType.getString(ctx, "newname")))))))
+                        .executes(ctx -> cmdDupe(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "sourceId")))))
 
                 // ── data commands ───────────────────────────────────────────
                 .then(CommandManager.literal("export")
@@ -283,14 +273,17 @@ public class CustomBlockCommand {
 
                 .then(CommandManager.literal("magicitems")
                     .executes(ctx -> {
-                        cmdGiveTriangleInternal(ctx.getSource(), "green");
-                        cmdGiveTriangleInternal(ctx.getSource(), "yellow");
-                        cmdGiveTriangleInternal(ctx.getSource(), "black");
-                        cmdGiveSquareInternal(ctx.getSource(), "green");
-                        cmdGiveSquareInternal(ctx.getSource(), "yellow");
-                        cmdGiveSquareInternal(ctx.getSource(), "black");
-                        cmdGiveRectangleInternal(ctx.getSource());
-                        ctx.getSource().sendMessage(Text.literal("§a[CustomBlocks] Granted all magic items!"));
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) GuiManager.openMagicItemsGui(p);
+                        else ctx.getSource().sendError(Text.literal("Player only."));
+                        return 1;
+                    }))
+
+                .then(CommandManager.literal("magic")
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) GuiManager.openMagicItemsGui(p);
+                        else ctx.getSource().sendError(Text.literal("Player only."));
                         return 1;
                     }))
 
@@ -305,6 +298,58 @@ public class CustomBlockCommand {
                 // ── gui ──────────────────────────────────────────────────────
                 .then(CommandManager.literal("gui")
                     .executes(ctx -> cmdGui(ctx.getSource())))
+
+                // ── search ───────────────────────────────────────────────────
+                .then(CommandManager.literal("search")
+                    .executes(ctx -> usage(ctx.getSource(), "search"))
+                    .then(CommandManager.argument("query", StringArgumentType.greedyString())
+                        .executes(ctx -> {
+                            ServerPlayerEntity p = ctx.getSource().getPlayer();
+                            if (p == null) { ctx.getSource().sendError(Text.literal("Player only.")); return 0; }
+                            GuiManager.openSearchPicker(p, StringArgumentType.getString(ctx, "query"), 0);
+                            return 1;
+                        })))
+
+                // ── helper ───────────────────────────────────────────────────
+                .then(CommandManager.literal("helper")
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) GuiManager.openAssistantControl(p);
+                        else ctx.getSource().sendError(Text.literal("Player only."));
+                        return 1;
+                    })
+                    .then(CommandManager.literal("spawn")
+                        .executes(ctx -> cmdHelperSpawn(ctx.getSource())))
+                    .then(CommandManager.literal("hide")
+                        .executes(ctx -> cmdHelperHide(ctx.getSource())))
+                    .then(CommandManager.literal("come")
+                        .executes(ctx -> cmdHelperCome(ctx.getSource())))
+                    .then(CommandManager.literal("stay")
+                        .executes(ctx -> cmdHelperStay(ctx.getSource())))
+                    .then(CommandManager.literal("tp")
+                        .executes(ctx -> cmdHelperTp(ctx.getSource())))
+                    .then(CommandManager.literal("scan")
+                        .executes(ctx -> cmdHelperScan(ctx.getSource())))
+                    .then(CommandManager.literal("status")
+                        .executes(ctx -> cmdHelperStatus(ctx.getSource()))))
+
+                // ── ai (shortcut to Assistant Control GUI) ──────────────────
+                .then(CommandManager.literal("ai")
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) GuiManager.openAssistantControl(p);
+                        else ctx.getSource().sendError(Text.literal("Player only."));
+                        return 1;
+                    }))
+
+                // ── config ───────────────────────────────────────────────────
+                .then(CommandManager.literal("config")
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) GuiManager.openConfigGui(p);
+                        else ctx.getSource().sendError(Text.literal("Player only."));
+                        return 1;
+                    }))
 
                 // ── reload ───────────────────────────────────────────────────
                 .then(CommandManager.literal("reload")
@@ -373,24 +418,6 @@ public class CustomBlockCommand {
                         .then(CommandManager.literal("off")
                             .executes(ctx -> cmdSetCollision(ctx.getSource(),
                                 StringArgumentType.getString(ctx, "id"), false)))))
-
-                .then(CommandManager.literal("saveshape")
-                    .executes(ctx -> usage(ctx.getSource(), "saveshape"))
-                    .then(CommandManager.argument("name", StringArgumentType.word())
-                        .then(CommandManager.argument("id", StringArgumentType.word())
-                            .suggests(BLOCK_SUGGESTIONS)
-                            .executes(ctx -> cmdSaveShape(ctx.getSource(),
-                                StringArgumentType.getString(ctx, "name"),
-                                StringArgumentType.getString(ctx, "id"))))))
-
-                .then(CommandManager.literal("loadshape")
-                    .executes(ctx -> usage(ctx.getSource(), "loadshape"))
-                    .then(CommandManager.argument("id", StringArgumentType.word())
-                        .suggests(BLOCK_SUGGESTIONS)
-                        .then(CommandManager.argument("name", StringArgumentType.word())
-                            .executes(ctx -> cmdLoadShape(ctx.getSource(),
-                                StringArgumentType.getString(ctx, "id"),
-                                StringArgumentType.getString(ctx, "name"))))))
 
                 .then(CommandManager.literal("shapeeditor")
                     .executes(ctx -> usage(ctx.getSource(), "shapeeditor"))
@@ -500,16 +527,27 @@ public class CustomBlockCommand {
         return 1;
     }
 
-    private static int cmdDupe(ServerCommandSource src, String rawSourceId, String rawNewId, String newName) {
+    /**
+     * Auto-incremented dupe ID: tries {@code sourceId_dupe}, then {@code _dupe_2}, {@code _dupe_3}, … up to 99.
+     */
+    public static String generateDupeId(String sourceId) {
+        String base = sourceId + "_dupe";
+        if (!SlotManager.hasId(base)) return base;
+        for (int i = 2; i <= 99; i++) {
+            String candidate = base + "_" + i;
+            if (!SlotManager.hasId(candidate)) return candidate;
+        }
+        return base + "_" + (System.currentTimeMillis() % 10000);
+    }
+
+    private static int cmdDupe(ServerCommandSource src, String rawSourceId) {
         String sourceId = sanitize(rawSourceId);
-        String newId    = sanitize(rawNewId);
         if (!SlotManager.hasId(sourceId)) { src.sendMessage(notFound(sourceId)); return 0; }
-        if (newId.isEmpty())              { ChatHelper.error(src, "Invalid new ID."); return 0; }
-        if (SlotManager.hasId(newId))     { ChatHelper.error(src, "'" + newId + "' already exists."); return 0; }
         if (SlotManager.freeSlots() == 0) { ChatHelper.error(src, "All " + CustomBlocksConfig.maxSlots + " slots are full!"); return 0; }
 
+        String newId = generateDupeId(sourceId);
         SlotData s = SlotManager.getById(sourceId);
-        String finalName = (newName != null && !newName.isBlank()) ? newName : s.displayName + " (Copy)";
+        String finalName = s.displayName + " (Copy)";
 
         byte[] texCopy = s.texture != null ? s.texture.clone() : null;
         SlotData d = SlotManager.assign(newId, finalName, texCopy);
@@ -574,46 +612,75 @@ public class CustomBlockCommand {
             ChatHelper.error(src, "Block ID not found.");
             return 0;
         }
-        com.google.gson.JsonObject obj = new com.google.gson.JsonObject();
-        obj.addProperty("customId", d.customId);
-        obj.addProperty("displayName", d.displayName);
-        obj.addProperty("light", d.lightLevel);
-        obj.addProperty("hard", d.hardness);
-        obj.addProperty("sound", d.soundType);
-        if (d.animMeta != null) obj.addProperty("anim", d.animMeta);
-        if (d.noCollision) obj.addProperty("ncol", true);
-        if (d.isShaped()) {
-            com.google.gson.JsonArray boxes = new com.google.gson.JsonArray();
-            for (SlotData.ShapeBox box : d.shapeBoxes) boxes.add(box.toSerialString());
-            obj.add("shape", boxes);
+        try {
+            com.google.gson.JsonObject obj = new com.google.gson.JsonObject();
+            obj.addProperty("customId", d.customId);
+            obj.addProperty("displayName", d.displayName);
+            obj.addProperty("light", d.lightLevel);
+            obj.addProperty("hard", d.hardness);
+            obj.addProperty("sound", d.soundType);
+            if (d.animMeta != null) obj.addProperty("anim", d.animMeta);
+            if (d.noCollision) obj.addProperty("ncol", true);
+            if (d.isShaped()) {
+                com.google.gson.JsonArray boxes = new com.google.gson.JsonArray();
+                for (SlotData.ShapeBox box : d.shapeBoxes) boxes.add(box.toSerialString());
+                obj.add("shape", boxes);
+            }
+            if (d.texture != null) obj.addProperty("tex", java.util.Base64.getEncoder().encodeToString(d.texture));
+            if (d.hasFaces()) {
+                com.google.gson.JsonObject faces = new com.google.gson.JsonObject();
+                for (var fe : d.faceTextures.entrySet())
+                    faces.addProperty(fe.getKey(), java.util.Base64.getEncoder().encodeToString(fe.getValue()));
+                obj.add("faces", faces);
+            }
+            byte[] jsonBytes = obj.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            try (java.util.zip.GZIPOutputStream gz = new java.util.zip.GZIPOutputStream(baos)) { gz.write(jsonBytes); }
+            String code = "CB2!" + java.util.Base64.getEncoder().encodeToString(baos.toByteArray());
+
+            ChatHelper.success(src, "Export code for '" + d.customId + "':");
+            src.sendMessage(Text.literal("§7Import with: §b/cb importblock <code>"));
+            net.minecraft.text.MutableText msg = Text.literal("§b§n" + code)
+                .styled(s -> s
+                    .withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.COPY_TO_CLIPBOARD, code))
+                    .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, Text.literal("§eClick to copy"))));
+            src.sendMessage(msg);
+            return 1;
+        } catch (Exception e) {
+            ChatHelper.error(src, "Export failed: " + e.getMessage());
+            return 0;
         }
-        String json = obj.toString();
-        String b64 = java.util.Base64.getEncoder().encodeToString(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        String code = "CB!" + b64;
-        
-        ChatHelper.success(src, "Export code for '" + d.customId + "':");
-        net.minecraft.text.MutableText msg = net.minecraft.text.Text.literal("§b§n" + code)
-            .styled(s -> s.withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.COPY_TO_CLIPBOARD, code))
-                          .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, net.minecraft.text.Text.literal("§eClick to copy to clipboard"))));
-        src.sendMessage(msg);
-        return 1;
     }
 
     private static int cmdImportBlock(ServerCommandSource src, String code) {
-        if (!code.startsWith("CB!")) {
-            ChatHelper.error(src, "Invalid code format. Must start with CB!");
+        if (!code.startsWith("CB!") && !code.startsWith("CB2!")) {
+            ChatHelper.error(src, "Invalid code format. Must start with CB! or CB2!");
             return 0;
         }
         try {
-            String b64 = code.substring(3);
-            String json = new String(java.util.Base64.getDecoder().decode(b64), java.nio.charset.StandardCharsets.UTF_8);
+            String json;
+            if (code.startsWith("CB2!")) {
+                byte[] compressed = java.util.Base64.getDecoder().decode(code.substring(4));
+                try (java.util.zip.GZIPInputStream gz = new java.util.zip.GZIPInputStream(new java.io.ByteArrayInputStream(compressed));
+                     java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+                    byte[] buf = new byte[4096];
+                    int n;
+                    while ((n = gz.read(buf)) != -1) out.write(buf, 0, n);
+                    json = out.toString(java.nio.charset.StandardCharsets.UTF_8);
+                }
+            } else {
+                json = new String(java.util.Base64.getDecoder().decode(code.substring(3)), java.nio.charset.StandardCharsets.UTF_8);
+            }
             com.google.gson.JsonObject obj = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
             
             String id = obj.get("customId").getAsString();
             String name = obj.has("displayName") ? obj.get("displayName").getAsString() : id;
             if (SlotManager.hasId(id)) id = id + "_imp";
             
-            SlotData d = SlotManager.assign(id, name, null);
+            byte[] texture = null;
+            if (obj.has("tex")) texture = java.util.Base64.getDecoder().decode(obj.get("tex").getAsString());
+            
+            SlotData d = SlotManager.assign(id, name, texture);
             if (d == null) {
                 ChatHelper.error(src, "Import failed: No free slots.");
                 return 0;
@@ -634,12 +701,20 @@ public class CustomBlockCommand {
                 if (!shapeBoxes.isEmpty()) SlotManager.setShape(id, shapeBoxes);
             }
             
+            if (obj.has("faces")) {
+                com.google.gson.JsonObject faces = obj.getAsJsonObject("faces");
+                for (var entry : faces.entrySet())
+                    SlotManager.setFaceTexture(id, entry.getKey(), java.util.Base64.getDecoder().decode(entry.getValue().getAsString()));
+            }
+            
             SlotData finalData = SlotManager.getById(id);
             SlotManager.saveAll();
+            String animMeta = obj.has("anim") ? obj.get("anim").getAsString() : null;
             NetworkManager.broadcastUpdate(src.getServer(), new SlotUpdatePayload(
                     "add", finalData.index, finalData.customId, finalData.displayName,
-                    null, finalData.lightLevel, finalData.hardness, finalData.soundType));
-            ChatHelper.success(src, "Imported '" + id + "'. Use '/cb retexture " + id + " <url>' to apply texture.");
+                    texture, finalData.lightLevel, finalData.hardness, finalData.soundType, null, null, animMeta));
+            if (texture != null) ChatHelper.success(src, "Imported '" + id + "' with texture!");
+            else ChatHelper.success(src, "Imported '" + id + "'. Use '/cb retexture " + id + " <url>' to apply texture.");
             return 1;
         } catch (Exception e) {
             ChatHelper.error(src, "Error decoding block: " + e.getMessage());
@@ -781,16 +856,6 @@ public class CustomBlockCommand {
                 "setcollision", d.index, id, null, null, 0, 0, "stone", null, on ? "true" : "false"));
         src.sendMessage(Text.literal("§a[CustomBlocks] Collision §f" + (on ? "ON" : "OFF") + "§a for '§f" + id + "§a'."));
         return 1;
-    }
-
-    private static int cmdSaveShape(ServerCommandSource src, String name, String id) {
-        src.sendError(net.minecraft.text.Text.literal("§cTemplates disabled."));
-        return 0;
-    }
-
-    private static int cmdLoadShape(ServerCommandSource src, String id, String name) {
-        src.sendError(net.minecraft.text.Text.literal("§cTemplates disabled."));
-        return 0;
     }
 
     private static int cmdShapeEditor(ServerCommandSource src, String id) {
@@ -1177,6 +1242,99 @@ public class CustomBlockCommand {
         return 1;
     }
 
+    /** Undo N times in a loop. */
+    private static int cmdUndoN(ServerCommandSource src, int count) {
+        int done = 0;
+        for (int i = 0; i < count; i++) {
+            if (UndoManager.undoSize(getPlayerUuid(src)) == 0) break;
+            int r = cmdUndo(src);
+            if (r == 0) break;
+            done++;
+        }
+        if (done > 1) src.sendMessage(Text.literal("§a[CustomBlocks] Undid §f" + done + "§a actions total."));
+        return done > 0 ? 1 : 0;
+    }
+
+    /** Redo N times in a loop. */
+    private static int cmdRedoN(ServerCommandSource src, int count) {
+        int done = 0;
+        for (int i = 0; i < count; i++) {
+            if (UndoManager.redoSize(getPlayerUuid(src)) == 0) break;
+            int r = cmdRedo(src);
+            if (r == 0) break;
+            done++;
+        }
+        if (done > 1) src.sendMessage(Text.literal("§a[CustomBlocks] Redid §f" + done + "§a actions total."));
+        return done > 0 ? 1 : 0;
+    }
+
+    // ── Helper commands ─────────────────────────────────────────────────────
+
+    private static int cmdHelperSpawn(ServerCommandSource src) {
+        ServerPlayerEntity p = src.getPlayer();
+        if (p == null) { src.sendError(Text.literal("Player only.")); return 0; }
+        com.customblocks.assistant.AssistantManager.spawn(src.getServer(),
+            (net.minecraft.server.world.ServerWorld) p.getWorld(), p.getX(), p.getY(), p.getZ());
+        src.sendMessage(Text.literal("§a[CustomBlocks] Helper spawned at your location."));
+        return 1;
+    }
+
+    private static int cmdHelperHide(ServerCommandSource src) {
+        if (!com.customblocks.assistant.AssistantManager.isSpawned()) {
+            src.sendMessage(Text.literal("§7[CustomBlocks] Helper is not active.")); return 0;
+        }
+        com.customblocks.assistant.AssistantManager.hide();
+        src.sendMessage(Text.literal("§a[CustomBlocks] Helper hidden."));
+        return 1;
+    }
+
+    private static int cmdHelperCome(ServerCommandSource src) {
+        ServerPlayerEntity p = src.getPlayer();
+        if (p == null) { src.sendError(Text.literal("Player only.")); return 0; }
+        if (!com.customblocks.assistant.AssistantManager.isSpawned()) {
+            src.sendMessage(Text.literal("§7[CustomBlocks] Helper is not active. Use §b/cb helper spawn§7 first.")); return 0;
+        }
+        com.customblocks.assistant.AssistantManager.setFollowing(true, p.getUuid());
+        src.sendMessage(Text.literal("§a[CustomBlocks] Helper is now following you."));
+        return 1;
+    }
+
+    private static int cmdHelperStay(ServerCommandSource src) {
+        if (!com.customblocks.assistant.AssistantManager.isSpawned()) {
+            src.sendMessage(Text.literal("§7[CustomBlocks] Helper is not active.")); return 0;
+        }
+        com.customblocks.assistant.AssistantManager.setFollowing(false, null);
+        src.sendMessage(Text.literal("§a[CustomBlocks] Helper is staying put."));
+        return 1;
+    }
+
+    private static int cmdHelperTp(ServerCommandSource src) {
+        ServerPlayerEntity p = src.getPlayer();
+        if (p == null) { src.sendError(Text.literal("Player only.")); return 0; }
+        if (!com.customblocks.assistant.AssistantManager.isSpawned()) {
+            src.sendMessage(Text.literal("§7[CustomBlocks] Helper is not active.")); return 0;
+        }
+        com.customblocks.assistant.AssistantManager.teleportToPlayer(p);
+        src.sendMessage(Text.literal("§a[CustomBlocks] Helper teleported to you."));
+        return 1;
+    }
+
+    private static int cmdHelperScan(ServerCommandSource src) {
+        ServerPlayerEntity p = src.getPlayer();
+        if (p == null) { src.sendError(Text.literal("Player only.")); return 0; }
+        if (!com.customblocks.assistant.AssistantManager.isSpawned()) {
+            src.sendMessage(Text.literal("§7[CustomBlocks] Helper is not active. Use §b/cb helper spawn§7 first.")); return 0;
+        }
+        com.customblocks.assistant.AssistantManager.runSanityScan(p);
+        return 1;
+    }
+
+    private static int cmdHelperStatus(ServerCommandSource src) {
+        String summary = com.customblocks.assistant.AssistantManager.getStatusSummary();
+        src.sendMessage(Text.literal("§0§l[§b§lHelper§0§l] " + summary));
+        return 1;
+    }
+
     private static SlotData snapshotForCmd(SlotData d) {
         java.util.Map<String, byte[]> facesCopy = new java.util.concurrent.ConcurrentHashMap<>();
         d.faceTextures.forEach((k, v) -> facesCopy.put(k, v.clone()));
@@ -1185,7 +1343,6 @@ public class CustomBlockCommand {
                 d.lightLevel, d.hardness, d.soundType, facesCopy, d.animMeta,
                 d.shapeBoxes != null ? new java.util.ArrayList<>(d.shapeBoxes) : null, d.noCollision);
     }
-
 
     /** Resize the existing stored texture (and all face overrides) of a block. */
     private static int cmdResize(ServerCommandSource src, String id, int size) {
@@ -1444,8 +1601,6 @@ public class CustomBlockCommand {
         src.sendMessage(Text.literal(G + "  /cb " + C + "removeshape " + A + "<id> <index>          " + G + "— remove a box by index (0-based)"));
         src.sendMessage(Text.literal(G + "  /cb " + C + "clearshape " + A + "<id>                  " + G + "— reset to full cube"));
         src.sendMessage(Text.literal(G + "  /cb " + C + "setcollision " + A + "<id> <on|off>        " + G + "— toggle walkthrough"));
-        src.sendMessage(Text.literal(G + "  /cb " + C + "saveshape " + A + "<name> <id>            " + G + "— save shape as template"));
-        src.sendMessage(Text.literal(G + "  /cb " + C + "loadshape " + A + "<id> <name>            " + G + "— apply saved template"));
         src.sendMessage(Text.literal(G + "  /cb " + C + "shapeeditor " + A + "<id>                 " + G + "— open shape editor GUI"));
         src.sendMessage(Text.literal(D));
 
@@ -1468,7 +1623,7 @@ public class CustomBlockCommand {
 
 
 
-    private static int cmdGiveSquareInternal(ServerCommandSource src, String color) {
+    public static int cmdGiveSquareInternal(ServerCommandSource src, String color) {
         String c = color.toLowerCase().trim();
         if (!c.equals("black") && !c.equals("yellow") && !c.equals("green")) {
             src.sendError(Text.literal("§c'" + color + "' is not a valid color. Choose: §fblack §7| §fyellow §7| §fgreen")); return 0;
@@ -1483,7 +1638,7 @@ public class CustomBlockCommand {
         return 1;
     }
 
-    private static int cmdGiveTriangleInternal(ServerCommandSource src, String color) {
+    public static int cmdGiveTriangleInternal(ServerCommandSource src, String color) {
         String c = color.toLowerCase().trim();
         if (!c.equals("black") && !c.equals("yellow") && !c.equals("green")) {
             src.sendError(Text.literal("§c'" + color + "' is not a valid color. Choose: §fblack §7| §fyellow §7| §fgreen")); return 0;
@@ -1498,7 +1653,7 @@ public class CustomBlockCommand {
         return 1;
     }
 
-    private static int cmdGiveRectangleInternal(ServerCommandSource src) {
+    public static int cmdGiveRectangleInternal(ServerCommandSource src) {
         net.minecraft.util.Identifier rectId = net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, "rainbow_rectangle");
         net.minecraft.item.Item rectItem = net.minecraft.registry.Registries.ITEM.get(rectId);
         if (rectItem == null || rectItem == net.minecraft.item.Items.AIR) {
@@ -1580,8 +1735,6 @@ public class CustomBlockCommand {
             case "removeshape"  -> "removeshape <id> <boxIndex>";
             case "clearshape"   -> "clearshape <id>";
             case "setcollision" -> "setcollision <id> <on|off>";
-            case "saveshape"    -> "saveshape <name> <id>";
-            case "loadshape"    -> "loadshape <id> <name>";
             case "shapeeditor"  -> "shapeeditor <id>";
             case "square"       -> "square <black|yellow|green>";
             case "triangle"     -> "triangle <black|yellow|green>";

@@ -104,9 +104,9 @@ public class AssistantManager {
         }
 
         if (brokenCount > 0) {
-            player.sendMessage(Text.literal("§0§l[§b§lHelper§0§l] §eScan complete. §c" + brokenCount + " §7anomalies detected. Visual markers placed. §e⚠"), false);
+            player.sendMessage(Text.literal("§0§l[§b§lHelper§0§l] §eScan complete. Found §c" + brokenCount + " §7broken blocks. Markers placed. §e⚠"), false);
         } else {
-            player.sendMessage(Text.literal("§0§l[§b§lHelper§0§l] §aArea is clean. All designs are stable. §f✔"), false);
+            player.sendMessage(Text.literal("§0§l[§b§lHelper§0§l] §aArea is clean. No broken blocks. §f✔"), false);
         }
     }
 
@@ -128,17 +128,17 @@ public class AssistantManager {
                 following = true;
                 followAnchor = player.getUuid();
                 targetPos = null;
-                player.sendMessage(Text.literal("§0§l[§b§lHelper§0§l] §fFollowing your lead, Architect. §a✔"), false);
+                player.sendMessage(Text.literal("§0§l[§b§lHelper§0§l] §fFollowing you. §a✔"), false);
                 return true;
             }
             case "stay" -> {
                 following = false;
                 targetPos = null;
-                player.sendMessage(Text.literal("§0§l[§b§lHelper§0§l] §fStanding guard here. §a✔"), false);
+                player.sendMessage(Text.literal("§0§l[§b§lHelper§0§l] §fStaying here. §a✔"), false);
                 return true;
             }
             case "status" -> {
-                player.sendMessage(Text.literal("§0§l[§b§lHelper§0§l] §fAll systems nominal. §7(Sanity: Optimal)"), false);
+                player.sendMessage(Text.literal("§0§l[§b§lHelper§0§l] §fI'm working fine. §a✔"), false);
                 return true;
             }
         }
@@ -148,4 +148,23 @@ public class AssistantManager {
     public static boolean isFollowing() { return following; }
     public static void setFollowing(boolean f, UUID anchor) { following = f; followAnchor = anchor; targetPos = null; }
     public static boolean isSpawned() { return helperEntity != null; }
+
+    public static void teleportToPlayer(ServerPlayerEntity player) {
+        if (helperEntity == null) return;
+        helperEntity.teleport(player.getX(), player.getY(), player.getZ(), true);
+    }
+
+    public static void teleportPlayerToHelper(ServerPlayerEntity player) {
+        if (helperEntity == null) return;
+        player.teleport((net.minecraft.server.world.ServerWorld) helperEntity.getWorld(),
+            helperEntity.getX(), helperEntity.getY(), helperEntity.getZ(),
+            java.util.Set.of(), player.getYaw(), player.getPitch());
+    }
+
+    public static String getStatusSummary() {
+        if (helperEntity == null) return "§cNot spawned.";
+        BlockPos pos = helperEntity.getBlockPos();
+        String state = following ? "§aFollowing" : (targetPos != null ? "§bMoving to target" : "§7Idle");
+        return "§fStatus: " + state + "  §7Position: §f" + pos.getX() + ", " + pos.getY() + ", " + pos.getZ();
+    }
 }

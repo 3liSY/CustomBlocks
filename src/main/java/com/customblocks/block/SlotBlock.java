@@ -43,14 +43,18 @@ public class SlotBlock extends Block {
 
     /**
      * Right-click an animated block → open the Animation Settings GUI.
+     * Non-animated blocks pass through to vanilla behaviour (no arm-swing).
      */
     @Override
     protected ActionResult onUse(BlockState state, World world, BlockPos pos,
                                   PlayerEntity player, BlockHitResult hit) {
-        if (world.isClient) return ActionResult.SUCCESS;
-
         SlotData data = SlotManager.getBySlot(getSlotKey());
-        if (data == null || !data.isAnimated()) return ActionResult.PASS;
+        boolean animated = data != null && data.isAnimated();
+
+        // Non-animated: behave like a normal block (no special click handling, no arm-swing).
+        if (!animated) return ActionResult.PASS;
+
+        if (world.isClient) return ActionResult.SUCCESS;
 
         if (player instanceof ServerPlayerEntity sp) {
             GuiManager.openAnimGui(sp, data.customId);

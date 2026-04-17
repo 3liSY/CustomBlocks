@@ -239,9 +239,8 @@ public class CustomBlocksMod implements ModInitializer {
                 if (com.customblocks.assistant.AssistantManager.isSpawned()) {
                     net.minecraft.util.math.BlockPos pos = hitResult.getBlockPos().offset(hitResult.getSide());
                     com.customblocks.assistant.AssistantManager.setFollowing(false, null);
-                    // Tell manager to move entity (teleport for now, update to pathfinding later)
-                    // AssistantManager.orderMoveTo(pos); 
-                    player.sendMessage(Text.literal("§0§l[§b§lHelper§0§l] §fMoving to position, Architect. §a✔"), false);
+                    com.customblocks.assistant.AssistantManager.orderMoveTo(pos);
+                    player.sendMessage(Text.literal("§0§l[§b§lHelper§0§l] §fMoving there. §a✔"), false);
                 }
             }
             return net.minecraft.util.ActionResult.PASS;

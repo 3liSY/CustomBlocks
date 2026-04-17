@@ -30,13 +30,20 @@ public final class SlotData {
     // ── Shape box record ─────────────────────────────────────────────────────
     public record ShapeBox(float x1, float y1, float z1, float x2, float y2, float z2) {
         public static ShapeBox parse(String input) {
-            // Split by comma OR space (handles multiple spaces/delimiters gracefully)
             String[] p = input.trim().split("[,\\s]+");
             if (p.length != 6) throw new IllegalArgumentException("Expected 6 values (x1 y1 z1 x2 y2 z2): " + input);
+            float x1 = clamp(Float.parseFloat(p[0].trim()));
+            float y1 = clamp(Float.parseFloat(p[1].trim()));
+            float z1 = clamp(Float.parseFloat(p[2].trim()));
+            float x2 = clamp(Float.parseFloat(p[3].trim()));
+            float y2 = clamp(Float.parseFloat(p[4].trim()));
+            float z2 = clamp(Float.parseFloat(p[5].trim()));
             return new ShapeBox(
-                    Float.parseFloat(p[0].trim()), Float.parseFloat(p[1].trim()), Float.parseFloat(p[2].trim()),
-                    Float.parseFloat(p[3].trim()), Float.parseFloat(p[4].trim()), Float.parseFloat(p[5].trim()));
+                    Math.min(x1, x2), Math.min(y1, y2), Math.min(z1, z2),
+                    Math.max(x1, x2), Math.max(y1, y2), Math.max(z1, z2));
         }
+
+        private static float clamp(float v) { return Math.max(0f, Math.min(16f, v)); }
 
         public String toDisplayString() {
             return String.format("%.1f,%.1f,%.1f → %.1f,%.1f,%.1f", x1, y1, z1, x2, y2, z2);
