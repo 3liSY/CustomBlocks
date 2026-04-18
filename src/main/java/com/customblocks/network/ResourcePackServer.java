@@ -15,7 +15,7 @@ import net.minecraft.server.MinecraftServer;
 public class ResourcePackServer {
 
     private static HttpServer server;
-    private static byte[] currentPackZip;
+    private static java.io.File currentPackFile;
     private static String currentHash;
     private static int activePort = -1;
     private static String lastError = null;
@@ -56,7 +56,7 @@ public class ResourcePackServer {
 
         try {
             server.createContext("/pack.zip", exchange -> {
-                if (currentPackZip == null) {
+                if (currentPackFile == null || !currentPackFile.exists()) {
                     byte[] msg = "Pipeline warming up...".getBytes();
                     exchange.sendResponseHeaders(404, msg.length);
                     exchange.getResponseBody().write(msg);
@@ -65,9 +65,9 @@ public class ResourcePackServer {
                 }
                 exchange.getResponseHeaders().set("Content-Type", "application/zip");
                 exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
-                exchange.sendResponseHeaders(200, currentPackZip.length);
+                exchange.sendResponseHeaders(200, currentPackFile.length());
                 try (OutputStream os = exchange.getResponseBody()) {
-                    os.write(currentPackZip);
+                    java.nio.file.Files.copy(currentPackFile.toPath(), os);
                 }
             });
             server.setExecutor(null);
@@ -94,15 +94,24 @@ public class ResourcePackServer {
         serverInstance = server;
     }
 
-    /** Rebuilds the in-memory ZIP using a consistent state snapshot. */
+    /** Rebuilds the ZIP to disk using a consistent state snapshot. */
     public static void updatePackWithSnapshot(com.customblocks.core.SlotManager.Snapshot snapshot) {
         new Thread(() -> {
             try {
-                byte[] zip = ServerPackGenerator.generateZipWithSnapshot(snapshot);
-                if (zip != null) {
-                    currentPackZip = zip;
+                java.io.File packFile = new java.io.File("customblocks_data", "customblocks_pack.zip");
+                ServerPackGenerator.generateZipWithSnapshot(snapshot, packFile);
+                if (packFile.exists()) {
+                    currentPackFile = packFile;
+                    
                     MessageDigest digest = MessageDigest.getInstance("SHA-1");
-                    byte[] hashBytes = digest.digest(zip);
+                    try (java.io.InputStream is = new java.io.FileInputStream(packFile)) {
+                        byte[] buffer = new byte[8192];
+                        int read;
+                        while ((read = is.read(buffer)) > 0) {
+                            digest.update(buffer, 0, read);
+                        }
+                    }
+                    byte[] hashBytes = digest.digest();
                     StringBuilder sb = new StringBuilder();
                     for (byte b : hashBytes) {
                         sb.append(String.format("%02x", b));
@@ -116,7 +125,7 @@ public class ResourcePackServer {
         }, "CustomBlocks-PackBuilder").start();
     }
 
-    /** Rebuilds the in-memory ZIP silently without prompting users. */
+    /** Rebuilds the ZIP silently without prompting users. */
     public static void updatePack() {
         updatePackWithSnapshot(com.customblocks.core.SlotManager.getSnapshot());
     }

@@ -38,17 +38,19 @@ public class ServerPackGenerator {
 
 
     /** Default: generate from live snapshot. */
-    public static byte[] generateZipInMemory() {
-        return generateZipWithSnapshot(SlotManager.getSnapshot());
+    public static void generateZipToDisk(File outputFile) {
+        generateZipWithSnapshot(SlotManager.getSnapshot(), outputFile);
     }
 
     /**
-     * The Royal Architect Fix: Generates the ZIP from a frozen snapshot to prevent texture 'griefing'.
+     * The Royal Architect Fix: Generates the ZIP directly to disk from a frozen snapshot.
      */
-    public static byte[] generateZipWithSnapshot(SlotManager.Snapshot snapshot) {
+    public static void generateZipWithSnapshot(SlotManager.Snapshot snapshot, File outputFile) {
         try {
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            try (ZipOutputStream zos = new ZipOutputStream(baos)) {
+            if (outputFile.getParentFile() != null) {
+                outputFile.getParentFile().mkdirs();
+            }
+            try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(outputFile))) {
                 
                 // pack.mcmeta
                 JsonObject pack = new JsonObject();
@@ -59,16 +61,20 @@ public class ServerPackGenerator {
                 addZipEntry(zos, "pack.mcmeta", GSON.toJson(meta).getBytes(StandardCharsets.UTF_8));
 
                 // Map slots by index for fast lookup during model generation
+                // Map slots by index for fast lookup during model generation
                 Map<Integer, SlotData> slotMap = new java.util.HashMap<>();
                 for (SlotData d : snapshot.slots()) slotMap.put(d.index, d);
 
-                for (int i = 0; i < CustomBlocksConfig.maxSlots; i++) {
+                // LAYER 1: The Active-Only Compiler (Skip Empty Blocks)
+                for (SlotData data : snapshot.slots()) {
+                    if ("tab_icon".equals(data.customId)) continue;
+                    
+                    int i = data.index;
                     String slotKey = "slot_" + i;
                     String modelRef = MOD_ID + ":block/" + slotKey;
-                    SlotData data = slotMap.get(i);
 
                     // default texture
-                    if (data != null && data.texture != null && data.texture.length > 0) {
+                    if (data.texture != null && data.texture.length > 0) {
                         addZipEntry(zos, "assets/" + MOD_ID + "/textures/block/" + slotKey + ".png", data.texture);
                         if (data.isAnimated() && data.animMeta != null) {
                             addZipEntry(zos, "assets/" + MOD_ID + "/textures/block/" + slotKey + ".png.mcmeta", data.animMeta.getBytes(StandardCharsets.UTF_8));
@@ -78,7 +84,7 @@ public class ServerPackGenerator {
                     }
 
                     // face textures
-                    if (data != null && data.hasFaces()) {
+                    if (data.hasFaces()) {
                         for (Map.Entry<String, byte[]> face : data.faceTextures.entrySet()) {
                             String faceKey = face.getKey();
                             byte[] faceBytes = face.getValue();
@@ -117,7 +123,7 @@ public class ServerPackGenerator {
 
                     // Block Model
                     JsonObject bm = new JsonObject();
-                    if (data != null && data.isShaped()) {
+                    if (data.isShaped()) {
                         JsonObject tex = new JsonObject();
                         tex.addProperty("particle", MOD_ID + ":block/" + slotKey);
                         for (String face : SlotData.FACE_KEYS) {
@@ -148,7 +154,7 @@ public class ServerPackGenerator {
                             elements.add(el);
                         }
                         bm.add("elements", elements);
-                    } else if (data != null && data.hasFaces()) {
+                    } else if (data.hasFaces()) {
                         // Legacy stitching: every face references its own file.
                         bm.addProperty("parent", "minecraft:block/cube");
                         JsonObject tex = new JsonObject();
@@ -181,10 +187,8 @@ public class ServerPackGenerator {
                     addZipEntry(zos, "assets/" + MOD_ID + "/textures/item/tab_icon.png", PLACEHOLDER_PNG);
                 }
             }
-            return baos.toByteArray();
         } catch (Exception e) {
             CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to generate server pack ZIP", e);
-            return null;
         }
     }
 
