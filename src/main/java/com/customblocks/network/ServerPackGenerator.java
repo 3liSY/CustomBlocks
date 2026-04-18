@@ -50,23 +50,34 @@ public class ServerPackGenerator {
             if (outputFile.getParentFile() != null) {
                 outputFile.getParentFile().mkdirs();
             }
+            // Track paths already written so a duplicate (e.g. two SlotData with
+            // the same index, corrupted state) cannot abort the entire pack build
+            // with ZipException: duplicate entry.
+            java.util.Set<String> writtenPaths = new java.util.HashSet<>();
             try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(outputFile))) {
-                
+
                 // pack.mcmeta
                 JsonObject pack = new JsonObject();
                 pack.addProperty("pack_format", PACK_FORMAT);
                 pack.addProperty("description", "CustomBlocks Server Pack");
                 JsonObject meta = new JsonObject();
                 meta.add("pack", pack);
-                addZipEntry(zos, "pack.mcmeta", GSON.toJson(meta).getBytes(StandardCharsets.UTF_8));
+                addZipEntry(zos, "pack.mcmeta", GSON.toJson(meta).getBytes(StandardCharsets.UTF_8), writtenPaths);
 
-                // Map slots by index for fast lookup during model generation
-                // Map slots by index for fast lookup during model generation
-                Map<Integer, SlotData> slotMap = new java.util.HashMap<>();
-                for (SlotData d : snapshot.slots()) slotMap.put(d.index, d);
+                // Dedupe snapshot entries by index so a corrupt state cannot produce
+                // duplicate slot_N.png writes. First entry wins; duplicates logged.
+                Map<Integer, SlotData> dedupedByIndex = new java.util.LinkedHashMap<>();
+                for (SlotData d : snapshot.slots()) {
+                    if (d == null) continue;
+                    if (dedupedByIndex.putIfAbsent(d.index, d) != null) {
+                        CustomBlocksMod.LOGGER.warn(
+                            "[CustomBlocks] Duplicate SlotData for slot_{} ('{}' vs '{}') — keeping first, skipping duplicate",
+                            d.index, dedupedByIndex.get(d.index).customId, d.customId);
+                    }
+                }
 
                 // LAYER 1: The Active-Only Compiler (Skip Empty Blocks)
-                for (SlotData data : snapshot.slots()) {
+                for (SlotData data : dedupedByIndex.values()) {
                     if ("tab_icon".equals(data.customId)) continue;
                     
                     int i = data.index;
@@ -75,12 +86,12 @@ public class ServerPackGenerator {
 
                     // default texture
                     if (data.texture != null && data.texture.length > 0) {
-                        addZipEntry(zos, "assets/" + MOD_ID + "/textures/block/" + slotKey + ".png", data.texture);
+                        addZipEntry(zos, "assets/" + MOD_ID + "/textures/block/" + slotKey + ".png", data.texture, writtenPaths);
                         if (data.isAnimated() && data.animMeta != null) {
-                            addZipEntry(zos, "assets/" + MOD_ID + "/textures/block/" + slotKey + ".png.mcmeta", data.animMeta.getBytes(StandardCharsets.UTF_8));
+                            addZipEntry(zos, "assets/" + MOD_ID + "/textures/block/" + slotKey + ".png.mcmeta", data.animMeta.getBytes(StandardCharsets.UTF_8), writtenPaths);
                         }
                     } else {
-                        addZipEntry(zos, "assets/" + MOD_ID + "/textures/block/" + slotKey + ".png", PLACEHOLDER_PNG);
+                        addZipEntry(zos, "assets/" + MOD_ID + "/textures/block/" + slotKey + ".png", PLACEHOLDER_PNG, writtenPaths);
                     }
 
                     // face textures
@@ -89,18 +100,25 @@ public class ServerPackGenerator {
                             String faceKey = face.getKey();
                             byte[] faceBytes = face.getValue();
                             String facePath = "assets/" + MOD_ID + "/textures/block/" + slotKey + "_" + faceKey + ".png";
-                            addZipEntry(zos, facePath, faceBytes);
-                            
+                            addZipEntry(zos, facePath, faceBytes, writtenPaths);
+
                             int frames = com.customblocks.ImageProcessor.getVerticalFrames(faceBytes);
                             if (frames > 1) {
-                                // Royal standard: Fluid Motion (interpolate: true)
-                                StringBuilder sb = new StringBuilder("{\"animation\":{\"interpolate\":true,\"frames\":[");
-                                for (int fi = 0; fi < frames; fi++) {
-                                    if (fi > 0) sb.append(",");
-                                    sb.append("{\"index\":").append(fi).append(",\"time\":5}");
+                                // Prefer real per-frame timing from processAnimation; fall back to uniform.
+                                String mcmetaJson;
+                                if (data.animMeta != null && !data.animMeta.isEmpty()
+                                        && data.animMeta.contains("\"frames\"")) {
+                                    mcmetaJson = data.animMeta;
+                                } else {
+                                    StringBuilder sb = new StringBuilder("{\"animation\":{\"interpolate\":true,\"frames\":[");
+                                    for (int fi = 0; fi < frames; fi++) {
+                                        if (fi > 0) sb.append(",");
+                                        sb.append("{\"index\":").append(fi).append(",\"time\":5}");
+                                    }
+                                    sb.append("]}}");
+                                    mcmetaJson = sb.toString();
                                 }
-                                sb.append("]}}");
-                                addZipEntry(zos, facePath + ".mcmeta", sb.toString().getBytes(StandardCharsets.UTF_8));
+                                addZipEntry(zos, facePath + ".mcmeta", mcmetaJson.getBytes(StandardCharsets.UTF_8), writtenPaths);
                             }
                         }
                         // Legacy texture stitching: for faces WITHOUT overrides,
@@ -109,7 +127,7 @@ public class ServerPackGenerator {
                             for (String face : SlotData.FACE_KEYS) {
                                 if (!data.faceTextures.containsKey(face)) {
                                     String inheritPath = "assets/" + MOD_ID + "/textures/block/" + slotKey + "_" + face + ".png";
-                                    addZipEntry(zos, inheritPath, data.texture);
+                                    addZipEntry(zos, inheritPath, data.texture, writtenPaths);
                                 }
                             }
                         }
@@ -119,7 +137,7 @@ public class ServerPackGenerator {
                     JsonObject variant = new JsonObject(); variant.addProperty("model", modelRef);
                     JsonObject variants = new JsonObject(); variants.add("", variant);
                     JsonObject bs = new JsonObject(); bs.add("variants", variants);
-                    addZipEntry(zos, "assets/" + MOD_ID + "/blockstates/" + slotKey + ".json", GSON.toJson(bs).getBytes(StandardCharsets.UTF_8));
+                    addZipEntry(zos, "assets/" + MOD_ID + "/blockstates/" + slotKey + ".json", GSON.toJson(bs).getBytes(StandardCharsets.UTF_8), writtenPaths);
 
                     // Block Model
                     JsonObject bm = new JsonObject();
@@ -170,21 +188,21 @@ public class ServerPackGenerator {
                         tex.addProperty("all", MOD_ID + ":block/" + slotKey);
                         bm.add("textures", tex);
                     }
-                    addZipEntry(zos, "assets/" + MOD_ID + "/models/block/" + slotKey + ".json", GSON.toJson(bm).getBytes(StandardCharsets.UTF_8));
+                    addZipEntry(zos, "assets/" + MOD_ID + "/models/block/" + slotKey + ".json", GSON.toJson(bm).getBytes(StandardCharsets.UTF_8), writtenPaths);
 
                     // Item model
                     JsonObject im = new JsonObject();
                     im.addProperty("parent", modelRef);
-                    addZipEntry(zos, "assets/" + MOD_ID + "/models/item/" + slotKey + ".json", GSON.toJson(im).getBytes(StandardCharsets.UTF_8));
+                    addZipEntry(zos, "assets/" + MOD_ID + "/models/item/" + slotKey + ".json", GSON.toJson(im).getBytes(StandardCharsets.UTF_8), writtenPaths);
                 }
 
                 // Tab Icon
                 byte[] tabIcon = snapshot.tabIcon();
                 if (tabIcon != null && tabIcon.length > 0) {
-                    addZipEntry(zos, "assets/" + MOD_ID + "/textures/item/tab_icon.png", tabIcon);
-                    addZipEntry(zos, "pack.png", tabIcon);
+                    addZipEntry(zos, "assets/" + MOD_ID + "/textures/item/tab_icon.png", tabIcon, writtenPaths);
+                    addZipEntry(zos, "pack.png", tabIcon, writtenPaths);
                 } else {
-                    addZipEntry(zos, "assets/" + MOD_ID + "/textures/item/tab_icon.png", PLACEHOLDER_PNG);
+                    addZipEntry(zos, "assets/" + MOD_ID + "/textures/item/tab_icon.png", PLACEHOLDER_PNG, writtenPaths);
                 }
             }
         } catch (Exception e) {
@@ -202,7 +220,17 @@ public class ServerPackGenerator {
         faces.add(mcFaceName, faceObj);
     }
 
-    private static void addZipEntry(ZipOutputStream zos, String path, byte[] data) throws Exception {
+    /**
+     * Dedupe-safe ZIP writer — silently skips paths already written to this stream.
+     * Prevents a single corrupt/duplicated slot from aborting the whole pack build
+     * with {@code java.util.zip.ZipException: duplicate entry}.
+     */
+    private static void addZipEntry(ZipOutputStream zos, String path, byte[] data,
+                                     java.util.Set<String> writtenPaths) throws Exception {
+        if (!writtenPaths.add(path)) {
+            CustomBlocksMod.LOGGER.warn("[CustomBlocks] Skipping duplicate ZIP entry: {}", path);
+            return;
+        }
         ZipEntry entry = new ZipEntry(path);
         zos.putNextEntry(entry);
         zos.write(data);

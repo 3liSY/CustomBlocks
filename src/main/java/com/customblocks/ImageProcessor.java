@@ -456,12 +456,16 @@ public final class ImageProcessor {
             if (!readers.hasNext()) return null;
 
             reader = readers.next();
-            reader.setInput(iis, true, false); // seekForwardOnly=true, ignoreMetadata=false
+            // IMPORTANT: getNumImages(true) requires seekForwardOnly=false; the two
+            // flags are mutually exclusive per ImageReader contract, otherwise it
+            // throws IllegalStateException and crashes every GIF upload.
+            reader.setInput(iis, false, false);
 
             int numFrames;
             try {
                 numFrames = reader.getNumImages(true);
-            } catch (IOException e) {
+            } catch (IOException | IllegalStateException e) {
+                CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not count GIF frames: {}", e.getMessage());
                 return null;
             }
             if (numFrames <= 1) return null;

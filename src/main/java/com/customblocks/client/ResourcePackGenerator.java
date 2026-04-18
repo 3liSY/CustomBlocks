@@ -96,15 +96,24 @@ public class ResourcePackGenerator {
                         try {
                             int frames = com.customblocks.ImageProcessor.getVerticalFrames(faceBytes);
                             if (frames > 1) {
-                                // Royal Standard: Object format {"index":i,"time":t} — raw indices cause stacked images
-                                StringBuilder sb = new StringBuilder("{\"animation\":{\"interpolate\":true,\"frames\":[");
-                                for (int fi = 0; fi < frames; fi++) {
-                                    if (fi > 0) sb.append(",");
-                                    sb.append("{\"index\":").append(fi).append(",\"time\":5}");
+                                // Prefer the REAL per-frame timing from processAnimation
+                                // (stored in data.animMeta). Only synthesize a uniform
+                                // fallback when no animMeta is present (e.g. legacy data).
+                                String mcmetaJson;
+                                if (data.animMeta != null && !data.animMeta.isEmpty()
+                                        && data.animMeta.contains("\"frames\"")) {
+                                    mcmetaJson = data.animMeta;
+                                } else {
+                                    StringBuilder sb = new StringBuilder("{\"animation\":{\"interpolate\":true,\"frames\":[");
+                                    for (int fi = 0; fi < frames; fi++) {
+                                        if (fi > 0) sb.append(",");
+                                        sb.append("{\"index\":").append(fi).append(",\"time\":5}");
+                                    }
+                                    sb.append("]}}");
+                                    mcmetaJson = sb.toString();
                                 }
-                                sb.append("]}}");
                                 try (java.io.FileWriter fw2 = new java.io.FileWriter(faceMcmeta, java.nio.charset.StandardCharsets.UTF_8)) {
-                                    fw2.write(sb.toString());
+                                    fw2.write(mcmetaJson);
                                 }
                             } else {
                                 // Not animated — clean up stale mcmeta
