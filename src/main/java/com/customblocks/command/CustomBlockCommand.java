@@ -631,14 +631,15 @@ public class CustomBlockCommand {
             java.nio.file.Files.createDirectories(exportDir);
             java.nio.file.Files.writeString(exportDir.resolve(hash + ".json"), jsonStr, java.nio.charset.StandardCharsets.UTF_8);
 
-            String code = "CB3!" + hash;
-            ChatHelper.success(src, "Export code for '§f" + d.customId + "§a':");
-            src.sendMessage(Text.literal("§7Import with: §b/cb importblock " + code));
-            net.minecraft.text.MutableText msg = Text.literal("§b§n" + code)
+            String code = "CB~" + hash;
+            // Single branded, clickable message — no duplicate print.
+            net.minecraft.text.MutableText clickable = Text.literal("§b§n" + code)
                 .styled(s -> s
                     .withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.COPY_TO_CLIPBOARD, code))
-                    .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, Text.literal("§eClick to copy code"))));
-            src.sendMessage(msg);
+                    .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, Text.literal("§eClick to copy"))));
+            net.minecraft.text.MutableText line = Text.literal("§0§l[§b§lCB§0§l] §a[Share] §f'§b" + d.customId + "§f' ready! ")
+                .append(clickable);
+            src.sendMessage(line);
             return 1;
         } catch (Exception e) {
             ChatHelper.error(src, "Export failed: " + e.getMessage());
@@ -647,14 +648,17 @@ public class CustomBlockCommand {
     }
 
     private static int cmdImportBlock(ServerCommandSource src, String code) {
-        if (!code.startsWith("CB!") && !code.startsWith("CB2!") && !code.startsWith("CB3!")) {
-            ChatHelper.error(src, "Invalid code format. Must start with CB!, CB2! or CB3!");
+        if (!code.startsWith("CB!") && !code.startsWith("CB2!")
+                && !code.startsWith("CB3!") && !code.startsWith("CB~")) {
+            ChatHelper.error(src, "Invalid code format. Must start with CB~, CB3!, CB2!, or CB!");
             return 0;
         }
         try {
             String json;
-            if (code.startsWith("CB3!")) {
-                String hash = code.substring(4).trim();
+            if (code.startsWith("CB~") || code.startsWith("CB3!")) {
+                // CB~ and CB3! use the same server-side hash→file storage format.
+                // Both prefixes are 3 or 4 chars long; handle either.
+                String hash = (code.startsWith("CB~") ? code.substring(3) : code.substring(4)).trim();
                 java.nio.file.Path exportFile = java.nio.file.Path.of("config/customblocks/exports", hash + ".json");
                 if (!java.nio.file.Files.exists(exportFile)) {
                     ChatHelper.error(src, "Export file not found for code '" + code + "'. Was it exported on this server?");
@@ -1030,23 +1034,32 @@ public class CustomBlockCommand {
         MinecraftServer server = src.getServer();
         thread(() -> {
             try {
-                byte[] raw = ImageProcessor.download(url);
-                byte[] bytes = ImageProcessor.toPng(raw);
-                bytes = ImageProcessor.padToSquare(bytes);
-                bytes = ImageProcessor.replaceBackground(bytes);
-                bytes = ImageProcessor.resizeTo(bytes, size);
-                final byte[] fb = bytes;
+                // Route through the unified animation pipeline so GIF face textures
+                // receive proper disposal handling + animMeta. Fixes server crash
+                // when setting a GIF as a face texture.
+                final ImageProcessor.ProcessResult result = ImageProcessor.downloadAndProcess(url, size);
+                if (result == null || result.bytes() == null || result.bytes().length == 0) {
+                    server.execute(() -> src.sendError(Text.literal("§c[CustomBlocks] Downloaded image was empty.")));
+                    return;
+                }
                 server.execute(() -> {
                     SlotData d = SlotManager.getById(id);
-        UndoManager.pushUndoMutation(id, d, "setface " + face, getPlayerUuid(src));
                     if (d == null) { src.sendError(Text.literal("§c[CustomBlocks] '" + id + "' was deleted.")); return; }
-                    SlotManager.setFaceTexture(id, face, fb);
+                    UndoManager.pushUndoMutation(id, d, "setface " + face, getPlayerUuid(src));
+                    SlotManager.setFaceTexture(id, face, result.bytes());
+                    // Propagate animation metadata if the face is an animated image.
+                    // Without this the GIF frames render stacked (no .mcmeta on client).
+                    if (result.isAnimated() && result.mcmeta() != null) {
+                        SlotManager.setAnimMeta(id, result.mcmeta());
+                    }
                     SlotManager.saveAll();
                     // Broadcast setface — clients apply it to ONLY this face
                     NetworkManager.broadcastUpdate(server,
-                        new SlotUpdatePayload("setface", d.index, id, null, fb,
-                                d.lightLevel, d.hardness, d.soundType, face));
-                    src.sendMessage(Text.literal("§a[CustomBlocks] " + face.toUpperCase() + " face set on '" + id + "'."));
+                        new SlotUpdatePayload("setface", d.index, id, null, result.bytes(),
+                                d.lightLevel, d.hardness, d.soundType, face,
+                                null, result.isAnimated() ? result.mcmeta() : null));
+                    String suffix = result.isAnimated() ? " §8(animated, " + result.frameCount() + " frames)" : "";
+                    src.sendMessage(Text.literal("§a[CustomBlocks] " + face.toUpperCase() + " face set on '" + id + "'." + suffix));
                 });
             } catch (Exception e) {
                 server.execute(() -> src.sendError(Text.literal("§c[CustomBlocks] Failed: " + e.getMessage())));

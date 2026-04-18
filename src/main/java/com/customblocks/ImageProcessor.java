@@ -420,107 +420,246 @@ public final class ImageProcessor {
     }
     // ── Animated Image Processing ────────────────────────────────────────────
 
+    // ── Animation limits (OOM + stability safeguards) ─────────────────────────
+    /** Max frames to prevent OOM on pathological GIFs. */
+    public static final int MAX_FRAMES = 100;
+    /** Max per-frame dimension we will decode before rescaling. */
+    private static final int MAX_FRAME_DIM = 512;
+    /** Processing timeout per GIF (prevents hang on malformed files). */
+    private static final long ANIM_TIMEOUT_MS = 30_000L;
+    /** Minimum free heap to allocate a frame buffer. */
+    private static final long MIN_FREE_HEAP_BYTES = 32L * 1024 * 1024; // 32 MB
+
+    /** Parsed per-frame metadata from the animation container. */
+    private record FrameMeta(int delayCsecs, int disposal, int offsetX, int offsetY, boolean transparent) {}
+
     /**
      * Universal animation processor. Detects format (GIF, WebP, APNG), extracts frames,
-     * applies disposal methods, and builds a vertical PNG strip with .mcmeta.
+     * applies disposal methods (none / restoreToBackground / restoreToPrevious), respects
+     * frame offsets, and builds a vertical PNG strip with proper {@code .mcmeta}.
+     *
+     * <p>Safety:
+     * <ul>
+     *   <li>Frames capped at {@link #MAX_FRAMES}.</li>
+     *   <li>Source frame dims clamped to {@link #MAX_FRAME_DIM}.</li>
+     *   <li>Free-heap pre-check per frame to avoid OOM.</li>
+     *   <li>Hard {@link #ANIM_TIMEOUT_MS} timeout; returns null cleanly if exceeded.</li>
+     * </ul>
      */
     public static ProcessResult processAnimation(byte[] raw, int frameSize) {
         frameSize = Math.max(16, Math.min(MAX_SIZE, frameSize));
+        long startTime = System.currentTimeMillis();
+        ImageReader reader = null;
         try (ImageInputStream iis = ImageIO.createImageInputStream(new ByteArrayInputStream(raw))) {
+            if (iis == null) return null;
             Iterator<ImageReader> readers = ImageIO.getImageReaders(iis);
             if (!readers.hasNext()) return null;
 
-            ImageReader reader = readers.next();
-            reader.setInput(iis);
+            reader = readers.next();
+            reader.setInput(iis, true, false); // seekForwardOnly=true, ignoreMetadata=false
 
-            int numFrames = 0;
+            int numFrames;
             try {
                 numFrames = reader.getNumImages(true);
             } catch (IOException e) {
-                reader.dispose();
                 return null;
             }
+            if (numFrames <= 1) return null;
 
-            if (numFrames <= 1) {
-                reader.dispose();
-                return null;
+            if (numFrames > MAX_FRAMES) {
+                CustomBlocksMod.LOGGER.warn("[CustomBlocks] GIF has {} frames, capped at {}", numFrames, MAX_FRAMES);
+                numFrames = MAX_FRAMES;
             }
 
-            // Cap frames to 64 to prevent server OOM
-            numFrames = Math.min(numFrames, 64);
+            // Peek first frame dims for canvas allocation
+            BufferedImage firstFrame;
+            try {
+                firstFrame = reader.read(0);
+            } catch (Exception e) {
+                CustomBlocksMod.LOGGER.warn("[CustomBlocks] Failed to read first frame: {}", e.getMessage());
+                return null;
+            }
+            if (firstFrame == null) return null;
 
-            BufferedImage firstFrame = reader.read(0);
-            int fw = firstFrame.getWidth();
-            int fh = firstFrame.getHeight();
+            int canvasW = Math.min(firstFrame.getWidth(), MAX_FRAME_DIM);
+            int canvasH = Math.min(firstFrame.getHeight(), MAX_FRAME_DIM);
+            if (canvasW <= 0 || canvasH <= 0) return null;
 
-            java.util.List<BufferedImage> frames = new java.util.ArrayList<>();
-            java.util.List<Integer> ticks = new java.util.ArrayList<>();
-            BufferedImage composite = new BufferedImage(fw, fh, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D gComp = composite.createGraphics();
+            // Re-open reader to start from frame 0 (seekForwardOnly used first frame)
+            reader.dispose();
+            reader = null;
+            try (ImageInputStream iis2 = ImageIO.createImageInputStream(new ByteArrayInputStream(raw))) {
+                Iterator<ImageReader> readers2 = ImageIO.getImageReaders(iis2);
+                if (!readers2.hasNext()) return null;
+                reader = readers2.next();
+                reader.setInput(iis2, false, false);
 
-            for (int i = 0; i < numFrames; i++) {
-                BufferedImage frame = reader.read(i);
-                int delayCsecs = 10; // default 100ms
-                try {
-                    IIOMetadata meta = reader.getImageMetadata(i);
-                    // Seek delay in common metadata formats (GIF/WebP)
-                    String[] names = meta.getMetadataFormatNames();
-                    for (String name : names) {
-                        org.w3c.dom.Node root = meta.getAsTree(name);
-                        // Search for delayTime in nodes (simplified heuristic)
-                        org.w3c.dom.NodeList nodes = root.getChildNodes();
-                        for (int k = 0; k < nodes.getLength(); k++) {
-                            if (nodes.item(k).getNodeName().contains("Control")) {
-                                org.w3c.dom.NamedNodeMap attrs = nodes.item(k).getAttributes();
-                                org.w3c.dom.Node delayNode = attrs.getNamedItem("delayTime");
-                                if (delayNode != null) delayCsecs = Integer.parseInt(delayNode.getNodeValue());
+                // Composite canvas - represents the "on-screen" state after each frame
+                BufferedImage composite = new BufferedImage(canvasW, canvasH, BufferedImage.TYPE_INT_ARGB);
+                BufferedImage previous = null; // for disposal=3 (restoreToPrevious)
+                Graphics2D gComp = composite.createGraphics();
+                gComp.setComposite(AlphaComposite.Src);
+                gComp.setColor(new Color(0, 0, 0, 0));
+                gComp.fillRect(0, 0, canvasW, canvasH);
+                gComp.setComposite(AlphaComposite.SrcOver);
+
+                java.util.List<BufferedImage> frames = new java.util.ArrayList<>(numFrames);
+                java.util.List<Integer> ticks = new java.util.ArrayList<>(numFrames);
+
+                for (int i = 0; i < numFrames; i++) {
+                    // Timeout check
+                    if (System.currentTimeMillis() - startTime > ANIM_TIMEOUT_MS) {
+                        CustomBlocksMod.LOGGER.warn("[CustomBlocks] GIF processing timeout after {}ms (frame {})",
+                                ANIM_TIMEOUT_MS, i);
+                        break;
+                    }
+
+                    // Memory pre-check - ensure we have headroom before allocating a frame copy
+                    Runtime rt = Runtime.getRuntime();
+                    long free = rt.freeMemory() + (rt.maxMemory() - rt.totalMemory());
+                    if (free < MIN_FREE_HEAP_BYTES) {
+                        CustomBlocksMod.LOGGER.warn("[CustomBlocks] Low heap ({} MB free) - stopping GIF at frame {}",
+                                free / (1024 * 1024), i);
+                        break;
+                    }
+
+                    BufferedImage frame;
+                    FrameMeta fm;
+                    try {
+                        frame = reader.read(i);
+                        fm = parseFrameMeta(reader.getImageMetadata(i));
+                    } catch (Exception e) {
+                        CustomBlocksMod.LOGGER.warn("[CustomBlocks] Failed to read frame {}: {}", i, e.getMessage());
+                        break;
+                    }
+                    if (frame == null) break;
+
+                    // Save pre-state for disposal=3 (restoreToPrevious)
+                    if (fm.disposal() == 3) {
+                        previous = copyArgb(composite);
+                    }
+
+                    // Draw current frame at its offset (respects partial-frame GIFs)
+                    gComp.setComposite(AlphaComposite.SrcOver);
+                    int dx = Math.max(0, Math.min(fm.offsetX(), canvasW - 1));
+                    int dy = Math.max(0, Math.min(fm.offsetY(), canvasH - 1));
+                    gComp.drawImage(frame, dx, dy, null);
+
+                    // Convert csecs to game ticks (1 tick = 50ms = 5 csecs). Minimum 1 tick.
+                    // GIFs with delay=0 are typically "as fast as possible" - clamp to 1 tick.
+                    int delay = fm.delayCsecs() <= 0 ? 10 : fm.delayCsecs();
+                    ticks.add(Math.max(1, delay / 5));
+                    frames.add(copyArgb(composite));
+
+                    // Apply disposal method for NEXT frame (per GIF89a spec)
+                    switch (fm.disposal()) {
+                        case 2 -> { // restoreToBackground - clear this frame's region
+                            gComp.setComposite(AlphaComposite.Clear);
+                            int rw = Math.min(frame.getWidth(), canvasW - dx);
+                            int rh = Math.min(frame.getHeight(), canvasH - dy);
+                            gComp.fillRect(dx, dy, rw, rh);
+                            gComp.setComposite(AlphaComposite.SrcOver);
+                        }
+                        case 3 -> { // restoreToPrevious - revert to pre-frame state
+                            if (previous != null) {
+                                gComp.setComposite(AlphaComposite.Src);
+                                gComp.drawImage(previous, 0, 0, null);
+                                gComp.setComposite(AlphaComposite.SrcOver);
                             }
                         }
+                        default -> { /* 0 or 1: leave current composite as-is */ }
                     }
-                } catch (Exception ignored) {}
+                }
+                gComp.dispose();
 
-                // Convert csecs to Game Ticks (1 tick = 50ms = 5 csecs)
-                ticks.add(Math.max(1, delayCsecs / 5));
+                if (frames.isEmpty()) return null;
 
-                // Minimal disposal handling: overdraw
-                gComp.setComposite(AlphaComposite.SrcOver);
-                gComp.drawImage(frame, 0, 0, null);
-                frames.add(copyArgb(composite));
+                // Build vertical strip at target frame size
+                BufferedImage strip = new BufferedImage(frameSize, frameSize * frames.size(), BufferedImage.TYPE_INT_ARGB);
+                Graphics2D gStrip = strip.createGraphics();
+                gStrip.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+                gStrip.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+                gStrip.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                gStrip.setComposite(AlphaComposite.Clear);
+                gStrip.fillRect(0, 0, frameSize, frameSize * frames.size());
+                gStrip.setComposite(AlphaComposite.SrcOver);
+                for (int i = 0; i < frames.size(); i++) {
+                    gStrip.drawImage(frames.get(i), 0, i * frameSize, frameSize, frameSize, null);
+                }
+                gStrip.dispose();
+
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                ImageIO.write(strip, "PNG", baos);
+
+                // Minecraft .mcmeta with interpolate + explicit {index,time} entries
+                StringBuilder mcmeta = new StringBuilder("{\"animation\":{\"interpolate\":true,\"frames\":[");
+                for (int i = 0; i < frames.size(); i++) {
+                    if (i > 0) mcmeta.append(",");
+                    mcmeta.append("{\"index\":").append(i).append(",\"time\":").append(ticks.get(i)).append("}");
+                }
+                mcmeta.append("]}}");
+
+                return new ProcessResult(baos.toByteArray(), mcmeta.toString(), frames.size());
             }
-            gComp.dispose();
-            reader.dispose();
-
-            if (frames.isEmpty()) return null;
-
-            // Build deterministic vertical strip
-            BufferedImage strip = new BufferedImage(frameSize, frameSize * frames.size(), BufferedImage.TYPE_INT_ARGB);
-            Graphics2D gStrip = strip.createGraphics();
-            gStrip.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-            gStrip.setComposite(java.awt.AlphaComposite.Clear);
-            gStrip.fillRect(0, 0, frameSize, frameSize * frames.size());
-            gStrip.setComposite(java.awt.AlphaComposite.SrcOver);
-
-            for (int i = 0; i < frames.size(); i++) {
-                gStrip.drawImage(frames.get(i), 0, i * frameSize, frameSize, frameSize, null);
-            }
-            gStrip.dispose();
-
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            ImageIO.write(strip, "PNG", baos);
-
-            // Generate mcmetas with "interpolate: true" for Fluid Motion (Royalty Standard)
-            StringBuilder mcmeta = new StringBuilder("{\"animation\":{\"interpolate\":true,\"frames\":[");
-            for (int i = 0; i < frames.size(); i++) {
-                if (i > 0) mcmeta.append(",");
-                mcmeta.append("{\"index\":").append(i).append(",\"time\":").append(ticks.get(i)).append("}");
-            }
-            mcmeta.append("]}}");
-
-            return new ProcessResult(baos.toByteArray(), mcmeta.toString(), frames.size());
+        } catch (OutOfMemoryError oom) {
+            CustomBlocksMod.LOGGER.error("[CustomBlocks] OOM during GIF processing - try a smaller GIF");
+            return null;
         } catch (Exception e) {
             CustomBlocksMod.LOGGER.error("[CustomBlocks] Animation processing failed", e);
             return null;
+        } finally {
+            if (reader != null) {
+                try { reader.dispose(); } catch (Exception ignored) {}
+            }
         }
+    }
+
+    /**
+     * Parse per-frame metadata (delay, disposal, offset) from standard javax_imageio_gif_image_1.0 format.
+     * Falls back to defaults if attributes are missing or malformed.
+     */
+    private static FrameMeta parseFrameMeta(IIOMetadata meta) {
+        int delay = 10, disposal = 0, offX = 0, offY = 0;
+        boolean transparent = false;
+        if (meta == null) return new FrameMeta(delay, disposal, offX, offY, transparent);
+        try {
+            String[] formats = meta.getMetadataFormatNames();
+            for (String fmt : formats) {
+                org.w3c.dom.Node root = meta.getAsTree(fmt);
+                if (root == null) continue;
+                // Walk the tree looking for GraphicControlExtension and ImageDescriptor
+                java.util.Deque<org.w3c.dom.Node> stack = new java.util.ArrayDeque<>();
+                stack.push(root);
+                while (!stack.isEmpty()) {
+                    org.w3c.dom.Node n = stack.pop();
+                    String name = n.getNodeName();
+                    org.w3c.dom.NamedNodeMap attrs = n.getAttributes();
+                    if (attrs != null) {
+                        if (name.equals("GraphicControlExtension")) {
+                            org.w3c.dom.Node d  = attrs.getNamedItem("delayTime");
+                            org.w3c.dom.Node dm = attrs.getNamedItem("disposalMethod");
+                            org.w3c.dom.Node tc = attrs.getNamedItem("transparentColorFlag");
+                            if (d != null)  try { delay = Integer.parseInt(d.getNodeValue()); } catch (NumberFormatException ignored) {}
+                            if (dm != null) disposal = switch (dm.getNodeValue()) {
+                                case "doNotDispose" -> 1;
+                                case "restoreToBackgroundColor" -> 2;
+                                case "restoreToPrevious" -> 3;
+                                default -> 0;
+                            };
+                            if (tc != null) transparent = "TRUE".equalsIgnoreCase(tc.getNodeValue());
+                        } else if (name.equals("ImageDescriptor")) {
+                            org.w3c.dom.Node x = attrs.getNamedItem("imageLeftPosition");
+                            org.w3c.dom.Node y = attrs.getNamedItem("imageTopPosition");
+                            if (x != null) try { offX = Integer.parseInt(x.getNodeValue()); } catch (NumberFormatException ignored) {}
+                            if (y != null) try { offY = Integer.parseInt(y.getNodeValue()); } catch (NumberFormatException ignored) {}
+                        }
+                    }
+                    org.w3c.dom.NodeList kids = n.getChildNodes();
+                    for (int i = 0; i < kids.getLength(); i++) stack.push(kids.item(i));
+                }
+            }
+        } catch (Exception ignored) {}
+        return new FrameMeta(delay, disposal, offX, offY, transparent);
     }
 
     /**

@@ -356,7 +356,22 @@ public final class SlotManager {
 
     public static void setCollision(String id, boolean collision)  { update(id, d -> d.withNoCollision(!collision)); }
 
-    public static void setFaceTexture(String id, String face, byte[] tex) { update(id, d -> d.withFaceTexture(face, tex)); }
+    public static void setFaceTexture(String id, String face, byte[] tex) {
+        // Validation: reject null/empty inputs to prevent downstream crashes
+        if (id == null || id.isEmpty()) {
+            LOGGER.warn("[CustomBlocks] setFaceTexture rejected: null/empty id");
+            return;
+        }
+        if (face == null || face.isEmpty()) {
+            LOGGER.warn("[CustomBlocks] setFaceTexture rejected: null/empty face for id '{}'", id);
+            return;
+        }
+        if (tex == null || tex.length == 0) {
+            LOGGER.warn("[CustomBlocks] setFaceTexture rejected: null/empty texture for id '{}' face '{}'", id, face);
+            return;
+        }
+        update(id, d -> d.withFaceTexture(face, tex));
+    }
 
     public static void clearFaceTexture(String id, String face)    { update(id, d -> d.withoutFaceTexture(face)); }
 

@@ -166,6 +166,11 @@ public final class SlotData {
     }
 
     public SlotData withFaceTexture(String face, byte[] tex) {
+        // Null safety: if face name or texture is null/empty, return unchanged
+        // Prevents NullPointerException crashes on tex.clone() when GIF processing fails
+        if (face == null || face.isEmpty() || tex == null || tex.length == 0) {
+            return this;
+        }
         Map<String, byte[]> newFaces = new ConcurrentHashMap<>(faceTextures);
         newFaces.put(face, tex.clone());
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,

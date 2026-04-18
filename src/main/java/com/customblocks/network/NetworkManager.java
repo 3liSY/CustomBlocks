@@ -23,8 +23,35 @@ public final class NetworkManager {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("CustomBlocks");
 
+    // ── Packet size limits ───────────────────────────────────────────────────
+    /** Warning threshold - textures larger than this will log a warning. */
+    private static final int PACKET_WARN_SIZE = 500 * 1024; // 500KB
+    /** Hard limit - textures larger than this are rejected to prevent client crashes. */
+    private static final int PACKET_MAX_SIZE = 8 * 1024 * 1024; // 8MB (below 10MB codec limit)
+
     // ── Per-player pending texture queues ────────────────────────────────────
     private static final ConcurrentHashMap<UUID, TextureQueue> PLAYER_QUEUES = new ConcurrentHashMap<>();
+
+    /**
+     * Validate payload size before queueing. Returns true if payload is safe to send.
+     * Logs warnings for oversized textures and rejects payloads exceeding hard limit.
+     */
+    private static boolean validatePayloadSize(SlotUpdatePayload payload) {
+        if (payload == null) return false;
+        byte[] tex = payload.texture();
+        if (tex == null) return true;
+        int size = tex.length;
+        if (size > PACKET_MAX_SIZE) {
+            LOGGER.error("[CustomBlocks] Rejected oversized payload for slot {} (action={}, face={}): {} bytes exceeds {} byte limit",
+                    payload.slotIndex(), payload.action(), payload.face(), size, PACKET_MAX_SIZE);
+            return false;
+        }
+        if (size > PACKET_WARN_SIZE) {
+            LOGGER.warn("[CustomBlocks] Large texture payload for slot {} (action={}, face={}): {} bytes - consider smaller textures",
+                    payload.slotIndex(), payload.action(), payload.face(), size);
+        }
+        return true;
+    }
 
     // ── Broadcast API ────────────────────────────────────────────────────────
 
@@ -186,6 +213,7 @@ public final class NetworkManager {
     // ── Internal ─────────────────────────────────────────────────────────────
 
     private static void enqueueForPlayer(ServerPlayerEntity player, SlotUpdatePayload payload) {
+        if (!validatePayloadSize(payload)) return;
         getOrCreateQueue(player).enqueue(payload);
     }
 

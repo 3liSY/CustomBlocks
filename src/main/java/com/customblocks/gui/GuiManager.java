@@ -563,8 +563,12 @@ public class GuiManager {
                 send(player, "§e[CB] Downloading '" + name + "'…");
                 MinecraftServer srv = player.getServer();
                 thread(player, () -> { try {
-                    byte[] raw = ImageProcessor.download(text);
-                    ImageProcessor.ProcessResult result = ImageProcessor.isAnimatedImage(raw) ? ImageProcessor.processAnimation(raw, CustomBlocksConfig.defaultTextureSize) : new ImageProcessor.ProcessResult(ImageProcessor.resizeTo(ImageProcessor.replaceBackground(ImageProcessor.padToSquare(ImageProcessor.toPng(raw))), CustomBlocksConfig.defaultTextureSize), null, 1);
+                    // Unified pipeline: handles GIFs (disposal + animMeta), PNG, WebP.
+                    ImageProcessor.ProcessResult result = ImageProcessor.downloadAndProcess(text, CustomBlocksConfig.defaultTextureSize);
+                    if (result == null || result.bytes() == null || result.bytes().length == 0) {
+                        srv.execute(() -> { playError(player); send(player, "§c[GUI] Downloaded image was empty."); openMain(player, rp); });
+                        return;
+                    }
                     final byte[] fb = result.bytes(); final String fa = result.mcmeta();
                     srv.execute(() -> {
                         if (SlotManager.hasId(id)) { playError(player); send(player, "§c'" + id + "' already exists."); openMain(player, rp); return; }
@@ -609,15 +613,26 @@ public class GuiManager {
                 MinecraftServer srv = player.getServer();
                 thread(player, () -> { try {
                     ImageProcessor.ProcessResult result = ImageProcessor.downloadAndProcess(text, CustomBlocksConfig.defaultTextureSize);
+                    if (result == null || result.bytes() == null || result.bytes().length == 0) {
+                        srv.execute(() -> { playError(player); send(player, "§c[GUI] Downloaded face image was empty."); openFaceEditor(player, blockId, rp); });
+                        return;
+                    }
                     srv.execute(() -> {
                         SlotData d = SlotManager.getById(blockId);
                         if (d == null) { openMain(player, rp); return; }
                         UndoManager.pushUndoMutation(blockId, d, "setface " + face, player.getUuid());
                         SlotManager.setFaceTexture(blockId, face, result.bytes());
+                        // Propagate animMeta for animated face textures so frames don't stack.
+                        if (result.isAnimated() && result.mcmeta() != null) {
+                            SlotManager.setAnimMeta(blockId, result.mcmeta());
+                        }
                         SlotManager.saveAll();
                         playSuccess(player);
-                        NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("setface", d.index, blockId, null, result.bytes(), d.lightLevel, d.hardness, d.soundType, face));
-                        send(player, "§a[CB] §f" + face.toUpperCase() + " §aface set on '§f" + blockId + "§a'.");
+                        NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("setface", d.index, blockId, null, result.bytes(),
+                                d.lightLevel, d.hardness, d.soundType, face, null,
+                                result.isAnimated() ? result.mcmeta() : null));
+                        String suffix = result.isAnimated() ? " §8(animated)" : "";
+                        send(player, "§a[CB] §f" + face.toUpperCase() + " §aface set on '§f" + blockId + "§a'." + suffix);
                         openFaceEditor(player, blockId, rp);
                     });
                 } catch (Exception e) { srv.execute(() -> { playError(player); send(player, "§c[GUI] Failed: " + e.getMessage()); openFaceEditor(player, blockId, rp); }); } });
