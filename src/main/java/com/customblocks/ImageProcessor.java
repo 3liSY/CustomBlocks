@@ -69,14 +69,16 @@ public final class ImageProcessor {
     /** Full pipeline with custom target size: download → convert → pad → remove bg → resize. */
     public static ProcessResult downloadAndProcess(String url, int targetSize) throws IOException, InterruptedException {
         byte[] raw = download(url);
-        if (raw == null || raw.length == 0) throw new IOException("Downloaded empty data");
+        if (raw == null || raw.length == 0)
+            throw new IOException("§eThe link worked, but there was nothing there! §7The image might have been deleted. Try uploading a new one.");
 
         try {
             // Detect animated format (GIF, APNG, animated WebP)
             if (isAnimatedImage(raw)) {
                 ProcessResult anim = processAnimation(raw, targetSize);
                 if (anim != null && anim.isAnimated()) {
-                    if (isBrokenTexture(anim.bytes)) throw new IOException("Broken texture detected in animation.");
+                    if (isBrokenTexture(anim.bytes))
+                        throw new IOException("§eGot the GIF, but something went wrong putting the frames together. §7Try a simpler GIF, or convert it to PNG first.");
                     return anim;
                 }
             }
@@ -85,11 +87,18 @@ public final class ImageProcessor {
             png = padToSquare(png);
             png = replaceBackground(png);
             byte[] processed = resizeTo(png, targetSize);
-            if (isBrokenTexture(processed)) throw new IOException("Broken texture detected.");
+            if (isBrokenTexture(processed))
+                throw new IOException("§eGot the image, but it came out broken after processing. §7Try saving it as a normal PNG and paste the new link.");
             return new ProcessResult(processed, null, 1);
+        } catch (IOException e) {
+            // Re-throw our own friendly messages as-is
+            throw e;
         } catch (Exception e) {
             CustomBlocksMod.LOGGER.error("[CustomBlocks] Error processing image from " + url, e);
-            throw new IOException("Processing failed: " + e.getMessage());
+            String msg = e.getMessage();
+            if (msg != null && msg.startsWith("§"))
+                throw new IOException(msg); // Already friendly
+            throw new IOException("§eSomething went wrong while processing the image. §7" + friendlyProcessingError(e));
         }
     }
 
@@ -129,17 +138,62 @@ public final class ImageProcessor {
         if (url.contains("i.imgur.com") && url.toLowerCase().endsWith(".webp"))
             fetchUrl = url.substring(0, url.length() - 5) + ".png";
 
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(fetchUrl))
-                .header("User-Agent", "CustomBlocksMod/2.0")
-                .timeout(Duration.ofSeconds(20))
-                .build();
-        HttpResponse<byte[]> res = HTTP.send(req, HttpResponse.BodyHandlers.ofByteArray());
-        if (res.statusCode() < 200 || res.statusCode() >= 300)
-            throw new IOException("HTTP " + res.statusCode() + " from " + url);
+        // Extract domain for friendly messages
+        String domain;
+        try {
+            domain = URI.create(url).getHost();
+            if (domain == null) domain = url;
+        } catch (Exception e) {
+            domain = url;
+        }
+
+        HttpRequest req;
+        try {
+            req = HttpRequest.newBuilder()
+                    .uri(URI.create(fetchUrl))
+                    .header("User-Agent", "CustomBlocksMod/2.0")
+                    .timeout(Duration.ofSeconds(CustomBlocksConfig.downloadTimeoutSeconds))
+                    .build();
+        } catch (IllegalArgumentException e) {
+            throw new IOException("§eThat doesn't look like a valid link! §7Make sure you copied the full URL — it should start with §fhttp:// §7or §fhttps://");
+        }
+
+        HttpResponse<byte[]> res;
+        try {
+            res = HTTP.send(req, HttpResponse.BodyHandlers.ofByteArray());
+        } catch (java.net.http.HttpConnectTimeoutException e) {
+            throw new IOException("§eCouldn't reach §f" + domain + "§e! §7The website might be down, or the server doesn't have internet. Try again later.");
+        } catch (java.net.http.HttpTimeoutException e) {
+            throw new IOException("§eThe download took too long! §f" + domain + " §7is being slow. Try again, or use a different image host like §fImgur§7.");
+        } catch (java.net.ConnectException e) {
+            throw new IOException("§eCan't reach §f" + domain + "§e at all! §7Either the website is down, or your server has no internet.");
+        } catch (java.nio.channels.UnresolvedAddressException e) {
+            throw new IOException("§eNever heard of §f" + domain + "§e! §7Check for typos in the URL — did you spell the website name correctly?");
+        } catch (Exception e) {
+            throw new IOException("§eSomething went wrong connecting to §f" + domain + "§e. §7Try pasting the link again, or use a different image host.");
+        }
+
+        int code = res.statusCode();
+        if (code < 200 || code >= 300) {
+            String hint = switch (code) {
+                case 400 -> "§eBad link! §7The URL has something weird in it. Try right-clicking the image → §fCopy image address §7and paste that instead.";
+                case 401, 403 -> "§eNo permission! §f" + domain + " §7won't let us download this image. It might be private. Try uploading it to §fImgur §7or §fDiscord §7instead.";
+                case 404 -> "§eImage not found! §7It was deleted or the link is broken. §fCheck if the link still works in your browser.";
+                case 410 -> "§eThis image was permanently deleted from §f" + domain + "§e. §7You'll need to upload a new one.";
+                case 429 -> "§eWhoah, slow down! §f" + domain + " §7says we're sending too many requests. Wait about a minute and try again.";
+                case 500 -> "§f" + domain + " §eis having problems on their end. §7Nothing we can do — try again in a few minutes.";
+                case 502, 503 -> "§f" + domain + " §eis temporarily down. §7Try again in a few minutes, or use a different image host.";
+                case 504 -> "§f" + domain + " §eis being really slow right now. §7Try again later.";
+                case 301, 302, 307, 308 -> "§eThe image moved to a new link and we couldn't follow it. §7Try opening it in your browser, then copy the final URL from the address bar.";
+                default -> "§eSomething unexpected happened with §f" + domain + " §7(error " + code + "). Try a different image or host.";
+            };
+            throw new IOException(hint);
+        }
         byte[] body = res.body();
-        if (body == null || body.length == 0) throw new IOException("Empty response from " + url);
-        if (body.length > 20_971_520) throw new IOException("Image too large (max 20MB): " + body.length + " bytes");
+        if (body == null || body.length == 0)
+            throw new IOException("§eGot nothing back from §f" + domain + "§e! §7The image was probably deleted. Try a different link.");
+        if (body.length > 20_971_520)
+            throw new IOException("§eToo big! §7This image is §f" + (body.length / 1_048_576) + " MB§7 but the max is §f20 MB§7. Shrink it first or use a smaller image.");
         return body;
     }
 
@@ -152,9 +206,9 @@ public final class ImageProcessor {
         if (img == null) {
             String detected = detectFormat(raw);
             throw new IOException(
-                "Could not read image" + (detected != null ? " (detected: " + detected + ")" : "") +
-                ". Supported formats: PNG, JPG, GIF, BMP, WebP. " +
-                "Try re-uploading as PNG or JPG if the issue persists.");
+                "§eCan't read this image" + (detected != null ? " §7(looks like a §f" + detected + "§7 file)" : "") +
+                "§e! We support §fPNG§7, §fJPG§7, §fGIF§7, §fBMP§7, and §fWebP§7. " +
+                "Try saving it as a §fPNG §7in any image editor, then re-upload.");
         }
         // Use AlphaComposite.Src so transparent/semi-transparent pixels from
         // WebP/PNG are preserved exactly — replaceBackground handles the flatten.
@@ -344,6 +398,26 @@ public final class ImageProcessor {
         return 1;
     }
 
+    /**
+     * Translates a processing exception into a human-readable explanation.
+     */
+    private static String friendlyProcessingError(Exception e) {
+        String name = e.getClass().getSimpleName();
+        String msg = e.getMessage();
+        if (name.contains("OutOfMemory"))
+            return "This image is way too big for the server to handle. Try a smaller one!";
+        if (e instanceof javax.imageio.IIOException || name.contains("IIOException"))
+            return "The image file seems broken or corrupted. Try saving it as a §fPNG§7 and re-upload.";
+        if (name.contains("NullPointer"))
+            return "The image didn't fully download. Make sure the upload finished before copying the link.";
+        if (name.contains("ArrayIndexOutOfBounds") || name.contains("NegativeArraySize"))
+            return "This image has weird dimensions we can't handle. Try cropping it to a square first.";
+        if (name.contains("IllegalArgument"))
+            return "The image uses a color type we don't support. Save it as a normal §fPNG§7 and try again.";
+        if (msg != null && !msg.isBlank())
+            return msg;
+        return "Something unexpected happened. Try a different image!";
+    }
     // ── Animated Image Processing ────────────────────────────────────────────
 
     /**

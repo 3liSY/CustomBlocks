@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.security.MessageDigest;
+import net.minecraft.server.MinecraftServer;
 
 public class ResourcePackServer {
 
@@ -87,6 +88,12 @@ public class ResourcePackServer {
         }
     }
 
+    private static MinecraftServer serverInstance;
+
+    public static void setServer(MinecraftServer server) {
+        serverInstance = server;
+    }
+
     /** Rebuilds the in-memory ZIP using a consistent state snapshot. */
     public static void updatePackWithSnapshot(com.customblocks.core.SlotManager.Snapshot snapshot) {
         new Thread(() -> {
@@ -150,5 +157,39 @@ public class ResourcePackServer {
         String ip = getExternalIp();
         int port = activePort() > 0 ? activePort() : getPort();
         return "http://" + ip + ":" + port + "/pack.zip";
+    }
+
+    /**
+     * Safely prompts ALL online players to re-download the resource pack.
+     * Uses required=false so players get a prompt instead of being force-kicked.
+     * Delayed slightly to let the pack ZIP finish building.
+     */
+    public static void sendUpdateToAllPlayers() {
+        if (serverInstance == null || !isRunning() || activePort() <= 0) return;
+        
+        new Thread(() -> {
+            try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+            serverInstance.execute(() -> {
+                String hash = currentHash;
+                if (hash == null || hash.isEmpty()) return;
+                String url = getPackUrl(serverInstance);
+                java.util.UUID packUuid = java.util.UUID.nameUUIDFromBytes(
+                        hash.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                
+                for (net.minecraft.server.network.ServerPlayerEntity player : serverInstance.getPlayerManager().getPlayerList()) {
+                    try {
+                        net.minecraft.network.packet.s2c.common.ResourcePackSendS2CPacket packet =
+                                new net.minecraft.network.packet.s2c.common.ResourcePackSendS2CPacket(
+                                        packUuid, url, hash, false, // NOT required — won't kick
+                                        java.util.Optional.of(net.minecraft.text.Text.literal(
+                                                "§eCustomBlocks textures updated. Accept to refresh.")));
+                        player.networkHandler.sendPacket(packet);
+                    } catch (Exception e) {
+                        CustomBlocksMod.LOGGER.warn("[CustomBlocks] Failed to send RP update to {}", 
+                                player.getName().getString());
+                    }
+                }
+            });
+        }, "CustomBlocks-RPNotify").start();
     }
 }

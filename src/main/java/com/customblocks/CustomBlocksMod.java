@@ -456,7 +456,8 @@ public class CustomBlocksMod implements ModInitializer {
 
         UseEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
 
-            if (entity instanceof com.customblocks.assistant.AssistantEntity) {
+            if (entity instanceof net.fabricmc.fabric.api.entity.FakePlayer
+                    && com.customblocks.assistant.AssistantManager.isSpawned()) {
 
                 if (!world.isClient) GuiManager.openAssistantControl((ServerPlayerEntity)player);
 
@@ -468,7 +469,17 @@ public class CustomBlocksMod implements ModInitializer {
 
         });
 
-
+        // FakePlayer rendering: clients need the player list entry to render the skin
+        net.fabricmc.fabric.api.networking.v1.EntityTrackingEvents.START_TRACKING.register((trackedEntity, player) -> {
+            if (trackedEntity instanceof net.fabricmc.fabric.api.entity.FakePlayer fp
+                    && com.customblocks.assistant.AssistantManager.isSpawned()) {
+                net.minecraft.network.packet.s2c.play.PlayerListS2CPacket packet = 
+                    new net.minecraft.network.packet.s2c.play.PlayerListS2CPacket(
+                        java.util.EnumSet.of(net.minecraft.network.packet.s2c.play.PlayerListS2CPacket.Action.ADD_PLAYER), 
+                        java.util.List.of(fp));
+                player.networkHandler.sendPacket(packet);
+            }
+        });
 
         // ── Assistant Diamond Command (Go Here) ──────────────────────────────
 
@@ -500,6 +511,10 @@ public class CustomBlocksMod implements ModInitializer {
             SlotManager.flushSave();
             com.customblocks.assistant.AssistantManager.hide();
 
+        });
+
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+            ResourcePackServer.setServer(server);
         });
 
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STOPPED.register(server -> {

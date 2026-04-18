@@ -3,6 +3,7 @@ package com.customblocks.assistant;
 import com.customblocks.CustomBlocksConfig;
 import com.customblocks.CustomBlocksMod;
 import com.mojang.authlib.GameProfile;
+import net.fabricmc.fabric.api.entity.FakePlayer;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -14,10 +15,11 @@ import java.util.UUID;
 
 /**
  * Singleton manager for the Assistant (The Helper).
+ * Uses Fabric's FakePlayer API for proper player entity lifecycle.
  */
 public class AssistantManager {
 
-    private static AssistantEntity helperEntity;
+    private static FakePlayer helperEntity;
     private static boolean following = false;
     private static UUID followAnchor = null;
     private static BlockPos targetPos = null;
@@ -27,7 +29,7 @@ public class AssistantManager {
 
         // --- Hologram Update (Visual feedback) ---
         if (CustomBlocksConfig.helperHologram) {
-             String status = following ? "§aFollowing Architect" : (targetPos != null ? "§bHeading to Sector" : "§7Standing Guard");
+             String status = following ? "§aFollowing" : (targetPos != null ? "§bMoving" : "§7Idle");
              helperEntity.setCustomName(Text.literal("§b§l" + CustomBlocksConfig.helperName + "\n§f" + status));
              helperEntity.setCustomNameVisible(true);
         }
@@ -61,14 +63,21 @@ public class AssistantManager {
     }
 
     public static void spawn(MinecraftServer server, ServerWorld world, double x, double y, double z) {
-        if (helperEntity != null) helperEntity.discard();
+        if (helperEntity != null) {
+            helperEntity.discard();
+            helperEntity = null;
+        }
 
         GameProfile profile = new GameProfile(UUID.randomUUID(), CustomBlocksConfig.helperName);
-        helperEntity = new AssistantEntity(server, world, profile);
-        helperEntity.refreshIdentity(CustomBlocksConfig.helperName);
+        // FakePlayer.get() handles all network connection and PlayerManager plumbing.
+        // It creates the fake player, stubs its network handler, and adds it to the world.
+        // Do NOT call world.spawnEntity() — FakePlayer manages its own lifecycle.
+        helperEntity = FakePlayer.get(world, profile);
         helperEntity.refreshPositionAndAngles(x, y, z, 0, 0);
-        
-        world.spawnEntity(helperEntity);
+        helperEntity.setCustomName(Text.literal(CustomBlocksConfig.helperName));
+        helperEntity.setCustomNameVisible(true);
+        helperEntity.setInvulnerable(true);
+
         CustomBlocksConfig.helperEnabled = true;
         CustomBlocksConfig.save();
     }

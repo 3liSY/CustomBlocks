@@ -2,25 +2,26 @@ package com.customblocks.assistant;
 
 import com.mojang.authlib.GameProfile;
 import net.minecraft.entity.damage.DamageSource;
-import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.network.packet.c2s.common.SyncedClientOptions;
-import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
+
+import net.fabricmc.fabric.api.entity.FakePlayer;
 
 import java.util.UUID;
 
 /**
  * The AssistantEntity (The Helper).
  * <p>
- * A "Fake Player" entity that supports standard skins and animations.
- * Does not appear in the Tab list by default and is designed for mod maintenance assistance.
+ * A "Fake Player" entity used for mod maintenance assistance.
+ * Uses Fabric's FakePlayer API for proper lifecycle management.
+ * FakePlayer handles all network/connection plumbing internally —
+ * do NOT call world.spawnEntity() on this. Use FakePlayer.get() instead.
  */
-public class AssistantEntity extends ServerPlayerEntity {
+public class AssistantEntity extends FakePlayer {
 
-    public AssistantEntity(MinecraftServer server, ServerWorld world, GameProfile profile) {
-        super(server, world, profile, SyncedClientOptions.createDefault());
+    protected AssistantEntity(ServerWorld world, GameProfile profile) {
+        super(world, profile);
     }
 
     @Override
@@ -41,7 +42,7 @@ public class AssistantEntity extends ServerPlayerEntity {
     @Override
     public void tick() {
         super.tick();
-        // Prevent fall damage/gravity issues if disconnected
+        // Prevent fall damage/gravity issues
         if (this.getY() < -64) {
             this.setNoGravity(true);
         }
