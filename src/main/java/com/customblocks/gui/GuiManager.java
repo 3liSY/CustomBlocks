@@ -292,7 +292,7 @@ public class GuiManager {
         STATES.put(player.getUuid(), GuiState.assistantControl());
         openScreen(player, new SimpleNamedScreenHandlerFactory(
             (s, pi, px) -> new CbScreenHandler(s, pi, buildAssistantControl(player)),
-            Text.literal("§b§l✦ §r§fHelper Settings")));
+            Text.literal("§b§l✦ §r§fAI Assistant")));
     }
 
     private static SimpleInventory buildAssistantControl(ServerPlayerEntity player) {
@@ -301,63 +301,58 @@ public class GuiManager {
 
         boolean active = com.customblocks.assistant.AssistantManager.isSpawned();
         boolean following = com.customblocks.assistant.AssistantManager.isFollowing();
-        boolean holo = CustomBlocksConfig.helperHologram;
+        boolean holo = CustomBlocksConfig.aiHologram;
+        String currentStyle = com.customblocks.assistant.AssistantManager.normalizeStyle(CustomBlocksConfig.aiStyle);
 
         inv.setStack(4, uiGlint(Items.PLAYER_HEAD, "§b§lAssistant Hub",
             "§7Status: " + (active ? "§aSpawned" : "§cHidden"),
             "§7Mode: " + (following ? "§bFollowing you" : "§7Staying in place"),
-            "§7Name: §f" + CustomBlocksConfig.helperName));
+            "§7Name: §f" + CustomBlocksConfig.aiName,
+            "§7Style: §d" + currentStyle));
 
         // Row 1: core controls
         inv.setStack(19, uiGlint(active ? Items.ENDER_EYE : Items.ENDER_PEARL,
             active ? "§a§l✔ Spawned" : "§c§l✖ Hidden",
-            "§7Turn the helper ON or OFF.",
-            "§7When active, it appears as a friendly NPC near you."));
+            "§7Turn the AI assistant ON or OFF.",
+            "§7When active, it appears near you in-world."));
 
         inv.setStack(20, uiGlint(following ? Items.RECOVERY_COMPASS : Items.COMPASS,
             "§e§lMode: " + (following ? "Following" : "Staying"),
-            "§7When following, the helper walks behind you.",
+            "§7When following, the assistant floats after you.",
             "§7When staying, it waits in place."));
 
-        inv.setStack(22, uiGlint(Items.ENDER_CHEST, "§b§lGo To Helper",
-            "§7Teleport yourself to where the helper is.",
-            active ? "§aHelper is active" : "§cHelper is not spawned"));
+        inv.setStack(22, uiGlint(Items.ENDER_CHEST, "§b§lGo To AI",
+            "§7Teleport yourself to where the assistant is.",
+            active ? "§aAI assistant is active" : "§cAI assistant is not spawned"));
 
         inv.setStack(24, uiGlint(Items.NETHER_STAR, "§6§lScan for Broken Blocks",
             "§7Searches nearby area for blocks with missing textures.",
-            "§7The helper walks to and highlights broken blocks."));
+            "§7The assistant highlights broken blocks."));
 
         inv.setStack(25, uiGlint(holo ? Items.END_CRYSTAL : Items.GLASS,
             holo ? "§d§lHologram: §aON" : "§7§lHologram: §cOFF",
-            "§7Floating status label above the helper.",
+            "§7Floating status label above the assistant.",
             "§8Click to toggle"));
 
         // Row 2: identity
-        inv.setStack(31, uiGlint(Items.PAINTING, "§f§lRename Helper",
-            "§7Current: §b" + CustomBlocksConfig.helperName,
-            "§8Click to type a new name in chat"));
+        inv.setStack(31, uiGlint(Items.PAINTING, "§f§lRename AI",
+            "§7Current: §b" + CustomBlocksConfig.aiName,
+            "§8Click to edit the assistant name"));
 
-        // Row 3: Skin Presets
-        String[] skins = {"Architect", "Engineer", "Watcher", "Cyber", "Royal", "Guard", "Phantom"};
-        for (int i = 0; i < skins.length; i++) {
-            boolean current = CustomBlocksConfig.helperSkin.equalsIgnoreCase(skins[i]);
-            inv.setStack(37 + i, customHeadByUsername(skins[i],
-                (current ? "§a§l✔ " : "§b§l") + skins[i],
-                current ? "§aCurrent skin" : "§7Click to use this skin"));
+        // Row 3: Style Presets
+        List<String> styles = com.customblocks.assistant.AssistantManager.availableStyles();
+        for (int i = 0; i < styles.size() && i < 7; i++) {
+            String style = styles.get(i);
+            boolean current = currentStyle.equalsIgnoreCase(style);
+            inv.setStack(37 + i, uiGlint(
+                com.customblocks.assistant.AssistantManager.getStyleDisplayItem(style),
+                (current ? "§a§l✔ " : "§b§l") + style,
+                current ? "§aCurrent AI style" : "§7Click to use this style"));
         }
 
         inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
         return inv;
     }
-
-    private static ItemStack customHeadByUsername(String user, String name, String... lore) {
-        ItemStack s = new ItemStack(Items.PLAYER_HEAD);
-        s.set(DataComponentTypes.CUSTOM_NAME, Text.literal(name).styled(st -> st.withItalic(false)));
-        if(lore.length > 0){ List<Text> ll = new ArrayList<>(); for(String l:lore)ll.add(lore(l)); s.set(DataComponentTypes.LORE, new LoreComponent(ll)); }
-        s.set(DataComponentTypes.PROFILE, new net.minecraft.component.type.ProfileComponent(java.util.Optional.of(user), java.util.Optional.empty(), new com.mojang.authlib.properties.PropertyMap()));
-        return s;
-    }
-
 
     public static void openHelpGui(ServerPlayerEntity player) {
         pushBackStack(player.getUuid());
@@ -448,7 +443,8 @@ public class GuiManager {
                     openSearchPicker(player, q, state.page());
                 }
                 case MAGIC_ITEMS -> openMagicItemsGui(player);
-                case CONFIG_GUI -> openConfigGui(player);
+                case CONFIG_WARNING -> openConfigWarningGui(player, false);
+                case CONFIG_GUI -> openConfigGui(player, false);
                 case UNDO_PICKER -> openUndoPicker(player, state.page());
                 case HELP_CATEGORY -> openHelpCategory(player, state.page());
                 default -> openMain(player, 0);
@@ -485,6 +481,7 @@ public class GuiManager {
                 case BULK_DELETE     -> handleBulkDeleteClick(player, state, slot);
                 case SEARCH_PICKER  -> handleSearchPickerClick(player, state, slot);
                 case MAGIC_ITEMS    -> handleMagicItemsClick(player, state, slot);
+                case CONFIG_WARNING -> handleConfigWarningClick(player, state, slot);
                 case CONFIG_GUI     -> handleConfigGuiClick(player, state, slot);
                 case UNDO_PICKER    -> handleUndoPickerClick(player, state, slot);
                 case HELP_CATEGORY  -> handleHelpCategoryClick(player, state, slot);
@@ -507,8 +504,26 @@ public class GuiManager {
 
         if (text.equalsIgnoreCase("cancel")) {
             send(player, "§7[CustomBlocks] Cancelled.");
-            if (blockId != null && !blockId.startsWith("__") && SlotManager.hasId(blockId)) openEditor(player, blockId, rp);
-            else openMain(player, rp);
+            switch (pending.action()) {
+                case CONFIG_VALUE -> openConfigGui(player, false);
+                case ADMIN_CUSTOM_TITLE -> {
+                    if ("ai_name".equals(blockId)) openAssistantControl(player);
+                    else openMain(player, rp);
+                }
+                case SET_LIGHT, SET_HARDNESS -> {
+                    if (blockId != null && SlotManager.hasId(blockId)) openPropertiesGui(player, blockId, rp);
+                    else openMain(player, rp);
+                }
+                case SETFACE_URL, SETFACE_VARIANT_URL -> {
+                    if (blockId != null && SlotManager.hasId(blockId)) openFaceEditor(player, blockId, rp);
+                    else openMain(player, rp);
+                }
+                case SETTABICON_URL -> openTabIconPicker(player, rp);
+                default -> {
+                    if (blockId != null && !blockId.startsWith("__") && SlotManager.hasId(blockId)) openEditor(player, blockId, rp);
+                    else openMain(player, rp);
+                }
+            }
             return true;
         }
 
@@ -527,8 +542,14 @@ public class GuiManager {
                 String id = text.toLowerCase().replaceAll("[^a-z0-9_]", "_");
                 if (id.isEmpty())          { send(player, "§cInvalid ID."); openMain(player, rp); return true; }
                 if (SlotManager.hasId(id)) { send(player, "§c'" + id + "' already exists."); openMain(player, rp); return true; }
-                PENDING.put(player.getUuid(), new PendingInput(InputAction.CREATE_NAME, id, null, id, null, rp));
-                send(player, "§6[GUI] §eNow type a §fdisplay name§e for '" + id + "' (or §ccancel§e):"); return true;
+                openShortInputPrompt(
+                    player,
+                    new PendingInput(InputAction.CREATE_NAME, id, null, id, null, rp),
+                    "§eDisplay Name",
+                    new ItemStack(Items.NAME_TAG),
+                    id
+                );
+                return true;
             }
             case CREATE_NAME -> {
                 PENDING.put(player.getUuid(), new PendingInput(InputAction.CREATE_URL, blockId, null, pending.partialId(), text.replace("_"," "), rp));
@@ -716,13 +737,11 @@ public class GuiManager {
                 openEditor(player, newId, rp); return true;
             }
             case ADMIN_CUSTOM_TITLE -> {
-                if ("helper_name".equals(blockId)) {
-                    CustomBlocksConfig.helperName = text;
+                if ("ai_name".equals(blockId)) {
+                    CustomBlocksConfig.aiName = text.replace("&", "§");
                     CustomBlocksConfig.save();
-                    if (com.customblocks.assistant.AssistantManager.isSpawned()) {
-                        // Manager will refresh on next tick or manually
-                         send(player, "§0§l[§b§lHelper§0§l] §fCall me '§b" + text + "§f' from now on. §a✔");
-                    }
+                    com.customblocks.assistant.AssistantManager.refreshFromConfig();
+                    send(player, "§0§l[§b§lAI§0§l] §fCall me '§b" + text + "§f' from now on. §a✔");
                     openAssistantControl(player);
                     return true;
                 }
@@ -780,23 +799,26 @@ public class GuiManager {
                         case "texturePayloadsPerTick" -> CustomBlocksConfig.texturePayloadsPerTick = Math.max(1, Math.min(50, Integer.parseInt(text)));
                         case "resourcePackPort" -> CustomBlocksConfig.resourcePackPort = Math.max(0, Math.min(65535, Integer.parseInt(text)));
                         case "reloadDebounceMs" -> CustomBlocksConfig.reloadDebounceMs = Math.max(500, Math.min(10000, Long.parseLong(text)));
-                        case "helperName" -> CustomBlocksConfig.helperName = text;
+                        case "aiName" -> CustomBlocksConfig.aiName = text.replace("&", "§");
                         case "rpPromptMessage" -> CustomBlocksConfig.rpPromptMessage = text;
                         case "rpKickMessage" -> CustomBlocksConfig.rpKickMessage = text;
                         case "undoMode" -> {
                             String v = text.toLowerCase().trim();
                             if (List.of("global", "per_player", "both").contains(v)) CustomBlocksConfig.undoMode = v;
-                            else { send(player, "§cMust be: global / per_player / both"); openConfigGui(player); return true; }
+                            else { send(player, "§cMust be: global / per_player / both"); openConfigGui(player, false); return true; }
                         }
-                        case "helperSkin" -> CustomBlocksConfig.helperSkin = text;
-                        default -> { send(player, "§cUnknown config key."); openConfigGui(player); return true; }
+                        case "aiStyle" -> CustomBlocksConfig.aiStyle = com.customblocks.assistant.AssistantManager.normalizeStyle(text);
+                        default -> { send(player, "§cUnknown config key."); openConfigGui(player, false); return true; }
                     }
                     CustomBlocksConfig.save();
+                    if ("aiName".equals(key) || "aiStyle".equals(key)) {
+                        com.customblocks.assistant.AssistantManager.refreshFromConfig();
+                    }
                     send(player, "§a[Config] §f" + key + " §a= §e" + text);
                 } catch (NumberFormatException e) {
                     send(player, "§cInvalid number.");
                 }
-                openConfigGui(player);
+                openConfigGui(player, false);
                 return true;
             }
             case WEB_LINK_CAST -> {
@@ -864,22 +886,22 @@ public class GuiManager {
         if (slot == 19) { // Toggle Spawn
             if (com.customblocks.assistant.AssistantManager.isSpawned()) {
                 com.customblocks.assistant.AssistantManager.hide();
-                send(player, "§0§l[§b§lHelper§0§l] §7Hidden. §c✖");
+                send(player, "§0§l[§b§lAI§0§l] §7Hidden. §c✖");
             } else {
                 com.customblocks.assistant.AssistantManager.spawn(player.getServer(), (net.minecraft.server.world.ServerWorld)player.getWorld(), player.getX(), player.getY(), player.getZ());
-                send(player, "§0§l[§b§lHelper§0§l] §fReady to help. §a✔");
+                send(player, "§0§l[§b§lAI§0§l] §fReady to help. §a✔");
             }
             openAssistantControl(player);
         }
         if (slot == 20) { // Toggle Follow
             boolean f = !com.customblocks.assistant.AssistantManager.isFollowing();
             com.customblocks.assistant.AssistantManager.setFollowing(f, player.getUuid());
-            send(player, "§0§l[§b§lHelper§0§l] §fMode: " + (f ? "§bFollowing" : "§7Staying"));
+            send(player, "§0§l[§b§lAI§0§l] §fMode: " + (f ? "§bFollowing" : "§7Staying"));
             openAssistantControl(player);
         }
-        if (slot == 22) { // Go To Helper
+        if (slot == 22) { // Go To AI
             if (!com.customblocks.assistant.AssistantManager.isSpawned()) {
-                send(player, "§c[Helper] Not spawned. Spawn the helper first.");
+                send(player, "§c[AI] Not spawned. Spawn the AI assistant first.");
                 return;
             }
             player.closeHandledScreen();
@@ -892,29 +914,32 @@ public class GuiManager {
             return;
         }
         if (slot == 25) { // Hologram toggle
-            CustomBlocksConfig.helperHologram = !CustomBlocksConfig.helperHologram;
+            CustomBlocksConfig.aiHologram = !CustomBlocksConfig.aiHologram;
             CustomBlocksConfig.save();
-            send(player, "§0§l[§b§lHelper§0§l] §fHologram: " + (CustomBlocksConfig.helperHologram ? "§aON" : "§cOFF"));
+            com.customblocks.assistant.AssistantManager.refreshFromConfig();
+            send(player, "§0§l[§b§lAI§0§l] §fStatus halo: " + (CustomBlocksConfig.aiHologram ? "§aON" : "§cOFF"));
             openAssistantControl(player);
             return;
         }
         if (slot == 31) { // Rename
-            player.closeHandledScreen();
-            send(player, "§0§l[§b§lHelper§0§l] §fType a new name in chat (or §ccancel§f):");
-            PENDING.put(player.getUuid(), new PendingInput(InputAction.ADMIN_CUSTOM_TITLE, "helper_name", null, null, null, 0));
+            openShortInputPrompt(
+                player,
+                new PendingInput(InputAction.ADMIN_CUSTOM_TITLE, "ai_name", null, null, null, 0),
+                "§bAI Name",
+                new ItemStack(Items.NAME_TAG),
+                stripFormattingCodes(CustomBlocksConfig.aiName)
+            );
             return;
         }
-        // Skin Presets
+        // Style Presets
         if (slot >= 37 && slot <= 43) {
-            String[] skins = {"Architect", "Engineer", "Watcher", "Cyber", "Royal", "Guard", "Phantom"};
+            List<String> skins = com.customblocks.assistant.AssistantManager.availableStyles();
             int si = slot - 37;
-            if (si < skins.length) {
-                CustomBlocksConfig.helperSkin = skins[si];
+            if (si < skins.size()) {
+                CustomBlocksConfig.aiStyle = skins.get(si);
                 CustomBlocksConfig.save();
-                send(player, "§0§l[§b§lHelper§0§l] §fSkin: §b" + skins[si] + " §a✔");
-                if (com.customblocks.assistant.AssistantManager.isSpawned()) {
-                    com.customblocks.assistant.AssistantManager.spawn(player.getServer(), (net.minecraft.server.world.ServerWorld)player.getWorld(), player.getX(), player.getY(), player.getZ());
-                }
+                com.customblocks.assistant.AssistantManager.refreshFromConfig();
+                send(player, "§0§l[§b§lAI§0§l] §fStyle: §b" + skins.get(si) + " §a✔");
                 openAssistantControl(player);
             }
         }
@@ -972,8 +997,45 @@ public class GuiManager {
 
     // ── Config GUI ────────────────────────────────────────────────────────────
 
+    public static void openConfigWarningGui(ServerPlayerEntity player) {
+        openConfigWarningGui(player, true);
+    }
+
+    public static void openConfigWarningGui(ServerPlayerEntity player, boolean pushBack) {
+        if (pushBack) pushBackStack(player.getUuid());
+        STATES.put(player.getUuid(), GuiState.configWarning());
+        openScreen(player, new SimpleNamedScreenHandlerFactory(
+            (s, pi, px) -> new CbScreenHandler(s, pi, buildConfigWarningGui()),
+            Text.literal("§6§l⚠ §r§fServer Config Warning")));
+    }
+
+    private static SimpleInventory buildConfigWarningGui() {
+        SimpleInventory inv = new SimpleInventory(27);
+        for (int i = 0; i < 27; i++) inv.setStack(i, glass());
+        inv.setStack(4, uiGlint(Items.COMPARATOR, "§6§lServer Config",
+            "§7These settings affect the entire server.",
+            "§7Changing them can impact every player and every block.",
+            "§eOnly continue if you mean to edit live server-wide behavior."));
+        inv.setStack(11, uiGlint(Items.RED_CONCRETE, "§c◀ Back",
+            "§7Return without changing server config."));
+        inv.setStack(15, uiGlint(Items.LIME_CONCRETE, "§a§lContinue",
+            "§7Open the advanced server config panel."));
+        return inv;
+    }
+
+    private static void handleConfigWarningClick(ServerPlayerEntity player, GuiState state, int slot) {
+        switch (slot) {
+            case 11 -> openMain(player, 0);
+            case 15 -> openConfigGui(player, false);
+        }
+    }
+
     public static void openConfigGui(ServerPlayerEntity player) {
-        pushBackStack(player.getUuid());
+        openConfigGui(player, true);
+    }
+
+    public static void openConfigGui(ServerPlayerEntity player, boolean pushBack) {
+        if (pushBack) pushBackStack(player.getUuid());
         STATES.put(player.getUuid(), GuiState.configGui());
         openScreen(player, new SimpleNamedScreenHandlerFactory(
             (s, pi, px) -> new CbScreenHandler(s, pi, buildConfigGui()),
@@ -984,24 +1046,24 @@ public class GuiManager {
         SimpleInventory inv = new SimpleInventory(54);
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
         // Row 1: Toggles
-        inv.setStack(10, toggleItem("RP Enforce on Join", CustomBlocksConfig.rpEnforceOnJoin, "Send resource pack as required on join"));
-        inv.setStack(11, toggleItem("Helper Enabled", CustomBlocksConfig.helperEnabled, "Master switch for the assistant NPC"));
-        inv.setStack(12, toggleItem("Helper Hologram", CustomBlocksConfig.helperHologram, "Floating status label above the helper"));
+        inv.setStack(10, toggleItem("Auto-Send Texture Pack", CustomBlocksConfig.rpEnforceOnJoin, "Require the texture pack when players join"));
+        inv.setStack(11, toggleItem("AI System Ready", CustomBlocksConfig.aiEnabled, "Keep the AI assistant system enabled"));
+        inv.setStack(12, toggleItem("AI Status Halo", CustomBlocksConfig.aiHologram, "Show a floating status label above the assistant"));
         // Row 2: Numbers
-        inv.setStack(19, numItem("Max Slots", CustomBlocksConfig.maxSlots, "Max custom block slots (restart required)"));
-        inv.setStack(20, numItem("Texture Size", CustomBlocksConfig.defaultTextureSize, "Default texture resolution (16-256)"));
-        inv.setStack(21, numItem("BG Tolerance", CustomBlocksConfig.bgRemovalTolerance, "Background removal tolerance (0=off, 1-100)"));
-        inv.setStack(22, numItem("Max Undo Depth", CustomBlocksConfig.maxUndoDepth, "Max undo/redo stack depth per player"));
-        inv.setStack(23, numItem("Download Timeout", CustomBlocksConfig.downloadTimeoutSeconds, "HTTP download timeout in seconds"));
-        inv.setStack(24, numItem("Payloads/Tick", CustomBlocksConfig.texturePayloadsPerTick, "Texture packets sent per server tick"));
-        inv.setStack(25, numItem("RP Port", CustomBlocksConfig.resourcePackPort, "HTTP resource pack server port (0=disabled)"));
-        inv.setStack(26, numItem("Reload Debounce", CustomBlocksConfig.reloadDebounceMs, "Debounce time for RP rebuilds (ms)"));
+        inv.setStack(19, numItem("Block Capacity", CustomBlocksConfig.maxSlots, "How many custom blocks this server can hold (restart required)"));
+        inv.setStack(20, numItem("Texture Quality", CustomBlocksConfig.defaultTextureSize, "Default resolution used when new textures are processed"));
+        inv.setStack(21, numItem("Background Cleanup", CustomBlocksConfig.bgRemovalTolerance, "How strongly imported images remove their background"));
+        inv.setStack(22, numItem("History Depth", CustomBlocksConfig.maxUndoDepth, "How many undo and redo steps each player can keep"));
+        inv.setStack(23, numItem("Download Timeout", CustomBlocksConfig.downloadTimeoutSeconds, "How long texture downloads may wait before failing"));
+        inv.setStack(24, numItem("Texture Burst Rate", CustomBlocksConfig.texturePayloadsPerTick, "How many texture packets are sent each server tick"));
+        inv.setStack(25, numItem("Communication Door", CustomBlocksConfig.resourcePackPort, "Port used by the local texture server (0 disables it)"));
+        inv.setStack(26, numItem("Pack Rebuild Delay", CustomBlocksConfig.reloadDebounceMs, "How long to wait before rebuilding the pack again"));
         // Row 3: Strings
-        inv.setStack(28, strItem("Helper Name", CustomBlocksConfig.helperName, "Display name for the assistant NPC"));
-        inv.setStack(29, strItem("RP Prompt", truncate(CustomBlocksConfig.rpPromptMessage, 30), "Message shown when RP download starts"));
-        inv.setStack(30, strItem("RP Kick Msg", truncate(CustomBlocksConfig.rpKickMessage, 30), "Kick message if player declines RP"));
-        inv.setStack(31, strItem("Undo Mode", CustomBlocksConfig.undoMode, "Undo mode: global / per_player / both"));
-        inv.setStack(32, strItem("Helper Skin", CustomBlocksConfig.helperSkin, "Minecraft username for helper skin"));
+        inv.setStack(28, strItem("AI Display Name", CustomBlocksConfig.aiName, "The name shown above your assistant"));
+        inv.setStack(29, strItem("Pack Invite Message", truncate(CustomBlocksConfig.rpPromptMessage, 30), "Message players see when the texture pack prompt appears"));
+        inv.setStack(30, strItem("Pack Required Message", truncate(CustomBlocksConfig.rpKickMessage, 30), "Message shown if the server requires the texture pack"));
+        inv.setStack(31, strItem("History Mode", CustomBlocksConfig.undoMode, "Choose whether undo history is shared or per-player"));
+        inv.setStack(32, strItem("AI Style", CustomBlocksConfig.aiStyle, "Visual style for the assistant AI"));
         // Row 5: Back
         inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
         return inv;
@@ -1013,10 +1075,10 @@ public class GuiManager {
             "§7" + desc, "§8Click to toggle");
     }
     private static ItemStack numItem(String label, Number val, String desc) {
-        return uiGlint(Items.REPEATER, "§b§l" + label + " §f= §e" + val, "§7" + desc, "§8Click to change (type in chat)");
+        return uiGlint(Items.REPEATER, "§b§l" + label + " §f= §e" + val, "§7" + desc, "§8Click to edit");
     }
     private static ItemStack strItem(String label, String val, String desc) {
-        return uiGlint(Items.NAME_TAG, "§d§l" + label + " §f= §e" + val, "§7" + desc, "§8Click to change (type in chat)");
+        return uiGlint(Items.NAME_TAG, "§d§l" + label + " §f= §e" + val, "§7" + desc, "§8Click to edit");
     }
     private static String truncate(String s, int max) {
         return s.length() <= max ? s : s.substring(0, max) + "...";
@@ -1025,30 +1087,57 @@ public class GuiManager {
     private static void handleConfigGuiClick(ServerPlayerEntity player, GuiState state, int slot) {
         switch (slot) {
             // Toggles
-            case 10 -> { CustomBlocksConfig.rpEnforceOnJoin = !CustomBlocksConfig.rpEnforceOnJoin; CustomBlocksConfig.save(); send(player, "§a[Config] rpEnforceOnJoin = " + CustomBlocksConfig.rpEnforceOnJoin); openConfigGui(player); }
-            case 11 -> { CustomBlocksConfig.helperEnabled = !CustomBlocksConfig.helperEnabled; CustomBlocksConfig.save(); send(player, "§a[Config] helperEnabled = " + CustomBlocksConfig.helperEnabled); openConfigGui(player); }
-            case 12 -> { CustomBlocksConfig.helperHologram = !CustomBlocksConfig.helperHologram; CustomBlocksConfig.save(); send(player, "§a[Config] helperHologram = " + CustomBlocksConfig.helperHologram); openConfigGui(player); }
+            case 10 -> {
+                CustomBlocksConfig.rpEnforceOnJoin = !CustomBlocksConfig.rpEnforceOnJoin;
+                CustomBlocksConfig.save();
+                send(player, "§a[Config] rpEnforceOnJoin = " + CustomBlocksConfig.rpEnforceOnJoin);
+                openConfigGui(player, false);
+            }
+            case 11 -> {
+                CustomBlocksConfig.aiEnabled = !CustomBlocksConfig.aiEnabled;
+                if (!CustomBlocksConfig.aiEnabled && com.customblocks.assistant.AssistantManager.isSpawned()) {
+                    com.customblocks.assistant.AssistantManager.hide();
+                }
+                CustomBlocksConfig.save();
+                if (CustomBlocksConfig.aiEnabled) {
+                    com.customblocks.assistant.AssistantManager.refreshFromConfig();
+                }
+                send(player, "§a[Config] aiEnabled = " + CustomBlocksConfig.aiEnabled);
+                openConfigGui(player, false);
+            }
+            case 12 -> {
+                CustomBlocksConfig.aiHologram = !CustomBlocksConfig.aiHologram;
+                CustomBlocksConfig.save();
+                com.customblocks.assistant.AssistantManager.refreshFromConfig();
+                send(player, "§a[Config] aiHologram = " + CustomBlocksConfig.aiHologram);
+                openConfigGui(player, false);
+            }
             // Numbers
-            case 19 -> configPrompt(player, "maxSlots", "Max Slots (1-8192):");
-            case 20 -> configPrompt(player, "defaultTextureSize", "Texture Size (16-256):");
-            case 21 -> configPrompt(player, "bgRemovalTolerance", "BG Tolerance (0-100):");
-            case 22 -> configPrompt(player, "maxUndoDepth", "Max Undo Depth (1-100):");
+            case 19 -> configPrompt(player, "maxSlots", "Block Capacity (1-8192):");
+            case 20 -> configPrompt(player, "defaultTextureSize", "Texture Quality (16-256):");
+            case 21 -> configPrompt(player, "bgRemovalTolerance", "Background Cleanup (0-100):");
+            case 22 -> configPrompt(player, "maxUndoDepth", "History Depth (1-100):");
             case 23 -> configPrompt(player, "downloadTimeoutSeconds", "Download Timeout (1-120):");
-            case 24 -> configPrompt(player, "texturePayloadsPerTick", "Payloads/Tick (1-50):");
-            case 25 -> configPrompt(player, "resourcePackPort", "RP Port (0=disabled):");
-            case 26 -> configPrompt(player, "reloadDebounceMs", "Reload Debounce (ms, 500-10000):");
+            case 24 -> configPrompt(player, "texturePayloadsPerTick", "Texture Burst Rate (1-50):");
+            case 25 -> configPrompt(player, "resourcePackPort", "Communication Door (0 disables it):");
+            case 26 -> configPrompt(player, "reloadDebounceMs", "Pack Rebuild Delay (500-10000 ms):");
             // Strings
-            case 28 -> configPrompt(player, "helperName", "Helper Name:");
-            case 29 -> configPrompt(player, "rpPromptMessage", "RP Prompt Message:");
-            case 30 -> configPrompt(player, "rpKickMessage", "RP Kick Message:");
-            case 31 -> configPrompt(player, "undoMode", "Undo Mode (global / per_player / both):");
-            case 32 -> configPrompt(player, "helperSkin", "Helper Skin (username):");
+            case 28 -> configPrompt(player, "aiName", "AI Display Name:");
+            case 29 -> configPrompt(player, "rpPromptMessage", "Pack Invite Message:");
+            case 30 -> configPrompt(player, "rpKickMessage", "Pack Required Message:");
+            case 31 -> configPrompt(player, "undoMode", "History Mode (global / per_player / both):");
+            case 32 -> configPrompt(player, "aiStyle", "AI Style:");
             case 45 -> openMain(player, 0);
         }
     }
 
     private static void configPrompt(ServerPlayerEntity player, String key, String prompt) {
-        PENDING.put(player.getUuid(), new PendingInput(InputAction.CONFIG_VALUE, key, null, null, null, 0));
+        PendingInput pending = new PendingInput(InputAction.CONFIG_VALUE, key, null, null, null, 0);
+        if (usesAnvilConfigPrompt(key)) {
+            openShortInputPrompt(player, pending, "§6" + prompt, shortPromptItemForConfig(key), currentConfigValue(key));
+            return;
+        }
+        PENDING.put(player.getUuid(), pending);
         closeForPrompt(player);
         send(player, "§6[Config] §eType new value for §f" + prompt + " §e(or §ccancel§e):");
     }
@@ -1210,7 +1299,13 @@ public class GuiManager {
         switch (slot) {
             // Row 1: main actions
             case 10 -> openEditorPicker(player, 0);
-            case 12 -> { PENDING.put(uuid, new PendingInput(InputAction.CREATE_ID, null, null, null, null, state.page())); closeForPrompt(player); send(player, "§6[GUI] §eType a block §fID §e(a-z 0-9 _ only) or §ccancel§e:"); }
+            case 12 -> openShortInputPrompt(
+                player,
+                new PendingInput(InputAction.CREATE_ID, null, null, null, null, state.page()),
+                "§6New Block ID",
+                new ItemStack(Items.COMMAND_BLOCK),
+                ""
+            );
             case 14 -> { PENDING.put(uuid, new PendingInput(InputAction.REID_TEXT, "__search__", null, null, null, state.page())); closeForPrompt(player); send(player, "§6[GUI] §eType a search query (or §ccancel§e):"); }
             case 16 -> openMagicItemsGui(player);
             // Row 2: utilities
@@ -1236,7 +1331,7 @@ public class GuiManager {
             case 24 -> openBulkDelete(player, 0);
             case 25 -> openHelpGui(player);
             // Row 3
-            case 28 -> openConfigGui(player);
+            case 28 -> openConfigWarningGui(player);
             // Recent blocks (slots 32-34)
             case 32, 33, 34 -> {
                 Deque<String> recent = RECENT_BLOCKS.getOrDefault(uuid, new ArrayDeque<>());
@@ -1336,8 +1431,20 @@ public class GuiManager {
             case 23 -> openPropertiesGui(player, id, rp);
             case 25 -> openSoundMenu(player, id, rp);
             case 31 -> { if (d.isAnimated()) openAnimGui(player, id); }
-            case 37 -> { PENDING.put(uuid,new PendingInput(InputAction.RENAME_TEXT,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new name for '§f"+id+"§e' (or §ccancel§e):"); }
-            case 39 -> { PENDING.put(uuid,new PendingInput(InputAction.REID_TEXT,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §eType new ID for '§f"+id+"§e' (a-z 0-9 _ -) (or §ccancel§e):"); }
+            case 37 -> openShortInputPrompt(
+                player,
+                new PendingInput(InputAction.RENAME_TEXT, id, null, null, null, rp),
+                "§eBlock Name",
+                new ItemStack(Items.NAME_TAG),
+                stripFormattingCodes(d.displayName)
+            );
+            case 39 -> openShortInputPrompt(
+                player,
+                new PendingInput(InputAction.REID_TEXT, id, null, null, null, rp),
+                "§6Block ID",
+                new ItemStack(Items.COMMAND_BLOCK),
+                id
+            );
             case 41 -> {
                 // One-click duplicate via auto-incremented ID
                 String newId = com.customblocks.command.CustomBlockCommand.generateDupeId(id);
@@ -1527,10 +1634,22 @@ public class GuiManager {
         UUID uuid = player.getUuid();
         switch(slot) {
             case 19 -> { UndoManager.pushUndoMutation(id, d, "setglow", uuid); SlotManager.setLightLevel(id,Math.max(0,d.lightLevel-1)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
-            case 20 -> { PENDING.put(uuid, new PendingInput(InputAction.SET_LIGHT, id, null, null, null, rp)); closeForPrompt(player); send(player, "§6[Properties] §eType light level (0-15) or §ccancel§e:"); }
+            case 20 -> openShortInputPrompt(
+                player,
+                new PendingInput(InputAction.SET_LIGHT, id, null, null, null, rp),
+                "§eLight Level",
+                new ItemStack(Items.GLOWSTONE_DUST),
+                String.valueOf(d.lightLevel)
+            );
             case 21 -> { UndoManager.pushUndoMutation(id, d, "setglow", uuid); SlotManager.setLightLevel(id,Math.min(15,d.lightLevel+1)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
             case 23 -> { UndoManager.pushUndoMutation(id, d, "sethardness", uuid); SlotManager.setHardness(id,prevHardness(d.hardness)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
-            case 24 -> { PENDING.put(uuid, new PendingInput(InputAction.SET_HARDNESS, id, null, null, null, rp)); closeForPrompt(player); send(player, "§6[Properties] §eType hardness value (e.g. 0.5, 1.5, -1) or §ccancel§e:"); }
+            case 24 -> openShortInputPrompt(
+                player,
+                new PendingInput(InputAction.SET_HARDNESS, id, null, null, null, rp),
+                "§bHardness",
+                new ItemStack(Items.NETHERITE_SCRAP),
+                String.valueOf(d.hardness)
+            );
             case 25 -> { UndoManager.pushUndoMutation(id, d, "sethardness", uuid); SlotManager.setHardness(id,nextHardness(d.hardness)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
             case 40 -> {
                 UndoManager.pushUndoMutation(id, d, "setcollision", uuid); SlotManager.setCollision(id,!d.noCollision); SlotManager.saveAll();
@@ -1914,7 +2033,7 @@ public class GuiManager {
         inv.setStack(16, uiGlint(Items.BRUSH, "§d§lMagic Items", "§7Wands, color squares, triangles"));
 
         // Row 2: utilities
-        inv.setStack(19, uiGlint(Items.ARMOR_STAND, "§b§lAssistant Hub", "§7Spawn, control, and configure the helper NPC"));
+        inv.setStack(19, uiGlint(Items.ARMOR_STAND, "§b§lAssistant Hub", "§7Spawn, control, and configure the AI assistant"));
         inv.setStack(20, uiGlint(Items.STRUCTURE_VOID, "§6§lServer Tools", "§7Broken blocks, resource pack, data", brokenCount > 0 ? "§c" + brokenCount + " broken" : "§aAll OK"));
         inv.setStack(21, undoSz > 0 ? uiGlint(Items.GOLDEN_PICKAXE, "§6§l↩ Undo §e(" + undoSz + ")", "§7Click to undo last action") : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Undo (Empty)"));
         inv.setStack(22, (undoSz + redoSz) > 0 ? uiGlint(Items.KNOWLEDGE_BOOK, "§6§lHistory §7(" + (undoSz + redoSz) + ")", "§7Browse undo/redo entries", "§8Click to open picker") : ui(Items.GRAY_STAINED_GLASS_PANE, "§8History (Empty)"));
@@ -1923,7 +2042,7 @@ public class GuiManager {
         inv.setStack(25, uiGlint(Items.BOOK, "§a§lHelp & Info", "§7Interactive help guide"));
 
         // Row 3: config + recent
-        inv.setStack(28, uiGlint(Items.COMPARATOR, "§6§l⚙ Config", "§7View and edit server settings"));
+        inv.setStack(28, uiGlint(Items.COMPARATOR, "§6§l⚙ Config", "§7View and edit server-wide settings"));
 
         // Recent blocks strip (slots 32-34)
         Deque<String> recent = RECENT_BLOCKS.getOrDefault(uuid, new ArrayDeque<>());
@@ -1963,7 +2082,7 @@ public class GuiManager {
         inv.setStack(19, uiGlint(Items.PAINTING, "§a§lSet Tab Icon", "§7Change dynamic creative tab icon", "§aUse a square PNG for best results."));
         inv.setStack(21, uiGlint(Items.DAMAGED_ANVIL, "§c§lBroken Block Finder", "§7Find and fix blocks with missing textures.", "§aCleans up missing textures."));
         inv.setStack(23, uiGlint(Items.BEACON, "§b§lResource Pack", "§7Manage the texture pack & sync.", "§aEnsure players can download your textures."));
-        inv.setStack(25, uiGlint(Items.PLAYER_HEAD, "§e§lHelper", "§7Manage your helper NPC.", "§aToggle presence & behaviors."));
+        inv.setStack(25, uiGlint(Items.PLAYER_HEAD, "§e§lAI Assistant", "§7Manage your in-world AI assistant.", "§aToggle presence & behaviors."));
 
         // ── Row 3: Slot Usage & Network ──────────────────────────────────────
         int used = SlotManager.usedSlots();
@@ -2073,7 +2192,7 @@ public class GuiManager {
                 inv.setStack(13, uiGlint(Items.HOPPER, "§aImport Folder", "§7/cb importfolder", "§8Bulk-imports from config/customblocks/import/."));
                 inv.setStack(14, uiGlint(Items.REPEATER, "§aReload", "§7/cb reload", "§8Reloads all data and syncs to players."));
                 inv.setStack(15, uiGlint(Items.COMPARATOR, "§aConfig", "§7/cb config", "§8Opens the server configuration GUI."));
-                inv.setStack(19, uiGlint(Items.PLAYER_HEAD, "§aAI / Helper", "§7/cb ai [spawn|hide|come|stay|tp|scan|status]", "§8Manage the assistant helper entity."));
+                inv.setStack(19, uiGlint(Items.PLAYER_HEAD, "§aAI Assistant", "§7/cb ai [spawn|hide|come|stay|tp|scan|status]", "§8Manage the in-world AI assistant."));
                 inv.setStack(20, uiGlint(Items.NETHER_STAR, "§aMagic Items", "§7/cb magicitems", "§8Opens the magic items GUI."));
                 inv.setStack(21, uiGlint(Items.COMPASS, "§aResource Pack", "§7/cb rp", "§8Resource pack management hub."));
             }
@@ -2437,6 +2556,53 @@ public class GuiManager {
         REOPENING_SCREENS.add(player.getUuid());
         player.closeHandledScreen();
         REOPENING_SCREENS.remove(player.getUuid());
+    }
+
+    private static void openShortInputPrompt(ServerPlayerEntity player, PendingInput pending, String title, ItemStack promptItem, String initialText) {
+        PENDING.put(player.getUuid(), pending);
+        AnvilPromptManager.open(player, Text.literal(title), promptItem, initialText);
+    }
+
+    private static boolean usesAnvilConfigPrompt(String key) {
+        return switch (key) {
+            case "rpPromptMessage", "rpKickMessage" -> false;
+            default -> true;
+        };
+    }
+
+    private static ItemStack shortPromptItemForConfig(String key) {
+        Item item = switch (key) {
+            case "maxSlots", "defaultTextureSize", "bgRemovalTolerance", "maxUndoDepth",
+                 "downloadTimeoutSeconds", "texturePayloadsPerTick", "resourcePackPort",
+                 "reloadDebounceMs" -> Items.REPEATER;
+            case "undoMode" -> Items.COMPARATOR;
+            case "aiStyle" -> com.customblocks.assistant.AssistantManager.getStyleDisplayItem(CustomBlocksConfig.aiStyle);
+            default -> Items.NAME_TAG;
+        };
+        return new ItemStack(item);
+    }
+
+    private static String currentConfigValue(String key) {
+        return switch (key) {
+            case "maxSlots" -> String.valueOf(CustomBlocksConfig.maxSlots);
+            case "defaultTextureSize" -> String.valueOf(CustomBlocksConfig.defaultTextureSize);
+            case "bgRemovalTolerance" -> String.valueOf(CustomBlocksConfig.bgRemovalTolerance);
+            case "maxUndoDepth" -> String.valueOf(CustomBlocksConfig.maxUndoDepth);
+            case "downloadTimeoutSeconds" -> String.valueOf(CustomBlocksConfig.downloadTimeoutSeconds);
+            case "texturePayloadsPerTick" -> String.valueOf(CustomBlocksConfig.texturePayloadsPerTick);
+            case "resourcePackPort" -> String.valueOf(CustomBlocksConfig.resourcePackPort);
+            case "reloadDebounceMs" -> String.valueOf(CustomBlocksConfig.reloadDebounceMs);
+            case "aiName" -> stripFormattingCodes(CustomBlocksConfig.aiName);
+            case "rpPromptMessage" -> CustomBlocksConfig.rpPromptMessage;
+            case "rpKickMessage" -> CustomBlocksConfig.rpKickMessage;
+            case "undoMode" -> CustomBlocksConfig.undoMode;
+            case "aiStyle" -> com.customblocks.assistant.AssistantManager.normalizeStyle(CustomBlocksConfig.aiStyle);
+            default -> "";
+        };
+    }
+
+    private static String stripFormattingCodes(String text) {
+        return text == null ? "" : text.replace("§", "");
     }
 
     private static void promptFace(ServerPlayerEntity player, String blockId, String face, int rp, boolean variant) {

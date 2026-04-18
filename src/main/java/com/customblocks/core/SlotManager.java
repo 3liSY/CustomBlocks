@@ -53,7 +53,6 @@ public final class SlotManager {
     private static final java.util.concurrent.ExecutorService IO_EXECUTOR = java.util.concurrent.Executors.newSingleThreadExecutor(r -> new Thread(r, "CustomBlocks-IO"));
 
     // ── Debounced save ────────────────────────────────────────────────────────
-    private static final long SAVE_DEBOUNCE_MS = 2000;
     private static volatile long lastDirtyTime = 0;
     private static volatile boolean dirty = false;
     private static final java.util.concurrent.ScheduledExecutorService SAVE_SCHEDULER =
@@ -567,12 +566,13 @@ public final class SlotManager {
     private static void markDirty() {
         dirty = true;
         lastDirtyTime = System.currentTimeMillis();
+        long debounce = CustomBlocksConfig.reloadDebounceMs;
         SAVE_SCHEDULER.schedule(() -> {
-            if (dirty && (System.currentTimeMillis() - lastDirtyTime) >= (SAVE_DEBOUNCE_MS - 200)) {
+            if (dirty && (System.currentTimeMillis() - lastDirtyTime) >= (debounce - 200)) {
                 dirty = false;
                 saveAllAsync();
             }
-        }, SAVE_DEBOUNCE_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+        }, debounce, java.util.concurrent.TimeUnit.MILLISECONDS);
     }
 
     /** Force immediate save — called on shutdown and /cb reload. */

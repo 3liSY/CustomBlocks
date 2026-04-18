@@ -456,10 +456,11 @@ public class CustomBlocksMod implements ModInitializer {
 
         UseEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
 
-            if (entity instanceof net.fabricmc.fabric.api.entity.FakePlayer
-                    && com.customblocks.assistant.AssistantManager.isSpawned()) {
+            if (!world.isClient
+                    && player instanceof ServerPlayerEntity serverPlayer
+                    && com.customblocks.assistant.AssistantManager.isManagedAssistant(entity)) {
 
-                if (!world.isClient) GuiManager.openAssistantControl((ServerPlayerEntity)player);
+                GuiManager.openAssistantControl(serverPlayer);
 
                 return net.minecraft.util.ActionResult.SUCCESS;
 
@@ -467,18 +468,6 @@ public class CustomBlocksMod implements ModInitializer {
 
             return net.minecraft.util.ActionResult.PASS;
 
-        });
-
-        // FakePlayer rendering: clients need the player list entry to render the skin
-        net.fabricmc.fabric.api.networking.v1.EntityTrackingEvents.START_TRACKING.register((trackedEntity, player) -> {
-            if (trackedEntity instanceof net.fabricmc.fabric.api.entity.FakePlayer fp
-                    && com.customblocks.assistant.AssistantManager.isSpawned()) {
-                net.minecraft.network.packet.s2c.play.PlayerListS2CPacket packet = 
-                    new net.minecraft.network.packet.s2c.play.PlayerListS2CPacket(
-                        java.util.EnumSet.of(net.minecraft.network.packet.s2c.play.PlayerListS2CPacket.Action.ADD_PLAYER), 
-                        java.util.List.of(fp));
-                player.networkHandler.sendPacket(packet);
-            }
         });
 
         // ── Assistant Diamond Command (Go Here) ──────────────────────────────
@@ -495,7 +484,7 @@ public class CustomBlocksMod implements ModInitializer {
 
                     com.customblocks.assistant.AssistantManager.orderMoveTo(pos);
 
-                    player.sendMessage(Text.literal("§0§l[§b§lHelper§0§l] §fMoving there. §a✔"), false);
+                    player.sendMessage(Text.literal("§0§l[§b§lAI§0§l] §fMoving there. §a✔"), false);
 
                 }
 

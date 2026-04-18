@@ -70,14 +70,14 @@ public final class CustomBlocksConfig {
     public static volatile String rpKickMessage = "§cYou must accept the CustomBlocks resource pack to play on this server.";
 
     // ── Assistant NPC (The Helper) ───────────────────────────────────────────
-    /** Whether the helper is currently spawned in the world. */
-    public static volatile boolean helperEnabled = false;
-    /** The helper's display name. */
-    public static volatile String helperName = "CustomBlocks Helper";
-    /** The helper's skin (Minecraft username or texture URL). */
-    public static volatile String helperSkin = "Architect";
+    /** Whether the assistant AI is currently active in the world. */
+    public static volatile boolean aiEnabled = false;
+    /** The assistant AI display name. */
+    public static volatile String aiName = "CustomBlocks AI";
+    /** The assistant AI visual style. */
+    public static volatile String aiStyle = "Echo";
     /** Whether the live status hologram is visible. */
-    public static volatile boolean helperHologram = true;
+    public static volatile boolean aiHologram = true;
 
     // ── Public API ───────────────────────────────────────────────────────────
 
@@ -113,10 +113,10 @@ public final class CustomBlocksConfig {
             resourcePackPort      = getInt(root, "resourcePackPort", resourcePackPort);
             reloadDebounceMs      = getLong(root, "reloadDebounceMs", reloadDebounceMs);
             joinDebounceMs        = getLong(root, "joinDebounceMs", joinDebounceMs);
-            helperEnabled         = getBool(root, "helperEnabled", helperEnabled);
-            helperName            = getString(root, "helperName", helperName);
-            helperSkin            = getString(root, "helperSkin", helperSkin);
-            helperHologram        = getBool(root, "helperHologram", helperHologram);
+            aiEnabled             = getBool(root, "aiEnabled", getBool(root, "helperEnabled", aiEnabled));
+            aiName                = getString(root, "aiName", getString(root, "helperName", aiName));
+            aiStyle               = getString(root, "aiStyle", getString(root, "helperSkin", aiStyle));
+            aiHologram            = getBool(root, "aiHologram", getBool(root, "helperHologram", aiHologram));
             rpEnforceOnJoin       = getBool(root, "rpEnforceOnJoin", rpEnforceOnJoin);
             rpPromptMessage       = getString(root, "rpPromptMessage", rpPromptMessage);
             rpKickMessage         = getString(root, "rpKickMessage", rpKickMessage);
@@ -164,10 +164,10 @@ public final class CustomBlocksConfig {
             root.addProperty("resourcePackPort", resourcePackPort);
             root.addProperty("reloadDebounceMs", reloadDebounceMs);
             root.addProperty("joinDebounceMs", joinDebounceMs);
-            root.addProperty("helperEnabled", helperEnabled);
-            root.addProperty("helperName", helperName);
-            root.addProperty("helperSkin", helperSkin);
-            root.addProperty("helperHologram", helperHologram);
+            root.addProperty("aiEnabled", aiEnabled);
+            root.addProperty("aiName", aiName);
+            root.addProperty("aiStyle", aiStyle);
+            root.addProperty("aiHologram", aiHologram);
             root.addProperty("rpEnforceOnJoin", rpEnforceOnJoin);
             root.addProperty("rpPromptMessage", rpPromptMessage);
             root.addProperty("rpKickMessage", rpKickMessage);

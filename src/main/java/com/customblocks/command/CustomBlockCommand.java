@@ -302,7 +302,7 @@ public class CustomBlockCommand {
                             return 1;
                         })))
 
-                // ── ai (merged helper + assistant GUI) ──────────────────────
+                // ── ai assistant controls ───────────────────────────────────
                 .then(CommandManager.literal("ai")
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
@@ -329,7 +329,7 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("config")
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
-                        if (p != null) GuiManager.openConfigGui(p);
+                        if (p != null) GuiManager.openConfigWarningGui(p);
                         else ctx.getSource().sendError(Text.literal("Player only."));
                         return 1;
                     }))
@@ -1277,16 +1277,16 @@ public class CustomBlockCommand {
         if (p == null) { src.sendError(Text.literal("Player only.")); return 0; }
         com.customblocks.assistant.AssistantManager.spawn(src.getServer(),
             (net.minecraft.server.world.ServerWorld) p.getWorld(), p.getX(), p.getY(), p.getZ());
-        src.sendMessage(Text.literal("§a[CustomBlocks] Helper spawned at your location."));
+        src.sendMessage(Text.literal("§a[CustomBlocks] AI assistant spawned at your location."));
         return 1;
     }
 
     private static int cmdHelperHide(ServerCommandSource src) {
         if (!com.customblocks.assistant.AssistantManager.isSpawned()) {
-            src.sendMessage(Text.literal("§7[CustomBlocks] Helper is not active.")); return 0;
+            src.sendMessage(Text.literal("§7[CustomBlocks] AI assistant is not active.")); return 0;
         }
         com.customblocks.assistant.AssistantManager.hide();
-        src.sendMessage(Text.literal("§a[CustomBlocks] Helper hidden."));
+        src.sendMessage(Text.literal("§a[CustomBlocks] AI assistant hidden."));
         return 1;
     }
 
@@ -1294,19 +1294,19 @@ public class CustomBlockCommand {
         ServerPlayerEntity p = src.getPlayer();
         if (p == null) { src.sendError(Text.literal("Player only.")); return 0; }
         if (!com.customblocks.assistant.AssistantManager.isSpawned()) {
-            src.sendMessage(Text.literal("§7[CustomBlocks] Helper is not active. Use §b/cb helper spawn§7 first.")); return 0;
+            src.sendMessage(Text.literal("§7[CustomBlocks] AI assistant is not active. Use §b/cb ai spawn§7 first.")); return 0;
         }
         com.customblocks.assistant.AssistantManager.setFollowing(true, p.getUuid());
-        src.sendMessage(Text.literal("§a[CustomBlocks] Helper is now following you."));
+        src.sendMessage(Text.literal("§a[CustomBlocks] AI assistant is now following you."));
         return 1;
     }
 
     private static int cmdHelperStay(ServerCommandSource src) {
         if (!com.customblocks.assistant.AssistantManager.isSpawned()) {
-            src.sendMessage(Text.literal("§7[CustomBlocks] Helper is not active.")); return 0;
+            src.sendMessage(Text.literal("§7[CustomBlocks] AI assistant is not active.")); return 0;
         }
         com.customblocks.assistant.AssistantManager.setFollowing(false, null);
-        src.sendMessage(Text.literal("§a[CustomBlocks] Helper is staying put."));
+        src.sendMessage(Text.literal("§a[CustomBlocks] AI assistant is staying put."));
         return 1;
     }
 
@@ -1314,10 +1314,10 @@ public class CustomBlockCommand {
         ServerPlayerEntity p = src.getPlayer();
         if (p == null) { src.sendError(Text.literal("Player only.")); return 0; }
         if (!com.customblocks.assistant.AssistantManager.isSpawned()) {
-            src.sendMessage(Text.literal("§7[CustomBlocks] Helper is not active.")); return 0;
+            src.sendMessage(Text.literal("§7[CustomBlocks] AI assistant is not active.")); return 0;
         }
         com.customblocks.assistant.AssistantManager.teleportToPlayer(p);
-        src.sendMessage(Text.literal("§a[CustomBlocks] Helper teleported to you."));
+        src.sendMessage(Text.literal("§a[CustomBlocks] AI assistant teleported to you."));
         return 1;
     }
 
@@ -1325,7 +1325,7 @@ public class CustomBlockCommand {
         ServerPlayerEntity p = src.getPlayer();
         if (p == null) { src.sendError(Text.literal("Player only.")); return 0; }
         if (!com.customblocks.assistant.AssistantManager.isSpawned()) {
-            src.sendMessage(Text.literal("§7[CustomBlocks] Helper is not active. Use §b/cb helper spawn§7 first.")); return 0;
+            src.sendMessage(Text.literal("§7[CustomBlocks] AI assistant is not active. Use §b/cb ai spawn§7 first.")); return 0;
         }
         com.customblocks.assistant.AssistantManager.runSanityScan(p);
         return 1;
@@ -1333,7 +1333,7 @@ public class CustomBlockCommand {
 
     private static int cmdHelperStatus(ServerCommandSource src) {
         String summary = com.customblocks.assistant.AssistantManager.getStatusSummary();
-        src.sendMessage(Text.literal("§0§l[§b§lHelper§0§l] " + summary));
+        src.sendMessage(Text.literal("§0§l[§b§lAI§0§l] " + summary));
         return 1;
     }
 
