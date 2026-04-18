@@ -78,15 +78,17 @@ public final class ImageProcessor {
                 ProcessResult anim = processAnimation(raw, targetSize);
                 if (anim != null && anim.isAnimated()) {
                     if (isBrokenTexture(anim.bytes))
-                        throw new IOException("§eGot the GIF, but something went wrong putting the frames together. §7Try a simpler GIF, or convert it to PNG first.");
+                        throw new IOException("§eGot the GIF, but frame-stitching came out broken. §7Check the server log for the exact reason.");
                     return anim;
                 }
-                // LOUD FAILURE: the file WAS animated but we couldn't decode it.
-                // Do NOT silently fall through to static pipeline - that produces
-                // the confusing "I uploaded a GIF and got a single image" bug.
-                CustomBlocksMod.LOGGER.error("[CustomBlocks] Animated image detected but processAnimation returned null/static. URL hint: length={} bytes, targetSize={}",
-                        raw.length, targetSize);
-                throw new IOException("§eThat animated image couldn't be decoded. §7The GIF may use features I don't support yet — try a simpler GIF, or convert it to a PNG/WebP first.");
+                // The file was flagged as animated but we could not produce multiple
+                // frames. Log the hint so admins can see why, then surface a clear
+                // chat error - NOT "convert to PNG", because that defeats the point
+                // of uploading a GIF in the first place.
+                CustomBlocksMod.LOGGER.warn(
+                    "[CustomBlocks] Animated image detected but no frames were produced. Size: {} bytes, target: {}px. See earlier GIF decode warning(s) in this log for the precise reason.",
+                    raw.length, targetSize);
+                throw new IOException("§eI couldn't extract animation frames from that image. §7The server log will show the decode reason — share it and I can make the decoder handle it.");
             }
 
             byte[] png = toPng(raw);
@@ -457,54 +459,64 @@ public final class ImageProcessor {
         long startTime = System.currentTimeMillis();
         ImageReader reader = null;
         try (ImageInputStream iis = ImageIO.createImageInputStream(new ByteArrayInputStream(raw))) {
-            if (iis == null) return null;
-            Iterator<ImageReader> readers = ImageIO.getImageReaders(iis);
-            if (!readers.hasNext()) return null;
-
-            reader = readers.next();
-            // IMPORTANT: getNumImages(true) requires seekForwardOnly=false; the two
-            // flags are mutually exclusive per ImageReader contract, otherwise it
-            // throws IllegalStateException and crashes every GIF upload.
-            reader.setInput(iis, false, false);
-
-            int numFrames;
-            try {
-                numFrames = reader.getNumImages(true);
-            } catch (IOException | IllegalStateException e) {
-                CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not count GIF frames: {}", e.getMessage());
+            if (iis == null) {
+                CustomBlocksMod.LOGGER.warn("[CustomBlocks] GIF decode: ImageIO.createImageInputStream returned null");
                 return null;
             }
-            if (numFrames <= 1) return null;
-
-            if (numFrames > MAX_FRAMES) {
-                CustomBlocksMod.LOGGER.warn("[CustomBlocks] GIF has {} frames, capped at {}", numFrames, MAX_FRAMES);
-                numFrames = MAX_FRAMES;
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(iis);
+            if (!readers.hasNext()) {
+                CustomBlocksMod.LOGGER.warn("[CustomBlocks] GIF decode: no ImageReader available for this data");
+                return null;
             }
 
-            // Peek first frame dims for canvas allocation
+            reader = readers.next();
+            // seekForwardOnly MUST be false so getNumImages(true) can search.
+            // ignoreMetadata=false so we can read GIF disposal/delay/offsets.
+            reader.setInput(iis, false, false);
+
+            // Best-effort frame count. Many malformed GIFs return 1 here even
+            // when they have multiple frames, so we do NOT fail when it says 1 -
+            // instead we let the read-loop below discover the real count by
+            // reading frames until read() fails.
+            int hintedFrames;
+            try {
+                hintedFrames = reader.getNumImages(true);
+            } catch (IOException | IllegalStateException e) {
+                hintedFrames = -1;
+            }
+
+            // Peek first frame for canvas dims. If this fails, it really is broken.
             BufferedImage firstFrame;
             try {
                 firstFrame = reader.read(0);
             } catch (Exception e) {
-                CustomBlocksMod.LOGGER.warn("[CustomBlocks] Failed to read first frame: {}", e.getMessage());
+                CustomBlocksMod.LOGGER.warn("[CustomBlocks] GIF decode: first-frame read failed: {}", e.getMessage());
                 return null;
             }
-            if (firstFrame == null) return null;
+            if (firstFrame == null) {
+                CustomBlocksMod.LOGGER.warn("[CustomBlocks] GIF decode: first frame was null");
+                return null;
+            }
 
             int canvasW = Math.min(firstFrame.getWidth(), MAX_FRAME_DIM);
             int canvasH = Math.min(firstFrame.getHeight(), MAX_FRAME_DIM);
-            if (canvasW <= 0 || canvasH <= 0) return null;
+            if (canvasW <= 0 || canvasH <= 0) {
+                CustomBlocksMod.LOGGER.warn("[CustomBlocks] GIF decode: invalid canvas {}x{}", canvasW, canvasH);
+                return null;
+            }
 
-            // Re-open reader to start from frame 0 (seekForwardOnly used first frame)
+            // Re-open the stream so the main loop starts from frame 0.
             reader.dispose();
             reader = null;
             try (ImageInputStream iis2 = ImageIO.createImageInputStream(new ByteArrayInputStream(raw))) {
                 Iterator<ImageReader> readers2 = ImageIO.getImageReaders(iis2);
-                if (!readers2.hasNext()) return null;
+                if (!readers2.hasNext()) {
+                    CustomBlocksMod.LOGGER.warn("[CustomBlocks] GIF decode: second pass found no reader");
+                    return null;
+                }
                 reader = readers2.next();
                 reader.setInput(iis2, false, false);
 
-                // Composite canvas - represents the "on-screen" state after each frame
                 BufferedImage composite = new BufferedImage(canvasW, canvasH, BufferedImage.TYPE_INT_ARGB);
                 BufferedImage previous = null; // for disposal=3 (restoreToPrevious)
                 Graphics2D gComp = composite.createGraphics();
@@ -513,10 +525,17 @@ public final class ImageProcessor {
                 gComp.fillRect(0, 0, canvasW, canvasH);
                 gComp.setComposite(AlphaComposite.SrcOver);
 
-                java.util.List<BufferedImage> frames = new java.util.ArrayList<>(numFrames);
-                java.util.List<Integer> ticks = new java.util.ArrayList<>(numFrames);
+                // Upper bound on loop: min(MAX_FRAMES, hint if reliable).
+                // If hint is -1 or 1, we still try all the way to MAX_FRAMES
+                // and stop when read() fails (robust against malformed GIFs).
+                int maxAttempts = hintedFrames > 1
+                        ? Math.min(hintedFrames, MAX_FRAMES)
+                        : MAX_FRAMES;
 
-                for (int i = 0; i < numFrames; i++) {
+                java.util.List<BufferedImage> frames = new java.util.ArrayList<>();
+                java.util.List<Integer> ticks = new java.util.ArrayList<>();
+
+                for (int i = 0; i < maxAttempts; i++) {
                     // Timeout check
                     if (System.currentTimeMillis() - startTime > ANIM_TIMEOUT_MS) {
                         CustomBlocksMod.LOGGER.warn("[CustomBlocks] GIF processing timeout after {}ms (frame {})",
