@@ -324,6 +324,26 @@ public final class ImageProcessor {
         return false;
     }
 
+    /**
+     * Extracts vertical frame count instantly from PNG headers without decoding the whole image.
+     * Returns 1 if not a valid PNG or not animated.
+     */
+    public static int getVerticalFrames(byte[] raw) {
+        if (raw == null || raw.length < 24) return 1;
+        // Check PNG signature: 89 50 4E 47
+        if (raw[0] != (byte)0x89 || raw[1] != 0x50 || raw[2] != 0x4E || raw[3] != 0x47) return 1;
+        
+        // IHDR chunk should follow immediately (12 bytes in, 4 byte data length, 4 byte type 'IHDR', then width/height)
+        // Standard width offset: 16, height offset: 20
+        int w = ((raw[16] & 0xFF) << 24) | ((raw[17] & 0xFF) << 16) | ((raw[18] & 0xFF) << 8) | (raw[19] & 0xFF);
+        int h = ((raw[20] & 0xFF) << 24) | ((raw[21] & 0xFF) << 16) | ((raw[22] & 0xFF) << 8) | (raw[23] & 0xFF);
+        
+        if (w > 0 && h > w) {
+            return h / w;
+        }
+        return 1;
+    }
+
     // ── Animated Image Processing ────────────────────────────────────────────
 
     /**

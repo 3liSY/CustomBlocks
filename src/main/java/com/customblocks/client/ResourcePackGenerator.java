@@ -94,11 +94,8 @@ public class ResourcePackGenerator {
                         File faceMcmeta = new File(assets,
                                 "textures/block/" + slotKey + "_" + faceKey + ".png.mcmeta");
                         try {
-                            java.awt.image.BufferedImage faceImg =
-                                javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(faceBytes));
-                            if (faceImg != null && faceImg.getHeight() > faceImg.getWidth()) {
-                                int faceW = faceImg.getWidth(), faceH = faceImg.getHeight();
-                                int frames = faceH / faceW;
+                            int frames = com.customblocks.ImageProcessor.getVerticalFrames(faceBytes);
+                            if (frames > 1) {
                                 // Royal Standard: Object format {"index":i,"time":t} — raw indices cause stacked images
                                 StringBuilder sb = new StringBuilder("{\"animation\":{\"interpolate\":true,\"frames\":[");
                                 for (int fi = 0; fi < frames; fi++) {

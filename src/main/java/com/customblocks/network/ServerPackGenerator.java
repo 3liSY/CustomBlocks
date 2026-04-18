@@ -85,20 +85,17 @@ public class ServerPackGenerator {
                             String facePath = "assets/" + MOD_ID + "/textures/block/" + slotKey + "_" + faceKey + ".png";
                             addZipEntry(zos, facePath, faceBytes);
                             
-                            try {
-                                BufferedImage faceImg = ImageIO.read(new ByteArrayInputStream(faceBytes));
-                                if (faceImg != null && faceImg.getHeight() > faceImg.getWidth()) {
-                                    int frames = faceImg.getHeight() / faceImg.getWidth();
-                                    // Royal standard: Fluid Motion (interpolate: true)
-                                    StringBuilder sb = new StringBuilder("{\"animation\":{\"interpolate\":true,\"frames\":[");
-                                    for (int fi = 0; fi < frames; fi++) {
-                                        if (fi > 0) sb.append(",");
-                                        sb.append("{\"index\":").append(fi).append(",\"time\":5}");
-                                    }
-                                    sb.append("]}}");
-                                    addZipEntry(zos, facePath + ".mcmeta", sb.toString().getBytes(StandardCharsets.UTF_8));
+                            int frames = com.customblocks.ImageProcessor.getVerticalFrames(faceBytes);
+                            if (frames > 1) {
+                                // Royal standard: Fluid Motion (interpolate: true)
+                                StringBuilder sb = new StringBuilder("{\"animation\":{\"interpolate\":true,\"frames\":[");
+                                for (int fi = 0; fi < frames; fi++) {
+                                    if (fi > 0) sb.append(",");
+                                    sb.append("{\"index\":").append(fi).append(",\"time\":5}");
                                 }
-                            } catch (Exception ignored) {}
+                                sb.append("]}}");
+                                addZipEntry(zos, facePath + ".mcmeta", sb.toString().getBytes(StandardCharsets.UTF_8));
+                            }
                         }
                         // Legacy texture stitching: for faces WITHOUT overrides,
                         // write a copy of the main texture so each face has its own file.

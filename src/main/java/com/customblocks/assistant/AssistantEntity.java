@@ -4,9 +4,10 @@ import com.mojang.authlib.GameProfile;
 import net.minecraft.entity.damage.DamageSource;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.network.packet.c2s.common.SyncedClientOptions;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
-import net.minecraft.world.GameMode;
 
 import java.util.UUID;
 
@@ -16,10 +17,10 @@ import java.util.UUID;
  * A "Fake Player" entity that supports standard skins and animations.
  * Does not appear in the Tab list by default and is designed for mod maintenance assistance.
  */
-public class AssistantEntity extends net.fabricmc.fabric.api.entity.FakePlayer {
+public class AssistantEntity extends ServerPlayerEntity {
 
     public AssistantEntity(MinecraftServer server, ServerWorld world, GameProfile profile) {
-        super(world, profile);
+        super(server, world, profile, SyncedClientOptions.createDefault());
     }
 
     @Override
