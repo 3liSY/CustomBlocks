@@ -81,8 +81,14 @@ public final class ImageProcessor {
                         throw new IOException("§eGot the GIF, but something went wrong putting the frames together. §7Try a simpler GIF, or convert it to PNG first.");
                     return anim;
                 }
+                // LOUD FAILURE: the file WAS animated but we couldn't decode it.
+                // Do NOT silently fall through to static pipeline - that produces
+                // the confusing "I uploaded a GIF and got a single image" bug.
+                CustomBlocksMod.LOGGER.error("[CustomBlocks] Animated image detected but processAnimation returned null/static. URL hint: length={} bytes, targetSize={}",
+                        raw.length, targetSize);
+                throw new IOException("§eThat animated image couldn't be decoded. §7The GIF may use features I don't support yet — try a simpler GIF, or convert it to a PNG/WebP first.");
             }
-            
+
             byte[] png = toPng(raw);
             png = padToSquare(png);
             png = replaceBackground(png);

@@ -296,6 +296,12 @@ public class GuiManager {
     }
 
     private static SimpleInventory buildAssistantControl(ServerPlayerEntity player) {
+        // Layout follows Main plan.md:168-174
+        //   Slot 4           : Status display (center top)
+        //   Row 2 (11,13,15) : Core controls (spawn toggle, mode, goto)
+        //   Row 4 (29,31,33) : Secondary actions (scan, hologram, rename)
+        //   Row 5 (45-51)    : Style presets (7 styles)
+        //   Slot 53          : Back
         SimpleInventory inv = new SimpleInventory(54);
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
 
@@ -304,53 +310,51 @@ public class GuiManager {
         boolean holo = CustomBlocksConfig.aiHologram;
         String currentStyle = com.customblocks.assistant.AssistantManager.normalizeStyle(CustomBlocksConfig.aiStyle);
 
+        // Slot 4: status display
         inv.setStack(4, uiGlint(Items.PLAYER_HEAD, "§b§lAssistant Hub",
             "§7Status: " + (active ? "§aSpawned" : "§cHidden"),
             "§7Mode: " + (following ? "§bFollowing you" : "§7Staying in place"),
             "§7Name: §f" + CustomBlocksConfig.aiName,
             "§7Style: §d" + currentStyle));
 
-        // Row 1: core controls
-        inv.setStack(19, uiGlint(active ? Items.ENDER_EYE : Items.ENDER_PEARL,
+        // Row 2: core controls (spawn toggle, mode, go to)
+        inv.setStack(11, uiGlint(active ? Items.ENDER_EYE : Items.ENDER_PEARL,
             active ? "§a§l✔ Spawned" : "§c§l✖ Hidden",
             "§7Turn the AI assistant ON or OFF.",
             "§7When active, it appears near you in-world."));
-
-        inv.setStack(20, uiGlint(following ? Items.RECOVERY_COMPASS : Items.COMPASS,
+        inv.setStack(13, uiGlint(following ? Items.RECOVERY_COMPASS : Items.COMPASS,
             "§e§lMode: " + (following ? "Following" : "Staying"),
             "§7When following, the assistant floats after you.",
             "§7When staying, it waits in place."));
-
-        inv.setStack(22, uiGlint(Items.ENDER_CHEST, "§b§lGo To AI",
+        inv.setStack(15, uiGlint(Items.ENDER_CHEST, "§b§lGo To AI",
             "§7Teleport yourself to where the assistant is.",
             active ? "§aAI assistant is active" : "§cAI assistant is not spawned"));
 
-        inv.setStack(24, uiGlint(Items.NETHER_STAR, "§6§lScan for Broken Blocks",
+        // Row 4: secondary actions (scan, hologram, rename)
+        inv.setStack(29, uiGlint(Items.NETHER_STAR, "§6§lScan for Broken Blocks",
             "§7Searches nearby area for blocks with missing textures.",
             "§7The assistant highlights broken blocks."));
-
-        inv.setStack(25, uiGlint(holo ? Items.END_CRYSTAL : Items.GLASS,
+        inv.setStack(31, uiGlint(holo ? Items.END_CRYSTAL : Items.GLASS,
             holo ? "§d§lHologram: §aON" : "§7§lHologram: §cOFF",
             "§7Floating status label above the assistant.",
             "§8Click to toggle"));
-
-        // Row 2: identity
-        inv.setStack(31, uiGlint(Items.PAINTING, "§f§lRename AI",
+        inv.setStack(33, uiGlint(Items.PAINTING, "§f§lRename AI",
             "§7Current: §b" + CustomBlocksConfig.aiName,
             "§8Click to edit the assistant name"));
 
-        // Row 3: Style Presets
+        // Row 5: style presets (slots 45-51, 7 styles)
         List<String> styles = com.customblocks.assistant.AssistantManager.availableStyles();
         for (int i = 0; i < styles.size() && i < 7; i++) {
             String style = styles.get(i);
             boolean current = currentStyle.equalsIgnoreCase(style);
-            inv.setStack(37 + i, uiGlint(
+            inv.setStack(45 + i, uiGlint(
                 com.customblocks.assistant.AssistantManager.getStyleDisplayItem(style),
                 (current ? "§a§l✔ " : "§b§l") + style,
                 current ? "§aCurrent AI style" : "§7Click to use this style"));
         }
 
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
+        // Slot 53: back
+        inv.setStack(53, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
         return inv;
     }
 
@@ -896,9 +900,10 @@ public class GuiManager {
 
     private static void handleAssistantControlClick(ServerPlayerEntity player, GuiState state, int slot) {
         playClick(player);
-        if (slot == 45) { openMain(player, 0); return; }
+        if (slot == 53) { openMain(player, 0); return; }
 
-        if (slot == 19) { // Toggle Spawn
+        // Row 2: core controls (11=spawn, 13=mode, 15=goto)
+        if (slot == 11) { // Toggle Spawn
             if (com.customblocks.assistant.AssistantManager.isSpawned()) {
                 com.customblocks.assistant.AssistantManager.hide();
                 send(player, "§0§l[§b§lAI§0§l] §7Hidden. §c✖");
@@ -907,14 +912,16 @@ public class GuiManager {
                 send(player, "§0§l[§b§lAI§0§l] §fReady to help. §a✔");
             }
             openAssistantControl(player);
+            return;
         }
-        if (slot == 20) { // Toggle Follow
+        if (slot == 13) { // Toggle Follow
             boolean f = !com.customblocks.assistant.AssistantManager.isFollowing();
             com.customblocks.assistant.AssistantManager.setFollowing(f, player.getUuid());
             send(player, "§0§l[§b§lAI§0§l] §fMode: " + (f ? "§bFollowing" : "§7Staying"));
             openAssistantControl(player);
+            return;
         }
-        if (slot == 22) { // Go To AI
+        if (slot == 15) { // Go To AI
             if (!com.customblocks.assistant.AssistantManager.isSpawned()) {
                 send(player, "§c[AI] Not spawned. Spawn the AI assistant first.");
                 return;
@@ -923,12 +930,14 @@ public class GuiManager {
             com.customblocks.assistant.AssistantManager.teleportPlayerToHelper(player);
             return;
         }
-        if (slot == 24) { // Sanity Scan
+
+        // Row 4: secondary actions (29=scan, 31=hologram, 33=rename)
+        if (slot == 29) { // Sanity Scan
             player.closeHandledScreen();
             com.customblocks.assistant.AssistantManager.runSanityScan(player);
             return;
         }
-        if (slot == 25) { // Hologram toggle
+        if (slot == 31) { // Hologram toggle
             CustomBlocksConfig.aiHologram = !CustomBlocksConfig.aiHologram;
             CustomBlocksConfig.save();
             com.customblocks.assistant.AssistantManager.refreshFromConfig();
@@ -936,7 +945,7 @@ public class GuiManager {
             openAssistantControl(player);
             return;
         }
-        if (slot == 31) { // Rename
+        if (slot == 33) { // Rename
             openShortInputPrompt(
                 player,
                 new PendingInput(InputAction.ADMIN_CUSTOM_TITLE, "ai_name", null, null, null, 0),
@@ -946,10 +955,11 @@ public class GuiManager {
             );
             return;
         }
-        // Style Presets
-        if (slot >= 37 && slot <= 43) {
+
+        // Row 5: style presets (slots 45-51)
+        if (slot >= 45 && slot <= 51) {
             List<String> skins = com.customblocks.assistant.AssistantManager.availableStyles();
-            int si = slot - 37;
+            int si = slot - 45;
             if (si < skins.size()) {
                 CustomBlocksConfig.aiStyle = skins.get(si);
                 CustomBlocksConfig.save();
@@ -1312,21 +1322,41 @@ public class GuiManager {
     private static void handleMainClick(ServerPlayerEntity player, GuiState state, int slot) {
         UUID uuid = player.getUuid();
         switch (slot) {
-            // Row 1: main actions
-            case 10 -> openEditorPicker(player, 0);
-            case 12 -> openShortInputPrompt(
+            // Row 2: primary actions
+            case 19 -> openEditorPicker(player, 0);
+            case 21 -> openShortInputPrompt(
                 player,
                 new PendingInput(InputAction.CREATE_ID, null, null, null, null, state.page()),
                 "§6New Block ID",
                 new ItemStack(Items.COMMAND_BLOCK),
                 ""
             );
-            case 14 -> { PENDING.put(uuid, new PendingInput(InputAction.REID_TEXT, "__search__", null, null, null, state.page())); closeForPrompt(player); send(player, "§6[GUI] §eType a search query (or §ccancel§e):"); }
-            case 16 -> openMagicItemsGui(player);
-            // Row 2: utilities
-            case 19 -> openAssistantControl(player);
-            case 20 -> openMaintenanceMenu(player);
-            case 21 -> {
+            case 23 -> {
+                PENDING.put(uuid, new PendingInput(InputAction.REID_TEXT, "__search__", null, null, null, state.page()));
+                closeForPrompt(player);
+                send(player, "§6[GUI] §eType a search query (or §ccancel§e):");
+            }
+            case 25 -> openMagicItemsGui(player);
+
+            // Row 3: recent blocks (slots 30, 32, 34)
+            case 30, 32, 34 -> {
+                Deque<String> recent = RECENT_BLOCKS.getOrDefault(uuid, new ArrayDeque<>());
+                int ri = (slot - 30) / 2; // 30->0, 32->1, 34->2
+                int idx = 0;
+                for (String rid : recent) {
+                    if (idx == ri && SlotManager.hasId(rid)) { openEditor(player, rid, state.page()); return; }
+                    idx++;
+                }
+            }
+
+            // Row 4: secondary actions
+            case 37 -> openAssistantControl(player);
+            case 39 -> openMaintenanceMenu(player);
+            case 41 -> openBulkDelete(player, 0);
+            case 43 -> openHelpGui(player);
+
+            // Row 5: navigation
+            case 46 -> {
                 int undoSz = UndoManager.undoSize(uuid);
                 if (undoSz == 0) { send(player, "§7Nothing to undo."); refreshScreen(player, buildMain(player, state.page())); return; }
                 UndoManager.UndoEntry entry = UndoManager.popUndo(uuid);
@@ -1334,7 +1364,8 @@ public class GuiManager {
                 applyUndoEntry(player, entry);
                 refreshScreen(player, buildMain(player, state.page()));
             }
-            case 23 -> {
+            case 48 -> openUndoPicker(player, 0);
+            case 50 -> {
                 int redoSz = UndoManager.redoSize(uuid);
                 if (redoSz == 0) { send(player, "§7Nothing to redo."); refreshScreen(player, buildMain(player, state.page())); return; }
                 UndoManager.UndoEntry entry = UndoManager.popRedo(uuid);
@@ -1342,21 +1373,7 @@ public class GuiManager {
                 applyRedoEntry(player, entry);
                 refreshScreen(player, buildMain(player, state.page()));
             }
-            case 22 -> openUndoPicker(player, 0);
-            case 24 -> openBulkDelete(player, 0);
-            case 25 -> openHelpGui(player);
-            // Row 3
-            case 28 -> openConfigWarningGui(player);
-            // Recent blocks (slots 32-34)
-            case 32, 33, 34 -> {
-                Deque<String> recent = RECENT_BLOCKS.getOrDefault(uuid, new ArrayDeque<>());
-                int ri = slot - 32;
-                int idx = 0;
-                for (String rid : recent) {
-                    if (idx == ri && SlotManager.hasId(rid)) { openEditor(player, rid, state.page()); return; }
-                    idx++;
-                }
-            }
+            case 52 -> openConfigWarningGui(player);
         }
     }
 
@@ -2027,6 +2044,13 @@ public class GuiManager {
     }
 
     private static SimpleInventory buildMain(ServerPlayerEntity player, int page) {
+        // Layout follows Main plan.md:151-158
+        //   Row 0 (slot 4)         : Title
+        //   Row 2 (19,21,23,25)    : Primary actions (1-slot gaps)
+        //   Row 3 (30,32,34)       : Recent blocks (if any)
+        //   Row 4 (37,39,41,43)    : Secondary actions (1-slot gaps)
+        //   Row 5 (46,48,50,52)    : Navigation (undo/history/redo/config)
+        //   Everything else        : invisible gray panes
         SimpleInventory inv = new SimpleInventory(54);
         UUID uuid = player.getUuid();
         int undoSz = UndoManager.undoSize(uuid);
@@ -2036,40 +2060,59 @@ public class GuiManager {
 
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
 
-        // Row 0: header
-        inv.setStack(4, uiGlint(Items.DIAMOND, "§b§lCustomBlocks Dashboard", "§7Total blocks: §f" + blockCount,
+        // Row 0: title
+        inv.setStack(4, uiGlint(Items.DIAMOND, "§b§lCustomBlocks Dashboard",
+            "§7Total blocks: §f" + blockCount,
             brokenCount > 0 ? "§cBroken: §f" + brokenCount : "§aAll textures OK",
             "§8Type /cb help for commands"));
 
-        // Row 1: main actions
-        inv.setStack(10, uiGlint(Items.CRAFTING_TABLE, "§e§lBlock Manager", "§7Browse, edit, or create blocks", "§8" + blockCount + " block(s) registered"));
-        inv.setStack(12, uiGlint(Items.EMERALD, "§a§l+ Create New Block", "§7Create a new custom block", "§8Type an ID in chat"));
-        inv.setStack(14, uiGlint(Items.SPYGLASS, "§f§lSearch Blocks", "§7Find a block by name or ID", "§8Type a query in chat"));
-        inv.setStack(16, uiGlint(Items.BRUSH, "§d§lMagic Items", "§7Wands, color squares, triangles"));
+        // Row 2: primary actions (spaced by 1 slot)
+        inv.setStack(19, uiGlint(Items.CRAFTING_TABLE, "§e§lBlock Manager",
+            "§7Browse, edit, or create blocks", "§8" + blockCount + " block(s) registered"));
+        inv.setStack(21, uiGlint(Items.EMERALD, "§a§l+ Create New Block",
+            "§7Create a new custom block", "§8Type an ID in chat"));
+        inv.setStack(23, uiGlint(Items.SPYGLASS, "§f§lSearch Blocks",
+            "§7Find a block by name or ID", "§8Type a query in chat"));
+        inv.setStack(25, uiGlint(Items.BRUSH, "§d§lMagic Items",
+            "§7Wands, color squares, triangles"));
 
-        // Row 2: utilities
-        inv.setStack(19, uiGlint(Items.ARMOR_STAND, "§b§lAssistant Hub", "§7Spawn, control, and configure the AI assistant"));
-        inv.setStack(20, uiGlint(Items.STRUCTURE_VOID, "§6§lServer Tools", "§7Broken blocks, resource pack, data", brokenCount > 0 ? "§c" + brokenCount + " broken" : "§aAll OK"));
-        inv.setStack(21, undoSz > 0 ? uiGlint(Items.GOLDEN_PICKAXE, "§6§l↩ Undo §e(" + undoSz + ")", "§7Click to undo last action") : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Undo (Empty)"));
-        inv.setStack(22, (undoSz + redoSz) > 0 ? uiGlint(Items.KNOWLEDGE_BOOK, "§6§lHistory §7(" + (undoSz + redoSz) + ")", "§7Browse undo/redo entries", "§8Click to open picker") : ui(Items.GRAY_STAINED_GLASS_PANE, "§8History (Empty)"));
-        inv.setStack(23, redoSz > 0 ? uiGlint(Items.DIAMOND_PICKAXE, "§b§l↪ Redo §3(" + redoSz + ")", "§7Click to redo last undone action") : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Redo (Empty)"));
-        inv.setStack(24, uiGlint(Items.LAVA_BUCKET, "§c§l⚠ Bulk Delete", "§7Select and delete multiple blocks"));
-        inv.setStack(25, uiGlint(Items.BOOK, "§a§lHelp & Info", "§7Interactive help guide"));
-
-        // Row 3: config + recent
-        inv.setStack(28, uiGlint(Items.COMPARATOR, "§6§l⚙ Config", "§7View and edit server-wide settings"));
-
-        // Recent blocks strip (slots 32-34)
+        // Row 3: recent blocks (inline, spaced)
         Deque<String> recent = RECENT_BLOCKS.getOrDefault(uuid, new ArrayDeque<>());
         int ri = 0;
+        int[] recentSlots = {30, 32, 34};
         for (String rid : recent) {
-            if (ri >= MAX_RECENT) break;
+            if (ri >= recentSlots.length) break;
             SlotData rd = SlotManager.getById(rid);
             if (rd == null) continue;
-            inv.setStack(32 + ri, uiGlint(Items.CLOCK, "§7§lRecent: §f" + rd.displayName, "§7ID: §f" + rd.customId, "§8Click to edit"));
+            inv.setStack(recentSlots[ri], uiGlint(Items.CLOCK,
+                "§7§lRecent: §f" + rd.displayName,
+                "§7ID: §f" + rd.customId, "§8Click to edit"));
             ri++;
         }
-        if (ri == 0) inv.setStack(32, ui(Items.GRAY_STAINED_GLASS_PANE, "§8No recent blocks"));
+
+        // Row 4: secondary actions (spaced by 1 slot)
+        inv.setStack(37, uiGlint(Items.ARMOR_STAND, "§b§lAssistant Hub",
+            "§7Spawn, control, and configure the AI assistant"));
+        inv.setStack(39, uiGlint(Items.STRUCTURE_VOID, "§6§lServer Tools",
+            "§7Broken blocks, resource pack, data",
+            brokenCount > 0 ? "§c" + brokenCount + " broken" : "§aAll OK"));
+        inv.setStack(41, uiGlint(Items.LAVA_BUCKET, "§c§l⚠ Bulk Delete",
+            "§7Select and delete multiple blocks"));
+        inv.setStack(43, uiGlint(Items.BOOK, "§a§lHelp & Info", "§7Interactive help guide"));
+
+        // Row 5: navigation (undo, history, redo, config)
+        inv.setStack(46, undoSz > 0
+            ? uiGlint(Items.GOLDEN_PICKAXE, "§6§l↩ Undo §e(" + undoSz + ")", "§7Click to undo last action")
+            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Undo (Empty)"));
+        inv.setStack(48, (undoSz + redoSz) > 0
+            ? uiGlint(Items.KNOWLEDGE_BOOK, "§6§lHistory §7(" + (undoSz + redoSz) + ")",
+                "§7Browse undo/redo entries", "§8Click to open picker")
+            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8History (Empty)"));
+        inv.setStack(50, redoSz > 0
+            ? uiGlint(Items.DIAMOND_PICKAXE, "§b§l↪ Redo §3(" + redoSz + ")", "§7Click to redo last undone action")
+            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Redo (Empty)"));
+        inv.setStack(52, uiGlint(Items.COMPARATOR, "§6§l⚙ Config",
+            "§7View and edit server-wide settings"));
 
         return inv;
     }
