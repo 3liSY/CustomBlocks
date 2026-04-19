@@ -3,7 +3,6 @@
   "package": "com.customblocks.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "ServerCommonNetworkHandlerAccessor",
     "ServerKeepAliveGraceMixin",
     "ClientConnectionKeepAliveMixin"
   ],
