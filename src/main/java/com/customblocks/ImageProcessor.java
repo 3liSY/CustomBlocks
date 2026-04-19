@@ -387,6 +387,30 @@ public final class ImageProcessor {
     }
 
     /**
+     * Produce a valid Minecraft animation .mcmeta JSON for a vertical frame
+     * strip of {@code frames} equal-duration frames (5 ticks per frame,
+     * interpolation on).
+     *
+     * <p>Used as a safety-net when a strip texture exists but its original
+     * per-frame timing was lost (e.g. legacy SlotData saved during a broken
+     * build, or a packet dropped animMeta in transit). Guarantees the strip
+     * animates instead of rendering as stacked frames.
+     *
+     * <p>Returns an empty string for frames &lt;= 1 so callers can short-circuit.
+     */
+    public static String synthesizeDefaultMcmeta(int frames) {
+        if (frames <= 1) return "";
+        StringBuilder sb = new StringBuilder(48 + frames * 26);
+        sb.append("{\"animation\":{\"interpolate\":true,\"frames\":[");
+        for (int i = 0; i < frames; i++) {
+            if (i > 0) sb.append(",");
+            sb.append("{\"index\":").append(i).append(",\"time\":5}");
+        }
+        sb.append("]}}");
+        return sb.toString();
+    }
+
+    /**
      * Extracts vertical frame count instantly from PNG headers without decoding the whole image.
      * Returns 1 if not a valid PNG or not animated.
      */

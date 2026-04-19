@@ -87,8 +87,16 @@ public class ServerPackGenerator {
                     // default texture
                     if (data.texture != null && data.texture.length > 0) {
                         addZipEntry(zos, "assets/" + MOD_ID + "/textures/block/" + slotKey + ".png", data.texture, writtenPaths);
-                        if (data.isAnimated() && data.animMeta != null) {
-                            addZipEntry(zos, "assets/" + MOD_ID + "/textures/block/" + slotKey + ".png.mcmeta", data.animMeta.getBytes(StandardCharsets.UTF_8), writtenPaths);
+                        // Use actual pixel dimensions as source of truth so the
+                        // mcmeta is still written even when animMeta is null from
+                        // legacy save data or a lost packet. Prevents stacked-frames.
+                        int frames = com.customblocks.ImageProcessor.getVerticalFrames(data.texture);
+                        if (frames > 1) {
+                            String effectiveMeta = (data.animMeta != null && !data.animMeta.isEmpty())
+                                    ? data.animMeta
+                                    : com.customblocks.ImageProcessor.synthesizeDefaultMcmeta(frames);
+                            addZipEntry(zos, "assets/" + MOD_ID + "/textures/block/" + slotKey + ".png.mcmeta",
+                                    effectiveMeta.getBytes(StandardCharsets.UTF_8), writtenPaths);
                         }
                     } else {
                         addZipEntry(zos, "assets/" + MOD_ID + "/textures/block/" + slotKey + ".png", PLACEHOLDER_PNG, writtenPaths);
@@ -104,20 +112,12 @@ public class ServerPackGenerator {
 
                             int frames = com.customblocks.ImageProcessor.getVerticalFrames(faceBytes);
                             if (frames > 1) {
-                                // Prefer real per-frame timing from processAnimation; fall back to uniform.
-                                String mcmetaJson;
-                                if (data.animMeta != null && !data.animMeta.isEmpty()
-                                        && data.animMeta.contains("\"frames\"")) {
-                                    mcmetaJson = data.animMeta;
-                                } else {
-                                    StringBuilder sb = new StringBuilder("{\"animation\":{\"interpolate\":true,\"frames\":[");
-                                    for (int fi = 0; fi < frames; fi++) {
-                                        if (fi > 0) sb.append(",");
-                                        sb.append("{\"index\":").append(fi).append(",\"time\":5}");
-                                    }
-                                    sb.append("]}}");
-                                    mcmetaJson = sb.toString();
-                                }
+                                // Prefer real per-frame timing from processAnimation;
+                                // fall back to shared synthesizer for legacy/null cases.
+                                String mcmetaJson = (data.animMeta != null && !data.animMeta.isEmpty()
+                                        && data.animMeta.contains("\"frames\""))
+                                        ? data.animMeta
+                                        : com.customblocks.ImageProcessor.synthesizeDefaultMcmeta(frames);
                                 addZipEntry(zos, facePath + ".mcmeta", mcmetaJson.getBytes(StandardCharsets.UTF_8), writtenPaths);
                             }
                         }

@@ -353,7 +353,13 @@ public class CustomBlocksClient implements ClientModInitializer {
                                 CustomBlocksMod.LOGGER.info("[CustomBlocks] Resources reloaded.");
                                 pendingCreativeRefresh = true;
                             })
-                        );
+                        ).exceptionally(ex -> {
+                            client.execute(() -> {
+                                reloadInFlight.set(false);
+                                CustomBlocksMod.LOGGER.error("[CustomBlocks] Resource reload failed, unlocking flag.", ex);
+                            });
+                            return null;
+                        });
                     } else {
                         pendingCreativeRefresh = true;
                     }
@@ -371,5 +377,10 @@ public class CustomBlocksClient implements ClientModInitializer {
             client.options.resourcePacks.add(PACK_ENTRY);
             client.options.write();
         }
+        client.getResourcePackManager().scanPacks();
+        CustomBlocksMod.LOGGER.info("[CustomBlocks] Pack inject: entry in options={}, scanPacks done, available profiles={}",
+            client.options.resourcePacks.contains(PACK_ENTRY),
+            client.getResourcePackManager().getProfiles().stream()
+                .map(p -> p.getId()).collect(java.util.stream.Collectors.joining(", ")));
     }
 }

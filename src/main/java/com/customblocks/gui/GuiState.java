@@ -67,8 +67,12 @@ public record GuiState(
         return new GuiState(GuiMode.SOUND_MENU, editingId, returnPage, false, 0, false);
     }
 
-    public static GuiState animGui(String editingId) {
-        return new GuiState(GuiMode.ANIM_GUI, editingId, 0, false, 0, false);
+    public static GuiState animGui(String editingId, int returnPage) {
+        return new GuiState(GuiMode.ANIM_GUI, editingId, returnPage, false, 0, false);
+    }
+
+    public static GuiState animConfirmAbandon(String editingId, int returnPage) {
+        return new GuiState(GuiMode.ANIM_CONFIRM_ABANDON, editingId, returnPage, false, 0, false);
     }
 
     public static GuiState tabIconMenu() {

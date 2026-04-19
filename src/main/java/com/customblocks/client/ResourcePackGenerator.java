@@ -67,13 +67,38 @@ public class ResourcePackGenerator {
                     // Always write — the old size-guard was unreliable because
                     // NativeImage re-encoding changes file size unpredictably.
                     writePng(data.texture, texDest);
-                    // Write animation mcmeta for animated (GIF) textures
-                    if (data.isAnimated() && data.animMeta != null) {
+
+                    // Use ACTUAL TEXTURE DIMENSIONS as source of truth for "is this
+                    // an animation strip?" - more reliable than data.isAnimated()
+                    // which depends on animMeta field that can be null due to a
+                    // lost packet, stale save file, or legacy broken-build data.
+                    int frames = com.customblocks.ImageProcessor.getVerticalFrames(data.texture);
+                    if (frames > 1) {
+                        // Prefer the REAL per-frame timing from processAnimation
+                        // when present; otherwise synthesize a uniform default so
+                        // the block ALWAYS animates instead of showing stacked frames.
+                        String effectiveMeta;
+                        boolean synthesized = false;
+                        if (data.animMeta != null && !data.animMeta.isEmpty()) {
+                            effectiveMeta = data.animMeta;
+                        } else {
+                            effectiveMeta = com.customblocks.ImageProcessor.synthesizeDefaultMcmeta(frames);
+                            synthesized = true;
+                        }
                         try (java.io.FileWriter fw = new java.io.FileWriter(mcmetaDest, java.nio.charset.StandardCharsets.UTF_8)) {
-                            fw.write(data.animMeta);
+                            fw.write(effectiveMeta);
+                        }
+                        if (synthesized) {
+                            CustomBlocksMod.LOGGER.info(
+                                "[CustomBlocks] Pack gen slot_{} ({}): strip detected ({} frames), animMeta was null - SYNTHESIZED default mcmeta",
+                                i, data.customId, frames);
+                        } else {
+                            CustomBlocksMod.LOGGER.info(
+                                "[CustomBlocks] Pack gen slot_{} ({}): strip detected ({} frames), wrote real animMeta ({} chars)",
+                                i, data.customId, frames, data.animMeta.length());
                         }
                     } else {
-                        // Clean up stale mcmeta from a previously-animated texture
+                        // Static texture - remove any stale mcmeta file from a previously-animated state
                         if (mcmetaDest.exists()) mcmetaDest.delete();
                     }
                 } else {
@@ -97,20 +122,14 @@ public class ResourcePackGenerator {
                             int frames = com.customblocks.ImageProcessor.getVerticalFrames(faceBytes);
                             if (frames > 1) {
                                 // Prefer the REAL per-frame timing from processAnimation
-                                // (stored in data.animMeta). Only synthesize a uniform
-                                // fallback when no animMeta is present (e.g. legacy data).
+                                // (stored in data.animMeta). Fall back to the shared
+                                // synthesizer - single source of truth for default timing.
                                 String mcmetaJson;
                                 if (data.animMeta != null && !data.animMeta.isEmpty()
                                         && data.animMeta.contains("\"frames\"")) {
                                     mcmetaJson = data.animMeta;
                                 } else {
-                                    StringBuilder sb = new StringBuilder("{\"animation\":{\"interpolate\":true,\"frames\":[");
-                                    for (int fi = 0; fi < frames; fi++) {
-                                        if (fi > 0) sb.append(",");
-                                        sb.append("{\"index\":").append(fi).append(",\"time\":5}");
-                                    }
-                                    sb.append("]}}");
-                                    mcmetaJson = sb.toString();
+                                    mcmetaJson = com.customblocks.ImageProcessor.synthesizeDefaultMcmeta(frames);
                                 }
                                 try (java.io.FileWriter fw2 = new java.io.FileWriter(faceMcmeta, java.nio.charset.StandardCharsets.UTF_8)) {
                                     fw2.write(mcmetaJson);

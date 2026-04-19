@@ -57,7 +57,7 @@ public class SlotBlock extends Block {
         if (world.isClient) return ActionResult.SUCCESS;
 
         if (player instanceof ServerPlayerEntity sp) {
-            GuiManager.openAnimGui(sp, data.customId);
+            GuiManager.openAnimGui(sp, data.customId, 0);
         }
         return ActionResult.SUCCESS;
     }

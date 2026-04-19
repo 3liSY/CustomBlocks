@@ -137,8 +137,14 @@ public final class NetworkManager {
 
     // ── Tick-based drip-feed ─────────────────────────────────────────────────
 
+    /** Max bytes of texture data to send per player per tick. Prevents saturating
+     *  the game socket on shared hosting with limited bandwidth. */
+    private static final int BYTES_PER_TICK_BUDGET = 256 * 1024; // 256KB
+
     /**
-     * Called every server tick. Drains pending payloads and sends them.
+     * Called every server tick. Drains pending payloads and sends them,
+     * respecting both a packet-count cap AND a bytes-per-tick budget so
+     * large textures don't flood the connection.
      */
     public static void onServerTick(MinecraftServer server) {
         int perTick = CustomBlocksConfig.texturePayloadsPerTick;
@@ -147,13 +153,30 @@ public final class NetworkManager {
             if (queue == null || queue.isEmpty()) continue;
 
             SlotUpdatePayload[] batch = queue.drain(perTick);
-            for (SlotUpdatePayload payload : batch) {
+            int bytesSent = 0;
+            int i;
+            for (i = 0; i < batch.length; i++) {
+                SlotUpdatePayload payload = batch[i];
                 try {
+                    int payloadSize = payload.texture() != null ? payload.texture().length : 0;
+                    if (bytesSent > 0 && bytesSent + payloadSize > BYTES_PER_TICK_BUDGET) {
+                        // Re-queue this and all remaining payloads — reverse order to maintain FIFO
+                        for (int j = batch.length - 1; j >= i; j--) {
+                            queue.requeueFront(batch[j]);
+                        }
+                        break;
+                    }
                     ServerPlayNetworking.send(player, payload);
+                    bytesSent += payloadSize;
                 } catch (Exception e) {
                     LOGGER.warn("[CustomBlocks] Failed to send payload to {}: {}",
                             player.getName().getString(), e.getMessage());
                 }
+            }
+
+            // Log when drip-feed completes for a player
+            if (queue.isEmpty()) {
+                LOGGER.info("[CustomBlocks] Drip-feed complete for {}", player.getName().getString());
             }
         }
     }

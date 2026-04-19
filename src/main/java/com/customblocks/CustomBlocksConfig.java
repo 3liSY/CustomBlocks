@@ -53,7 +53,7 @@ public final class CustomBlocksConfig {
 
     // ── Network ──────────────────────────────────────────────────────────────
     /** Number of texture payloads to drip-feed per server tick. */
-    public static volatile int texturePayloadsPerTick = 8;
+    public static volatile int texturePayloadsPerTick = 2;
     /** Internal HTTP server port for resource pack hosting (0 = disabled/auto). */
     public static volatile int resourcePackPort = 8080;
     /** Debounce time for live-edit resource pack reloads (ms). */
@@ -120,6 +120,14 @@ public final class CustomBlocksConfig {
             rpEnforceOnJoin       = getBool(root, "rpEnforceOnJoin", rpEnforceOnJoin);
             rpPromptMessage       = getString(root, "rpPromptMessage", rpPromptMessage);
             rpKickMessage         = getString(root, "rpKickMessage", rpKickMessage);
+
+            // Force rpEnforceOnJoin OFF — mandatory RP from HTTP server causes
+            // disconnects on shared hosting where the RP port is firewalled.
+            if (rpEnforceOnJoin) {
+                LOGGER.warn("[CustomBlocks] rpEnforceOnJoin was true — forcing to false to prevent player disconnects.");
+                rpEnforceOnJoin = false;
+                save();
+            }
 
             // Clamp values
             maxSlots              = Math.max(1, Math.min(8192, maxSlots));

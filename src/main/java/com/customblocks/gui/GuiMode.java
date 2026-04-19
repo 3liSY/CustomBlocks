@@ -26,5 +26,6 @@ public enum GuiMode {
     UNDO_PICKER,
     CONFIG_WARNING,
     CONFIG_GUI,
-    HELP_CATEGORY
+    HELP_CATEGORY,
+    ANIM_CONFIRM_ABANDON
 }

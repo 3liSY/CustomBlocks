@@ -68,6 +68,14 @@ public final class TextureQueue {
         return result;
     }
 
+    /**
+     * Push a payload back to the FRONT of the queue. Used when the
+     * bytes-per-tick budget is exceeded — the payload will be sent next tick.
+     */
+    public void requeueFront(SlotUpdatePayload payload) {
+        queue.addFirst(payload);
+    }
+
     /** Check if the queue is empty. */
     public boolean isEmpty() {
         return queue.isEmpty();

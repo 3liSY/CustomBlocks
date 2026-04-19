@@ -342,7 +342,29 @@ public final class SlotManager {
 
 
 
-    public static void updateTexture(String id, byte[] tex)       { update(id, d -> d.withTexture(tex)); }
+    /**
+     * Update the default texture. If the new texture is a vertical frame strip
+     * (height > width, height divisible by width) AND the current animMeta is
+     * null or empty, auto-populate a default animMeta so the block animates
+     * even when a real animMeta packet has not arrived yet or was lost.
+     *
+     * <p>Never overwrites a non-empty animMeta - real per-frame timing always
+     * wins. This is strictly a safety net for the "strip texture exists but
+     * animMeta is null" class of bugs (e.g. legacy save data, dropped packets).
+     */
+    public static void updateTexture(String id, byte[] tex) {
+        update(id, d -> {
+            SlotData updated = d.withTexture(tex);
+            if (updated.animMeta == null || updated.animMeta.isEmpty()) {
+                int frames = com.customblocks.ImageProcessor.getVerticalFrames(tex);
+                if (frames > 1) {
+                    updated = updated.withAnimMeta(
+                        com.customblocks.ImageProcessor.synthesizeDefaultMcmeta(frames));
+                }
+            }
+            return updated;
+        });
+    }
 
     public static void rename(String id, String name)              { update(id, d -> d.withDisplayName(name)); }
 

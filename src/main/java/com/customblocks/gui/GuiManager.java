@@ -56,6 +56,12 @@ public class GuiManager {
 
     private record AnimParams(float fps, boolean interpolate, int frameCount) {}
     private static final Map<UUID, AnimParams> ANIM_PARAMS = new ConcurrentHashMap<>();
+    private static final Map<UUID, AnimParams> ANIM_ORIGINAL_PARAMS = new ConcurrentHashMap<>();
+
+    private static final Map<UUID, Long> SHAPE_CREATE_COOLDOWN = new ConcurrentHashMap<>();
+    private static final long SHAPE_COOLDOWN_MS = 500;
+    private static final Map<UUID, Long> CLICK_COOLDOWN = new ConcurrentHashMap<>();
+    private static final long CLICK_COOLDOWN_MS = 100;
 
     public enum InputAction {
         SET_LIGHT,
@@ -71,7 +77,8 @@ public class GuiManager {
         REID_TEXT,
         SETTABICON_URL,
         ADMIN_CUSTOM_TITLE,
-        CONFIG_VALUE
+        CONFIG_VALUE,
+        ANIM_CUSTOM_FPS
     }
 
     public record PendingInput(InputAction action, String blockId, String face,
@@ -128,11 +135,15 @@ public class GuiManager {
     /**
      * Push current state to back-stack before navigating away.
      */
+    private static final int MAX_BACK_STACK_DEPTH = 10;
+
     private static void pushBackStack(UUID uuid) {
         if (RESTORING.contains(uuid)) return;
         GuiState current = STATES.get(uuid);
         if (current != null) {
-            BACK_STACK.computeIfAbsent(uuid, k -> new ArrayDeque<>()).push(current);
+            Deque<GuiState> stack = BACK_STACK.computeIfAbsent(uuid, k -> new ArrayDeque<>());
+            stack.push(current);
+            while (stack.size() > MAX_BACK_STACK_DEPTH) stack.removeLast();
         }
     }
 
@@ -145,15 +156,21 @@ public class GuiManager {
         GuiState state = STATES.get(uuid);
         if (state == null) return;
 
+        if (state.mode() == GuiMode.ANIM_GUI && isAnimDirty(uuid)) {
+            openAnimConfirmAbandon(player, state.editingId(), state.page());
+            return;
+        }
+
+        if (state.mode() == GuiMode.ANIM_CONFIRM_ABANDON) {
+            reopenAnimGui(player, state.editingId(), state.page());
+            return;
+        }
+
         Deque<GuiState> stack = BACK_STACK.get(uuid);
         if (stack != null && !stack.isEmpty()) {
             GuiState prev = stack.pop();
-            // Implement "Back once, then exit entirely":
-            // We pop the previous menu, then clear the stack so the next ESC closes.
-            stack.clear();
             restoreState(player, prev);
         } else {
-            // At root or after one back-step - fully close
             STATES.remove(uuid);
         }
     }
@@ -166,6 +183,9 @@ public class GuiManager {
         PENDING.remove(uuid);
         HANDLERS.remove(uuid);
         ANIM_PARAMS.remove(uuid);
+        ANIM_ORIGINAL_PARAMS.remove(uuid);
+        SHAPE_CREATE_COOLDOWN.remove(uuid);
+        CLICK_COOLDOWN.remove(uuid);
         BULK_DELETE_SELECTIONS.remove(uuid);
     }
 
@@ -440,7 +460,7 @@ public class GuiManager {
                 case TAB_ICON_MENU -> openTabIconPicker(player, state.page());
                 case RESOURCE_CENTER -> openResourceHub(player);
                 case ASSISTANT_CONTROL -> openAssistantControl(player);
-                case ANIM_GUI -> openAnimGui(player, state.editingId());
+                case ANIM_GUI -> openAnimGui(player, state.editingId(), state.page());
                 case BULK_DELETE -> openBulkDelete(player, state.page());
                 case SEARCH_PICKER -> {
                     String q = SEARCH_QUERIES.getOrDefault(player.getUuid(), "");
@@ -451,6 +471,7 @@ public class GuiManager {
                 case CONFIG_GUI -> openConfigGui(player, false);
                 case UNDO_PICKER -> openUndoPicker(player, state.page());
                 case HELP_CATEGORY -> openHelpCategory(player, state.page());
+                case ANIM_CONFIRM_ABANDON -> reopenAnimGui(player, state.editingId(), state.page());
                 default -> openMain(player, 0);
             }
         } finally {
@@ -461,6 +482,9 @@ public class GuiManager {
     // ── Click dispatch ───────────────────────────────────────────────────────
 
     public static void handleClick(ServerPlayerEntity player, int slot, int button) {
+        long now = System.currentTimeMillis();
+        Long lastClick = CLICK_COOLDOWN.put(player.getUuid(), now);
+        if (lastClick != null && now - lastClick < CLICK_COOLDOWN_MS) return;
         GuiState state = null;
         try {
             playClick(player);
@@ -489,6 +513,7 @@ public class GuiManager {
                 case CONFIG_GUI     -> handleConfigGuiClick(player, state, slot);
                 case UNDO_PICKER    -> handleUndoPickerClick(player, state, slot);
                 case HELP_CATEGORY  -> handleHelpCategoryClick(player, state, slot);
+                case ANIM_CONFIRM_ABANDON -> handleAnimConfirmAbandonClick(player, state, slot);
             }
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] GUI Command Error: {}", e.getMessage(), e);
@@ -523,6 +548,7 @@ public class GuiManager {
                     else openMain(player, rp);
                 }
                 case SETTABICON_URL -> openTabIconPicker(player, rp);
+                case ANIM_CUSTOM_FPS -> reopenAnimGui(player, blockId, rp);
                 default -> {
                     if (blockId != null && !blockId.startsWith("__") && SlotManager.hasId(blockId)) openEditor(player, blockId, rp);
                     else openMain(player, rp);
@@ -806,6 +832,20 @@ public class GuiManager {
                 }
                 return true;
             }
+            case ANIM_CUSTOM_FPS -> {
+                try {
+                    float customFps = Float.parseFloat(text);
+                    customFps = Math.max(0.5f, Math.min(100f, customFps));
+                    customFps = Math.round(customFps * 10f) / 10f;
+                    AnimParams ap = ANIM_PARAMS.getOrDefault(player.getUuid(), new AnimParams(10f, false, 1));
+                    ANIM_PARAMS.put(player.getUuid(), new AnimParams(customFps, ap.interpolate(), ap.frameCount()));
+                    send(player, "§a[Anim] FPS set to §f" + String.format("%.1f", customFps));
+                } catch (NumberFormatException e) {
+                    send(player, "§cInvalid number. Enter a value like §f20§c or §f0.5");
+                }
+                reopenAnimGui(player, blockId, rp);
+                return true;
+            }
             case CONFIG_VALUE -> {
                 String key = blockId;
                 try {
@@ -891,9 +931,14 @@ public class GuiManager {
             openResourceHub(player);
         }
         if (slot == 24) { // Toggle RP enforce
-            CustomBlocksConfig.rpEnforceOnJoin = !CustomBlocksConfig.rpEnforceOnJoin;
-            CustomBlocksConfig.save();
-            send(player, "§a[Config] rpEnforceOnJoin = " + CustomBlocksConfig.rpEnforceOnJoin);
+            if (!CustomBlocksConfig.rpEnforceOnJoin) {
+                send(player, "§e§l[CB] §7Resource Pack Enforcement is §e§lunder maintenance§7. This feature is temporarily disabled to ensure connection stability.");
+                playClick(player);
+            } else {
+                CustomBlocksConfig.rpEnforceOnJoin = false;
+                CustomBlocksConfig.save();
+                send(player, "§a[Config] rpEnforceOnJoin = false");
+            }
             openResourceHub(player);
         }
     }
@@ -1113,9 +1158,14 @@ public class GuiManager {
         switch (slot) {
             // Toggles
             case 10 -> {
-                CustomBlocksConfig.rpEnforceOnJoin = !CustomBlocksConfig.rpEnforceOnJoin;
-                CustomBlocksConfig.save();
-                send(player, "§a[Config] rpEnforceOnJoin = " + CustomBlocksConfig.rpEnforceOnJoin);
+                if (!CustomBlocksConfig.rpEnforceOnJoin) {
+                    send(player, "§e§l[CB] §7Resource Pack Enforcement is §e§lunder maintenance§7. This feature is temporarily disabled to ensure connection stability.");
+                    playClick(player);
+                } else {
+                    CustomBlocksConfig.rpEnforceOnJoin = false;
+                    CustomBlocksConfig.save();
+                    send(player, "§a[Config] rpEnforceOnJoin = false");
+                }
                 openConfigGui(player, false);
             }
             case 11 -> {
@@ -1258,16 +1308,16 @@ public class GuiManager {
                     }
                 } catch (Exception e) { send(player, "§cCould not give rectangle wand."); }
             }
-            case 21 -> { // Color Square - prompt for color
-                PENDING.put(player.getUuid(), new PendingInput(InputAction.REID_TEXT, "__givesquare__", null, null, null, state.page()));
-                closeForPrompt(player);
-                send(player, "§6[GUI] §eType color: §fblack §7| §fyellow §7| §fgreen§e:");
-            }
-            case 22 -> { // Color Triangle - prompt for color
-                PENDING.put(player.getUuid(), new PendingInput(InputAction.REID_TEXT, "__givetriangle__", null, null, null, state.page()));
-                closeForPrompt(player);
-                send(player, "§6[GUI] §eType color: §fblack §7| §fyellow §7| §fgreen§e:");
-            }
+            case 21 -> openShortInputPrompt(player,
+                new PendingInput(InputAction.REID_TEXT, "__givesquare__", null, null, null, state.page()),
+                "§6Square Color (black/yellow/green)",
+                new ItemStack(Items.YELLOW_WOOL),
+                "");
+            case 22 -> openShortInputPrompt(player,
+                new PendingInput(InputAction.REID_TEXT, "__givetriangle__", null, null, null, state.page()),
+                "§6Triangle Color (black/yellow/green)",
+                new ItemStack(Items.YELLOW_WOOL),
+                "");
             case 24 -> openTabIconPicker(player, 0); // Tab Icon
             case 45 -> openMain(player, 0);     // Back
         }
@@ -1331,11 +1381,11 @@ public class GuiManager {
                 new ItemStack(Items.COMMAND_BLOCK),
                 ""
             );
-            case 23 -> {
-                PENDING.put(uuid, new PendingInput(InputAction.REID_TEXT, "__search__", null, null, null, state.page()));
-                closeForPrompt(player);
-                send(player, "§6[GUI] §eType a search query (or §ccancel§e):");
-            }
+            case 23 -> openShortInputPrompt(player,
+                new PendingInput(InputAction.REID_TEXT, "__search__", null, null, null, state.page()),
+                "§6Search Blocks",
+                new ItemStack(Items.SPYGLASS),
+                "");
             case 25 -> openMagicItemsGui(player);
 
             // Row 3: recent blocks (slots 30, 32, 34)
@@ -1462,7 +1512,7 @@ public class GuiManager {
             case 21 -> openShapeEditor(player, id, rp);
             case 23 -> openPropertiesGui(player, id, rp);
             case 25 -> openSoundMenu(player, id, rp);
-            case 31 -> { if (d.isAnimated()) openAnimGui(player, id); }
+            case 31 -> { if (d.isAnimated()) openAnimGui(player, id, rp); }
             case 37 -> openShortInputPrompt(
                 player,
                 new PendingInput(InputAction.RENAME_TEXT, id, null, null, null, rp),
@@ -1569,7 +1619,7 @@ public class GuiManager {
 
         if (slot == 0) { openEditor(player,id,rp); return; }
         if (slot == 8) {
-            UndoManager.pushUndoMutation(id, d, "setcollision", uuid); SlotManager.setCollision(id,!d.noCollision); SlotManager.saveAll();
+            UndoManager.pushUndoMutation(id, d, "setcollision", uuid); SlotManager.setCollision(id,d.noCollision); SlotManager.saveAll();
             SlotData upd = SlotManager.getById(id);
             NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setcollision",upd.index,id,null,null,0,0,"stone",null,upd.noCollision?"false":"true"));
             send(player,"§a[Shape] Collision: §f"+(upd.noCollision?"§cOFF":"§aON")); reopenShapeEditor(player,id,rp,boxPage); return;
@@ -1684,7 +1734,7 @@ public class GuiManager {
             );
             case 25 -> { UndoManager.pushUndoMutation(id, d, "sethardness", uuid); SlotManager.setHardness(id,nextHardness(d.hardness)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
             case 40 -> {
-                UndoManager.pushUndoMutation(id, d, "setcollision", uuid); SlotManager.setCollision(id,!d.noCollision); SlotManager.saveAll();
+                UndoManager.pushUndoMutation(id, d, "setcollision", uuid); SlotManager.setCollision(id,d.noCollision); SlotManager.saveAll();
                 SlotData upd = SlotManager.getById(id);
                 NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setcollision",upd.index,id,null,null,0,0,"stone",null,upd.noCollision?"false":"true"));
                 send(player,"§a[GUI] Collision: §f"+(upd.noCollision?"§cOFF":"§aON")); refreshScreen(player, buildPropertiesGui(upd));
@@ -1746,29 +1796,62 @@ public class GuiManager {
     private static void createShapeVariant(ServerPlayerEntity player, SlotData d, String id,
                                             String preset, int rp, int boxPage) {
         UUID uuid = player.getUuid();
-        String varId = generateShapeVariantId(id, preset);
-        if (SlotManager.hasId(varId)) { send(player,"§e[Shape] '§f"+varId+"§e' already exists — opening it."); openShapeEditor(player,varId,rp); return; }
-        if (SlotManager.freeSlots()==0) { send(player,"§c[Shape] No free slots!"); reopenShapeEditor(player,id,rp,boxPage); return; }
-        List<SlotData.ShapeBox> presetBoxes = SlotManager.SHAPE_PRESETS.get(preset);
-        String varName = d.displayName + " (" + cap(preset) + ")";
-        byte[] texCopy = d.texture != null ? d.texture.clone() : null;
-        SlotData nb = SlotManager.assign(varId, varName, texCopy);
-        if (nb == null) { send(player,"§c[Shape] Assign failed!"); reopenShapeEditor(player,id,rp,boxPage); return; }
-        SlotManager.setLightLevel(varId,d.lightLevel); SlotManager.setHardness(varId,d.hardness); SlotManager.setSoundType(varId,d.soundType);
-        if (d.animMeta!=null) SlotManager.setAnimMeta(varId,d.animMeta);
-        for (var e : d.faceTextures.entrySet()) SlotManager.setFaceTexture(varId,e.getKey(),e.getValue().clone());
-        SlotManager.setShape(varId, presetBoxes!=null ? new ArrayList<>(presetBoxes) : null);
-        if (d.noCollision) SlotManager.setCollision(varId, false);
-        UndoManager.pushUndoCreate(varId, uuid); SlotManager.saveAll();
-        SlotData fresh = SlotManager.getById(varId);
-        if (fresh != null) {
-            NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("add",fresh.index,varId,varName,texCopy,fresh.lightLevel,fresh.hardness,fresh.soundType,null,null,fresh.animMeta));
-            for (var fe : fresh.faceTextures.entrySet()) NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setface",fresh.index,varId,null,fe.getValue(),fresh.lightLevel,fresh.hardness,fresh.soundType,fe.getKey()));
-            broadcastShape(player.getServer(), fresh);
-            if (fresh.noCollision) NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setcollision",fresh.index,varId,null,null,0,0,"stone",null,"false"));
+
+        long now = System.currentTimeMillis();
+        Long last = SHAPE_CREATE_COOLDOWN.get(uuid);
+        if (last != null && now - last < SHAPE_COOLDOWN_MS) {
+            send(player, "§e[Shape] Please wait a moment...");
+            reopenShapeEditor(player, id, rp, boxPage);
+            return;
         }
-        send(player,"§a[Shape] ✔ Created '§f"+varName+"§a' (ID: §f"+varId+"§a)");
-        openShapeEditor(player, varId, rp);
+        SHAPE_CREATE_COOLDOWN.put(uuid, now);
+
+        List<SlotData> existingVariants = findShapeVariants(id);
+        if (existingVariants.size() >= 24) {
+            send(player, "§c[Shape] Maximum variants reached (24).");
+            reopenShapeEditor(player, id, rp, boxPage);
+            return;
+        }
+
+        try {
+            String varId = generateShapeVariantId(id, preset);
+            if (SlotManager.hasId(varId)) { send(player,"§e[Shape] '§f"+varId+"§e' already exists — opening it."); openShapeEditor(player,varId,rp); return; }
+            if (SlotManager.freeSlots()==0) { send(player,"§c[Shape] No free slots!"); reopenShapeEditor(player,id,rp,boxPage); return; }
+
+            byte[] texCopy;
+            try {
+                texCopy = d.texture != null ? d.texture.clone() : null;
+            } catch (OutOfMemoryError oom) {
+                LOGGER.error("[CustomBlocks] OOM cloning texture for variant of '{}'", id);
+                send(player, "§c[Shape] Not enough memory!");
+                reopenShapeEditor(player, id, rp, boxPage);
+                return;
+            }
+
+            List<SlotData.ShapeBox> presetBoxes = SlotManager.SHAPE_PRESETS.get(preset);
+            String varName = d.displayName + " (" + cap(preset) + ")";
+            SlotData nb = SlotManager.assign(varId, varName, texCopy);
+            if (nb == null) { send(player,"§c[Shape] Assign failed!"); reopenShapeEditor(player,id,rp,boxPage); return; }
+            SlotManager.setLightLevel(varId,d.lightLevel); SlotManager.setHardness(varId,d.hardness); SlotManager.setSoundType(varId,d.soundType);
+            if (d.animMeta!=null) SlotManager.setAnimMeta(varId,d.animMeta);
+            for (var e : d.faceTextures.entrySet()) SlotManager.setFaceTexture(varId,e.getKey(),e.getValue().clone());
+            SlotManager.setShape(varId, presetBoxes!=null ? new ArrayList<>(presetBoxes) : null);
+            if (d.noCollision) SlotManager.setCollision(varId, false);
+            UndoManager.pushUndoCreate(varId, uuid); SlotManager.saveAll();
+            SlotData fresh = SlotManager.getById(varId);
+            if (fresh != null) {
+                NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("add",fresh.index,varId,varName,texCopy,fresh.lightLevel,fresh.hardness,fresh.soundType,null,null,fresh.animMeta));
+                for (var fe : fresh.faceTextures.entrySet()) NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setface",fresh.index,varId,null,fe.getValue(),fresh.lightLevel,fresh.hardness,fresh.soundType,fe.getKey()));
+                broadcastShape(player.getServer(), fresh);
+                if (fresh.noCollision) NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setcollision",fresh.index,varId,null,null,0,0,"stone",null,"false"));
+            }
+            send(player,"§a[Shape] ✔ Created '§f"+varName+"§a' (ID: §f"+varId+"§a)");
+            openShapeEditor(player, varId, rp);
+        } catch (Exception e) {
+            LOGGER.error("[CustomBlocks] Shape variant creation failed for '{}': {}", id, e.getMessage(), e);
+            send(player, "§c[Shape] Creation failed. Please try again.");
+            reopenShapeEditor(player, id, rp, boxPage);
+        }
     }
 
     private static void applyPresetToCurrent(ServerPlayerEntity player, SlotData d, String id,
@@ -1804,9 +1887,10 @@ public class GuiManager {
 
     // ── Anim GUI ─────────────────────────────────────────────────────────────
 
-    public static void openAnimGui(ServerPlayerEntity player, String id) {
+    public static void openAnimGui(ServerPlayerEntity player, String id, int returnPage) {
         SlotData d = SlotManager.getById(id);
         if (d == null || !d.isAnimated()) return;
+        pushBackStack(player.getUuid());
         float fps = 10f; boolean interp = false; int frameCount = 1;
         try {
             JsonObject root = JsonParser.parseString(d.animMeta).getAsJsonObject();
@@ -1830,7 +1914,8 @@ public class GuiManager {
         } catch (Exception ignored) {}
         final float finalFps = fps; final boolean finalInterp = interp; final int finalFrames = frameCount;
         ANIM_PARAMS.put(player.getUuid(), new AnimParams(fps, interp, frameCount));
-        STATES.put(player.getUuid(), GuiState.animGui(id));
+        ANIM_ORIGINAL_PARAMS.put(player.getUuid(), new AnimParams(fps, interp, frameCount));
+        STATES.put(player.getUuid(), GuiState.animGui(id, returnPage));
         openScreen(player, new SimpleNamedScreenHandlerFactory(
             (s, pi, p) -> new CbScreenHandler(s, pi, buildAnimGui(id, finalFps, finalInterp, finalFrames)),
             Text.literal("§b§l▶ §r§fAnimation Settings §8— §b" + d.displayName)));
@@ -1844,15 +1929,26 @@ public class GuiManager {
             case 0  -> { openEditor(player, id, state.page()); return; }
             case 19 -> { fps = Math.max(0.5f, fps - 5); playClick(player); }
             case 20 -> { fps = Math.max(0.5f, fps - 1); playClick(player); }
-            case 24 -> { fps = Math.min(60f,  fps + 1); playClick(player); }
-            case 25 -> { fps = Math.min(60f,  fps + 5); playClick(player); }
+            case 24 -> { fps = Math.min(100f, fps + 1); playClick(player); }
+            case 25 -> { fps = Math.min(100f, fps + 5); playClick(player); }
             case 28 -> { fps = 5f; playClick(player); }
             case 29 -> { fps = 10f; playClick(player); }
             case 30 -> { fps = 20f; playClick(player); }
             case 31 -> { fps = 40f; playClick(player); }
+            case 32 -> { fps = 60f; playClick(player); }
+            case 33 -> { fps = 80f; playClick(player); }
+            case 34 -> {
+                ANIM_PARAMS.put(player.getUuid(), new AnimParams(fps, interp, frames));
+                openShortInputPrompt(player,
+                    new PendingInput(InputAction.ANIM_CUSTOM_FPS, id, null, null, null, state.page()),
+                    "§b§lCustom FPS",
+                    new ItemStack(Items.ANVIL),
+                    String.format("%.1f", fps));
+                return;
+            }
             case 40 -> { interp = !interp; playClick(player); }
             case 45 -> { openEditor(player, id, state.page()); return; }
-            case 49 -> { applyAnimSettings(player, id, fps, interp, frames); ANIM_PARAMS.remove(player.getUuid()); openEditor(player, id, state.page()); return; }
+            case 49 -> { applyAnimSettings(player, id, fps, interp, frames); ANIM_PARAMS.remove(player.getUuid()); ANIM_ORIGINAL_PARAMS.remove(player.getUuid()); openEditor(player, id, state.page()); return; }
             default -> { return; }
         }
         fps = Math.round(fps * 10f) / 10f;
@@ -1882,7 +1978,80 @@ public class GuiManager {
         SlotUpdatePayload pkt = new SlotUpdatePayload("animsettings", d.index, id, d.displayName,
                 null, d.lightLevel, d.hardness, d.soundType, null, null, newMeta);
         NetworkManager.broadcastUpdate(player.getServer(), pkt);
-        ChatHelper.success(player, "Animation speed updated for '§f" + d.displayName + "§a' (" + String.format("%.1f", fps) + " fps)");
+        AnimParams orig = ANIM_ORIGINAL_PARAMS.getOrDefault(player.getUuid(), new AnimParams(fps, interp, frameCount));
+        boolean fpsChanged = Math.abs(orig.fps() - fps) > 0.05f;
+        boolean interpChanged = orig.interpolate() != interp;
+        if (fpsChanged && interpChanged) {
+            ChatHelper.success(player, "Animation updated for '§f" + d.displayName + "§a' (" + String.format("%.1f", fps) + " fps, blending " + (interp ? "§6ON" : "§7OFF") + "§a)");
+        } else if (fpsChanged) {
+            ChatHelper.success(player, "Animation speed updated for '§f" + d.displayName + "§a' (" + String.format("%.1f", fps) + " fps)");
+        } else if (interpChanged) {
+            ChatHelper.success(player, "Smooth blending " + (interp ? "§6enabled" : "§7disabled") + "§a for '§f" + d.displayName + "§a'");
+        } else {
+            ChatHelper.success(player, "Animation settings saved for '§f" + d.displayName + "§a' (no changes)");
+        }
+    }
+
+    private static boolean isAnimDirty(UUID uuid) {
+        AnimParams current = ANIM_PARAMS.get(uuid);
+        AnimParams original = ANIM_ORIGINAL_PARAMS.get(uuid);
+        if (current == null || original == null) return false;
+        return Math.abs(current.fps() - original.fps()) > 0.05f
+            || current.interpolate() != original.interpolate();
+    }
+
+    private static void openAnimConfirmAbandon(ServerPlayerEntity player, String id, int returnPage) {
+        STATES.put(player.getUuid(), GuiState.animConfirmAbandon(id, returnPage));
+        AnimParams current = ANIM_PARAMS.getOrDefault(player.getUuid(), new AnimParams(10f, false, 1));
+        AnimParams original = ANIM_ORIGINAL_PARAMS.getOrDefault(player.getUuid(), current);
+
+        SimpleInventory inv = new SimpleInventory(27);
+        for (int i = 0; i < 27; i++) inv.setStack(i, glass());
+
+        inv.setStack(13, uiGlint(Items.WRITABLE_BOOK, "§e§lUnsaved Changes",
+            "§7FPS: §f" + String.format("%.1f", original.fps()) + " §7→ §b" + String.format("%.1f", current.fps()),
+            "§7Blending: §f" + (original.interpolate() ? "ON" : "OFF") + " §7→ §b" + (current.interpolate() ? "ON" : "OFF"),
+            "", "§cDiscard these changes?"));
+        inv.setStack(11, uiGlint(Items.LIME_WOOL, "§a§lYes — Discard", "§7Abandon changes and go back"));
+        inv.setStack(15, uiGlint(Items.RED_WOOL, "§c§lNo — Keep Editing", "§7Return to animation settings"));
+
+        playClick(player);
+        openScreen(player, new SimpleNamedScreenHandlerFactory(
+            (s, pi, p) -> new CbScreenHandler(s, pi, inv),
+            Text.literal("§c§l⚠ §r§fAbandon Changes?")));
+    }
+
+    private static void handleAnimConfirmAbandonClick(ServerPlayerEntity player, GuiState state, int slot) {
+        String id = state.editingId();
+        int rp = state.page();
+        switch (slot) {
+            case 11 -> {
+                ANIM_PARAMS.remove(player.getUuid());
+                ANIM_ORIGINAL_PARAMS.remove(player.getUuid());
+                playSuccess(player);
+                Deque<GuiState> stack = BACK_STACK.get(player.getUuid());
+                if (stack != null && !stack.isEmpty()) {
+                    GuiState prev = stack.pop();
+                    restoreState(player, prev);
+                } else {
+                    openEditor(player, id, rp);
+                }
+            }
+            case 15 -> {
+                playClick(player);
+                reopenAnimGui(player, id, rp);
+            }
+        }
+    }
+
+    private static void reopenAnimGui(ServerPlayerEntity player, String id, int returnPage) {
+        AnimParams p = ANIM_PARAMS.getOrDefault(player.getUuid(), new AnimParams(10f, false, 1));
+        SlotData d = SlotManager.getById(id);
+        String title = d != null ? d.displayName : id;
+        STATES.put(player.getUuid(), GuiState.animGui(id, returnPage));
+        openScreen(player, new SimpleNamedScreenHandlerFactory(
+            (s, pi, pp) -> new CbScreenHandler(s, pi, buildAnimGui(id, p.fps(), p.interpolate(), p.frameCount())),
+            Text.literal("§b§l▶ §r§fAnimation Settings §8— §b" + title)));
     }
 
     // ── Bulk Delete GUI ────────────────────────────────────────────────────────
@@ -2586,6 +2755,9 @@ public class GuiManager {
         inv.setStack(29, ui(Items.AMETHYST_SHARD, "§d10 FPS", "§7Slow"));
         inv.setStack(30, ui(Items.AMETHYST_CLUSTER, "§b20 FPS", "§7Normal"));
         inv.setStack(31, ui(Items.AMETHYST_CLUSTER, "§b40 FPS", "§7Fast"));
+        inv.setStack(32, ui(Items.AMETHYST_CLUSTER, "§b60 FPS", "§7Very fast"));
+        inv.setStack(33, ui(Items.AMETHYST_CLUSTER, "§b80 FPS", "§7Ultra fast"));
+        inv.setStack(34, uiGlint(Items.ANVIL, "§e§lCustom FPS", "§7Type any value from §f0.5§7 to §f100", "§8Click to enter"));
 
         // ── Smooth Blending (Interpolation) ───────────────────────────────────
         inv.setStack(40, interp
