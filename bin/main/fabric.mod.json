@@ -11,7 +11,7 @@
     "main":   [ "com.customblocks.CustomBlocksMod" ],
     "client": [ "com.customblocks.client.CustomBlocksClient" ]
   },
-  "mixins": [],
+  "mixins": ["customblocks.mixins.json"],
   "depends": {
     "fabricloader": ">=0.16.0",
     "fabric-api":   "*",

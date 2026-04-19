@@ -28,6 +28,13 @@ import net.minecraft.util.hit.BlockHitResult;
 import java.util.Map;
 import org.lwjgl.glfw.GLFW;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -336,40 +343,117 @@ public class CustomBlocksClient implements ClientModInitializer {
                     try { Thread.sleep(Math.max(50, Math.min(remaining, 200))); }
                     catch (InterruptedException ignored) { break; }
                 }
-                SlotManager.saveToClientDir(client.runDirectory);
-                ResourcePackGenerator.generate(client);
-                client.execute(() -> {
-                    injectPackIfNeeded(client);
-                    joinBurst        = false;   // burst is definitively over
-                    syncDoneReceived = false;   // reset for next join
-                    generateRunning.set(false); // allow future threads
+                // ── Texture cache check ──────────────────────────────────
+                // Compute a hash of ALL received texture data. If it matches
+                // the hash from the last successful generation, skip the
+                // expensive generate + reloadResources() cycle entirely.
+                // This makes reconnects instant (no 2-min freeze).
+                String currentHash = computeTextureHash();
+                String cachedHash  = loadCachedHash(client.runDirectory);
+                boolean packExists = new File(client.runDirectory,
+                        "customblocks_generated/assets").isDirectory();
 
-                    // Only fire one reload at a time — if one is already in flight,
-                    // the files are already written and it will pick them up.
-                    if (reloadInFlight.compareAndSet(false, true)) {
-                        client.reloadResources().thenRun(() ->
-                            client.execute(() -> {
-                                reloadInFlight.set(false);
-                                CustomBlocksMod.LOGGER.info("[CustomBlocks] Resources reloaded.");
-                                pendingCreativeRefresh = true;
-                            })
-                        ).exceptionally(ex -> {
-                            client.execute(() -> {
-                                reloadInFlight.set(false);
-                                CustomBlocksMod.LOGGER.error("[CustomBlocks] Resource reload failed, unlocking flag.", ex);
-                            });
-                            return null;
-                        });
-                    } else {
+                if (currentHash.equals(cachedHash) && packExists) {
+                    // CACHE HIT — textures unchanged, pack on disk is valid
+                    CustomBlocksMod.LOGGER.info(
+                            "[CustomBlocks] Texture cache HIT (hash={}). Skipping generation + reload.",
+                            currentHash.substring(0, 12));
+                    SlotManager.saveToClientDir(client.runDirectory);
+                    client.execute(() -> {
+                        injectPackIfNeeded(client);
+                        joinBurst        = false;
+                        syncDoneReceived = false;
+                        generateRunning.set(false);
                         pendingCreativeRefresh = true;
-                    }
-                });
+                    });
+                } else {
+                    // CACHE MISS — regenerate pack and reload resources
+                    CustomBlocksMod.LOGGER.info(
+                            "[CustomBlocks] Texture cache MISS (cur={}, cached={}, packExists={}). Regenerating.",
+                            currentHash.substring(0, Math.min(12, currentHash.length())),
+                            cachedHash  != null ? cachedHash.substring(0, Math.min(12, cachedHash.length())) : "null",
+                            packExists);
+                    SlotManager.saveToClientDir(client.runDirectory);
+                    ResourcePackGenerator.generate(client);
+                    saveCachedHash(client.runDirectory, currentHash);
+                    client.execute(() -> {
+                        injectPackIfNeeded(client);
+                        joinBurst        = false;
+                        syncDoneReceived = false;
+                        generateRunning.set(false);
+
+                        if (reloadInFlight.compareAndSet(false, true)) {
+                            client.reloadResources().thenRun(() ->
+                                client.execute(() -> {
+                                    reloadInFlight.set(false);
+                                    CustomBlocksMod.LOGGER.info("[CustomBlocks] Resources reloaded.");
+                                    pendingCreativeRefresh = true;
+                                })
+                            ).exceptionally(ex -> {
+                                client.execute(() -> {
+                                    reloadInFlight.set(false);
+                                    CustomBlocksMod.LOGGER.error("[CustomBlocks] Resource reload failed, unlocking flag.", ex);
+                                });
+                                return null;
+                            });
+                        } else {
+                            pendingCreativeRefresh = true;
+                        }
+                    });
+                }
             }, "CustomBlocks-GenerateReload");
             t.setDaemon(true);
             t.start();
         }
         // If generateRunning is already true, the running thread will see the updated
         // lastPacketTime on its next 200ms poll and extend or break its wait as needed.
+    }
+
+    // ── Texture cache helpers ────────────────────────────────────────────────
+
+    private static final String CACHE_HASH_FILE = "customblocks_cache_hash.txt";
+
+    /** Compute a SHA-256 hash of all slot IDs + texture bytes in the client SlotManager. */
+    private static String computeTextureHash() {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            for (SlotData data : SlotManager.allSlots()) {
+                md.update(data.customId.getBytes(StandardCharsets.UTF_8));
+                if (data.texture != null) md.update(data.texture);
+                if (data.animMeta != null) md.update(data.animMeta.getBytes(StandardCharsets.UTF_8));
+                for (var entry : data.faceTextures.entrySet()) {
+                    md.update(entry.getKey().getBytes(StandardCharsets.UTF_8));
+                    md.update(entry.getValue());
+                }
+            }
+            return HexFormat.of().formatHex(md.digest());
+        } catch (Exception e) {
+            CustomBlocksMod.LOGGER.warn("[CustomBlocks] Hash computation failed: {}", e.getMessage());
+            return "";
+        }
+    }
+
+    /** Load the cached texture hash from disk. Returns null if not found. */
+    private static String loadCachedHash(File runDir) {
+        try {
+            Path hashFile = runDir.toPath().resolve(CACHE_HASH_FILE);
+            if (Files.exists(hashFile)) {
+                return Files.readString(hashFile, StandardCharsets.UTF_8).trim();
+            }
+        } catch (IOException e) {
+            CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not read cache hash: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    /** Save the texture hash to disk after successful generation. */
+    private static void saveCachedHash(File runDir, String hash) {
+        try {
+            Path hashFile = runDir.toPath().resolve(CACHE_HASH_FILE);
+            Files.writeString(hashFile, hash, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not write cache hash: {}", e.getMessage());
+        }
     }
 
     private static void injectPackIfNeeded(MinecraftClient client) {

@@ -10,6 +10,9 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.customblocks.mixin.ServerCommonNetworkHandlerAccessor;
+import net.minecraft.util.Util;
+
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -157,12 +160,49 @@ public final class NetworkManager {
      *  the game socket on shared hosting with limited bandwidth. */
     private static final int BYTES_PER_TICK_BUDGET = 256 * 1024; // 256KB
 
+    /** Tracks players in the "sync grace window" — their keepalive timer is
+     *  continuously reset so the server doesn't kick them while the client
+     *  is busy regenerating + reloading the resource pack (can take 2-3 min). */
+    private static final ConcurrentHashMap<UUID, Long> SYNC_GRACE = new ConcurrentHashMap<>();
+    /** How long to keep the grace window open (ms). 5 minutes covers even the
+     *  slowest clients with 400+ textures and 100+ mods. */
+    private static final long SYNC_GRACE_MS = 300_000;
+
     /**
      * Called every server tick. Drains pending payloads and sends them,
      * respecting both a packet-count cap AND a bytes-per-tick budget so
      * large textures don't flood the connection.
      */
     public static void onServerTick(MinecraftServer server) {
+        long now = Util.getMeasuringTimeMs();
+
+        // ── Keepalive grace period for players in sync window ────────────
+        // After a full sync, the client needs 1-3+ min to write 400 PNGs and
+        // call reloadResources(). During that heavy operation, keepalive
+        // responses can be delayed past the server's timeout. We reset the
+        // timer here so the server doesn't false-kick them.
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            Long graceStart = SYNC_GRACE.get(player.getUuid());
+            if (graceStart != null) {
+                if (now - graceStart > SYNC_GRACE_MS) {
+                    SYNC_GRACE.remove(player.getUuid());
+                } else {
+                    try {
+                        ServerCommonNetworkHandlerAccessor accessor =
+                                (ServerCommonNetworkHandlerAccessor) player.networkHandler;
+                        accessor.setLastKeepAliveTime(now);
+                        accessor.setWaitingForKeepAlive(false);
+                    } catch (Exception e) {
+                        // Mixin cast failed — log once and remove grace
+                        LOGGER.warn("[CustomBlocks] Could not reset keepalive for {}: {}",
+                                player.getName().getString(), e.getMessage());
+                        SYNC_GRACE.remove(player.getUuid());
+                    }
+                }
+            }
+        }
+
+        // ── Drip-feed texture payloads ───────────────────────────────────
         int perTick = CustomBlocksConfig.texturePayloadsPerTick;
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
             TextureQueue queue = PLAYER_QUEUES.get(player.getUuid());
@@ -193,6 +233,9 @@ public final class NetworkManager {
             // Log when drip-feed completes for a player
             if (queue.isEmpty()) {
                 LOGGER.info("[CustomBlocks] Drip-feed complete for {}", player.getName().getString());
+                // Start the grace window — the CLIENT now needs time to generate
+                // the resource pack and call reloadResources().
+                SYNC_GRACE.put(player.getUuid(), now);
             }
         }
     }
@@ -204,6 +247,7 @@ public final class NetworkManager {
         TextureQueue queue = PLAYER_QUEUES.remove(player.getUuid());
         if (queue != null) queue.clear();
         LAST_FULL_SYNC.remove(player.getUuid());
+        SYNC_GRACE.remove(player.getUuid());
     }
 
     /** Called when a player joins — sends full sync + mandatory resource pack. */

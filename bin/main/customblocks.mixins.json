@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "package": "com.customblocks.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "ServerCommonNetworkHandlerAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
