@@ -137,6 +137,9 @@ public final class NetworkManager {
         LOGGER.info("[CustomBlocks] Drip-feed queued for {}: {} textures, {} faces, {} null-texture slots",
                 player.getName().getString(), texCount, faceCount, nullCount);
 
+        // Start the keepalive grace period NOW (covers drip-feed + client reload).
+        SYNC_GRACE.put(player.getUuid(), Util.getMeasuringTimeMs());
+
         // Sentinel: tells the client that every join texture has been queued.
         // The client uses this to fire exactly one resource-pack reload instead
         // of relying on a fixed debounce timer that can fire mid-burst on
@@ -179,8 +182,13 @@ public final class NetworkManager {
         // ── Keepalive grace period for players in sync window ────────────
         // After a full sync, the client needs 1-3+ min to write 400 PNGs and
         // call reloadResources(). During that heavy operation, keepalive
-        // responses can be delayed past the server's timeout. We reset the
-        // timer here so the server doesn't false-kick them.
+        // responses can be delayed past the server's timeout.
+        //
+        // We ONLY clear waitingForKeepAlive (so the server never kicks them).
+        // We do NOT reset lastKeepAliveTime — this lets the server continue
+        // sending keepalive packets to the client on the normal 15-second
+        // cycle. Without those keepalives, the CLIENT's Netty read timeout
+        // would fire and disconnect from the client side.
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
             Long graceStart = SYNC_GRACE.get(player.getUuid());
             if (graceStart != null) {
@@ -190,10 +198,10 @@ public final class NetworkManager {
                     try {
                         ServerCommonNetworkHandlerAccessor accessor =
                                 (ServerCommonNetworkHandlerAccessor) player.networkHandler;
-                        accessor.setLastKeepAliveTime(now);
+                        // Only clear the "waiting" flag — server won't kick,
+                        // but keepalive packets keep flowing to the client.
                         accessor.setWaitingForKeepAlive(false);
                     } catch (Exception e) {
-                        // Mixin cast failed — log once and remove grace
                         LOGGER.warn("[CustomBlocks] Could not reset keepalive for {}: {}",
                                 player.getName().getString(), e.getMessage());
                         SYNC_GRACE.remove(player.getUuid());
@@ -233,9 +241,6 @@ public final class NetworkManager {
             // Log when drip-feed completes for a player
             if (queue.isEmpty()) {
                 LOGGER.info("[CustomBlocks] Drip-feed complete for {}", player.getName().getString());
-                // Start the grace window — the CLIENT now needs time to generate
-                // the resource pack and call reloadResources().
-                SYNC_GRACE.put(player.getUuid(), now);
             }
         }
     }
