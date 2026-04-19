@@ -10,7 +10,6 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.customblocks.mixin.ServerCommonNetworkHandlerAccessor;
 import net.minecraft.util.Util;
 
 import java.util.*;
@@ -171,44 +170,30 @@ public final class NetworkManager {
      *  slowest clients with 400+ textures and 100+ mods. */
     private static final long SYNC_GRACE_MS = 300_000;
 
+    /** Check if a player is currently in the keepalive grace window.
+     *  Called from {@link com.customblocks.mixin.ServerKeepAliveGraceMixin}
+     *  inside {@code baseTick()} HEAD — before the vanilla timeout check. */
+    public static boolean isInGracePeriod(UUID playerId) {
+        Long graceStart = SYNC_GRACE.get(playerId);
+        if (graceStart == null) return false;
+        long elapsed = Util.getMeasuringTimeMs() - graceStart;
+        if (elapsed > SYNC_GRACE_MS) {
+            SYNC_GRACE.remove(playerId);
+            return false;
+        }
+        return true;
+    }
+
     /**
      * Called every server tick. Drains pending payloads and sends them,
      * respecting both a packet-count cap AND a bytes-per-tick budget so
      * large textures don't flood the connection.
      */
     public static void onServerTick(MinecraftServer server) {
-        long now = Util.getMeasuringTimeMs();
-
-        // ── Keepalive grace period for players in sync window ────────────
-        // After a full sync, the client needs 1-3+ min to write 400 PNGs and
-        // call reloadResources(). During that heavy operation, keepalive
-        // responses can be delayed past the server's timeout.
-        //
-        // We ONLY clear waitingForKeepAlive (so the server never kicks them).
-        // We do NOT reset lastKeepAliveTime — this lets the server continue
-        // sending keepalive packets to the client on the normal 15-second
-        // cycle. Without those keepalives, the CLIENT's Netty read timeout
-        // would fire and disconnect from the client side.
-        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
-            Long graceStart = SYNC_GRACE.get(player.getUuid());
-            if (graceStart != null) {
-                if (now - graceStart > SYNC_GRACE_MS) {
-                    SYNC_GRACE.remove(player.getUuid());
-                } else {
-                    try {
-                        ServerCommonNetworkHandlerAccessor accessor =
-                                (ServerCommonNetworkHandlerAccessor) player.networkHandler;
-                        // Only clear the "waiting" flag — server won't kick,
-                        // but keepalive packets keep flowing to the client.
-                        accessor.setWaitingForKeepAlive(false);
-                    } catch (Exception e) {
-                        LOGGER.warn("[CustomBlocks] Could not reset keepalive for {}: {}",
-                                player.getName().getString(), e.getMessage());
-                        SYNC_GRACE.remove(player.getUuid());
-                    }
-                }
-            }
-        }
+        // NOTE: The keepalive grace period is now handled by ServerKeepAliveGraceMixin
+        // which injects at HEAD of baseTick(). This fires BEFORE the keepalive timeout
+        // check, preventing the race where baseTick() disconnects the player before
+        // our END_SERVER_TICK handler could clear the flag.
 
         // ── Drip-feed texture payloads ───────────────────────────────────
         int perTick = CustomBlocksConfig.texturePayloadsPerTick;
