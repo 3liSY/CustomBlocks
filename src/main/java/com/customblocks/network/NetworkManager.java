@@ -32,6 +32,12 @@ public final class NetworkManager {
     // ── Per-player pending texture queues ────────────────────────────────────
     private static final ConcurrentHashMap<UUID, TextureQueue> PLAYER_QUEUES = new ConcurrentHashMap<>();
 
+    /** Tracks when each player last received a full sync to prevent redundant re-syncs. */
+    private static final ConcurrentHashMap<UUID, Long> LAST_FULL_SYNC = new ConcurrentHashMap<>();
+    /** Minimum interval between full syncs per player (ms). Prevents double-syncing
+     *  when a broadcastFullSync fires shortly after a join sync. */
+    private static final long FULL_SYNC_COOLDOWN_MS = 30_000;
+
     /**
      * Validate payload size before queueing. Returns true if payload is safe to send.
      * Logs warnings for oversized textures and rejects payloads exceeding hard limit.
@@ -82,6 +88,16 @@ public final class NetworkManager {
      * mid-burst on slow (internet) connections.
      */
     public static void sendFullSync(ServerPlayerEntity player) {
+        // Skip if this player was already synced recently (e.g. broadcastFullSync shortly after join)
+        long now = System.currentTimeMillis();
+        Long lastSync = LAST_FULL_SYNC.get(player.getUuid());
+        if (lastSync != null && (now - lastSync) < FULL_SYNC_COOLDOWN_MS) {
+            LOGGER.info("[CustomBlocks] Skipping redundant full sync for {} (last sync {}ms ago)",
+                    player.getName().getString(), now - lastSync);
+            return;
+        }
+        LAST_FULL_SYNC.put(player.getUuid(), now);
+
         List<FullSyncPayload.SlotEntry> entries = new ArrayList<>();
         for (SlotData data : SlotManager.allSlots()) {
             entries.add(new FullSyncPayload.SlotEntry(
@@ -187,6 +203,7 @@ public final class NetworkManager {
     public static void onPlayerDisconnect(ServerPlayerEntity player) {
         TextureQueue queue = PLAYER_QUEUES.remove(player.getUuid());
         if (queue != null) queue.clear();
+        LAST_FULL_SYNC.remove(player.getUuid());
     }
 
     /** Called when a player joins — sends full sync + mandatory resource pack. */
