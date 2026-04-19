@@ -10,8 +10,6 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import net.minecraft.util.Util;
-
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -136,9 +134,6 @@ public final class NetworkManager {
         LOGGER.info("[CustomBlocks] Drip-feed queued for {}: {} textures, {} faces, {} null-texture slots",
                 player.getName().getString(), texCount, faceCount, nullCount);
 
-        // Start the keepalive grace period NOW (covers drip-feed + client reload).
-        SYNC_GRACE.put(player.getUuid(), Util.getMeasuringTimeMs());
-
         // Sentinel: tells the client that every join texture has been queued.
         // The client uses this to fire exactly one resource-pack reload instead
         // of relying on a fixed debounce timer that can fire mid-burst on
@@ -162,39 +157,12 @@ public final class NetworkManager {
      *  the game socket on shared hosting with limited bandwidth. */
     private static final int BYTES_PER_TICK_BUDGET = 256 * 1024; // 256KB
 
-    /** Tracks players in the "sync grace window" — their keepalive timer is
-     *  continuously reset so the server doesn't kick them while the client
-     *  is busy regenerating + reloading the resource pack (can take 2-3 min). */
-    private static final ConcurrentHashMap<UUID, Long> SYNC_GRACE = new ConcurrentHashMap<>();
-    /** How long to keep the grace window open (ms). 5 minutes covers even the
-     *  slowest clients with 400+ textures and 100+ mods. */
-    private static final long SYNC_GRACE_MS = 300_000;
-
-    /** Check if a player is currently in the keepalive grace window.
-     *  Called from {@link com.customblocks.mixin.ServerKeepAliveGraceMixin}
-     *  inside {@code baseTick()} HEAD — before the vanilla timeout check. */
-    public static boolean isInGracePeriod(UUID playerId) {
-        Long graceStart = SYNC_GRACE.get(playerId);
-        if (graceStart == null) return false;
-        long elapsed = Util.getMeasuringTimeMs() - graceStart;
-        if (elapsed > SYNC_GRACE_MS) {
-            SYNC_GRACE.remove(playerId);
-            return false;
-        }
-        return true;
-    }
-
     /**
      * Called every server tick. Drains pending payloads and sends them,
      * respecting both a packet-count cap AND a bytes-per-tick budget so
      * large textures don't flood the connection.
      */
     public static void onServerTick(MinecraftServer server) {
-        // NOTE: The keepalive grace period is now handled by ServerKeepAliveGraceMixin
-        // which injects at HEAD of baseTick(). This fires BEFORE the keepalive timeout
-        // check, preventing the race where baseTick() disconnects the player before
-        // our END_SERVER_TICK handler could clear the flag.
-
         // ── Drip-feed texture payloads ───────────────────────────────────
         int perTick = CustomBlocksConfig.texturePayloadsPerTick;
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
@@ -237,7 +205,6 @@ public final class NetworkManager {
         TextureQueue queue = PLAYER_QUEUES.remove(player.getUuid());
         if (queue != null) queue.clear();
         LAST_FULL_SYNC.remove(player.getUuid());
-        SYNC_GRACE.remove(player.getUuid());
     }
 
     /** Called when a player joins — sends full sync + mandatory resource pack. */
