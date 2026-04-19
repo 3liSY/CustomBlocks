@@ -190,6 +190,10 @@ public class CustomBlocksClient implements ClientModInitializer {
                         if (payload.animMeta() != null && !payload.animMeta().isEmpty())
                             SlotManager.setAnimMeta(payload.customId(), payload.animMeta());
                         TextureCache.invalidate(payload.customId());
+                        if (!joinBurst) {
+                            scheduleAnimMetaReload(client, payload.slotIndex(), payload.animMeta());
+                            return;
+                        }
                     }
                     case "remove" -> {
                         TextureCache.invalidate(payload.customId());
@@ -242,8 +246,7 @@ public class CustomBlocksClient implements ClientModInitializer {
                     String action = payload.action();
                     boolean needsReload = action.equals("add") || action.equals("retexture")
                             || action.equals("remove") || action.equals("setface")
-                            || action.equals("clearface") || action.equals("clearfaces")
-                            || action.equals("setshape") || action.equals("animsettings");
+                            || action.equals("clearface") || action.equals("clearfaces");
                     if (needsReload) scheduleGenerateAndReload(client, 2000L);
                 } else {
                     // Still in join burst — refresh the fallback debounce timer so it
@@ -407,6 +410,51 @@ public class CustomBlocksClient implements ClientModInitializer {
         }
         // If generateRunning is already true, the running thread will see the updated
         // lastPacketTime on its next 200ms poll and extend or break its wait as needed.
+    }
+
+    // ── Lightweight anim-only reload ─────────────────────────────────────────
+
+    /**
+     * Fast path for animation setting changes: writes ONLY the .mcmeta file for
+     * the affected slot to the existing pack directory, then triggers a resource
+     * reload. Skips the expensive full ResourcePackGenerator.generate() that
+     * rewrites all 410+ texture PNGs to disk.
+     */
+    private static void scheduleAnimMetaReload(MinecraftClient client, int slotIndex, String animMeta) {
+        File packRoot = new File(client.runDirectory, "customblocks_generated");
+        File mcmetaFile = new File(packRoot, "assets/customblocks/textures/block/slot_" + slotIndex + ".png.mcmeta");
+
+        if (animMeta != null && !animMeta.isEmpty()) {
+            mcmetaFile.getParentFile().mkdirs();
+            try (java.io.FileWriter fw = new java.io.FileWriter(mcmetaFile, StandardCharsets.UTF_8)) {
+                fw.write(animMeta);
+            } catch (Exception e) {
+                CustomBlocksMod.LOGGER.warn("[CustomBlocks] Failed to write .mcmeta for slot_{}: {}", slotIndex, e.getMessage());
+            }
+        } else {
+            if (mcmetaFile.exists()) mcmetaFile.delete();
+        }
+
+        // Also update the texture hash on disk so the next join doesn't see a stale cache
+        String currentHash = computeTextureHash();
+        saveCachedHash(client.runDirectory, currentHash);
+
+        // Trigger resource reload to pick up the new animation timing
+        if (reloadInFlight.compareAndSet(false, true)) {
+            client.reloadResources().thenRun(() ->
+                client.execute(() -> {
+                    reloadInFlight.set(false);
+                    CustomBlocksMod.LOGGER.info("[CustomBlocks] Anim-only reload complete.");
+                    pendingCreativeRefresh = true;
+                })
+            ).exceptionally(ex -> {
+                client.execute(() -> {
+                    reloadInFlight.set(false);
+                    CustomBlocksMod.LOGGER.error("[CustomBlocks] Anim-only reload failed.", ex);
+                });
+                return null;
+            });
+        }
     }
 
     // ── Texture cache helpers ────────────────────────────────────────────────

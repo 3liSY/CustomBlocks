@@ -1,0 +1,22 @@
+{
+  "mappings": {
+    "com/customblocks/mixin/ClientConnectionKeepAliveMixin": {
+      "channelRead0(Lio/netty/channel/ChannelHandlerContext;Lnet/minecraft/network/packet/Packet;)V": "Lnet/minecraft/class_2535;method_10770(Lio/netty/channel/ChannelHandlerContext;Lnet/minecraft/class_2596;)V"
+    },
+    "com/customblocks/mixin/ServerKeepAliveGraceMixin": {
+      "baseTick": "Lnet/minecraft/class_8609;method_52400()V",
+      "onKeepAlive": "Lnet/minecraft/class_8609;method_52393(Lnet/minecraft/class_2827;)V"
+    }
+  },
+  "data": {
+    "named:intermediary": {
+      "com/customblocks/mixin/ClientConnectionKeepAliveMixin": {
+        "channelRead0(Lio/netty/channel/ChannelHandlerContext;Lnet/minecraft/network/packet/Packet;)V": "Lnet/minecraft/class_2535;method_10770(Lio/netty/channel/ChannelHandlerContext;Lnet/minecraft/class_2596;)V"
+      },
+      "com/customblocks/mixin/ServerKeepAliveGraceMixin": {
+        "baseTick": "Lnet/minecraft/class_8609;method_52400()V",
+        "onKeepAlive": "Lnet/minecraft/class_8609;method_52393(Lnet/minecraft/class_2827;)V"
+      }
+    }
+  }
+}
