@@ -1682,10 +1682,21 @@ public class CustomBlockCommand {
     }
 
     private static int cmdReload(ServerCommandSource src) {
+        ChatHelper.success(src, "Reloading blocks... (running in background)");
+        // Fix 4: Run off the server thread to prevent blocking ticks for 10+ seconds
         SlotManager.flushSave();
-        SlotManager.loadAll();
-        CustomBlocksMod.broadcastFullSync(src.getServer());
-        ChatHelper.success(src, "Reloaded all blocks and synced to all players.");
+        new Thread(() -> {
+            try {
+                SlotManager.loadAll();
+                src.getServer().execute(() -> {
+                    CustomBlocksMod.broadcastFullSync(src.getServer());
+                    ChatHelper.success(src, "Reload complete — synced to all players.");
+                });
+            } catch (Exception e) {
+                src.getServer().execute(() ->
+                    ChatHelper.error(src, "Reload failed: " + e.getMessage()));
+            }
+        }, "CustomBlocks-Reload").start();
         return 1;
     }
 

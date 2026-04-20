@@ -272,6 +272,10 @@ public class CustomBlocksMod implements ModInitializer {
 
                 com.customblocks.network.AnimSettingsPayload.CODEC);
 
+        PayloadTypeRegistry.playC2S().register(
+                com.customblocks.network.SyncRequestPayload.ID,
+                com.customblocks.network.SyncRequestPayload.CODEC);
+
 
 
         // ── AnimSettings C2S handler ─────────────────────────────────────────
@@ -331,6 +335,18 @@ public class CustomBlocksMod implements ModInitializer {
         );
 
 
+
+        // ── SyncRequest C2S handler (Fix 7: client-initiated sync) ────────────
+        ServerPlayNetworking.registerGlobalReceiver(
+                com.customblocks.network.SyncRequestPayload.ID,
+                (payload, context) -> {
+                    context.server().execute(() -> {
+                        LOGGER.info("[CustomBlocks] Received sync request from {}",
+                                context.player().getName().getString());
+                        NetworkManager.onSyncRequest(context.player());
+                    });
+                }
+        );
 
         // ── Creative tab ─────────────────────────────────────────────────────
 

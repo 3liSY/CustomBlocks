@@ -166,7 +166,16 @@ public final class NetworkManager {
         // ── Drip-feed texture payloads ───────────────────────────────────
         int perTick = CustomBlocksConfig.texturePayloadsPerTick;
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
-            TextureQueue queue = PLAYER_QUEUES.get(player.getUuid());
+            java.util.UUID uid = player.getUuid();
+
+            // Fix 12: Traffic shaping — if this player is in cooldown, decrement and skip
+            Integer cooldown = COOLDOWN_TICKS.get(uid);
+            if (cooldown != null && cooldown > 0) {
+                COOLDOWN_TICKS.put(uid, cooldown - 1);
+                continue;
+            }
+
+            TextureQueue queue = PLAYER_QUEUES.get(uid);
             if (queue == null || queue.isEmpty()) continue;
 
             SlotUpdatePayload[] batch = queue.drain(perTick);
@@ -176,8 +185,18 @@ public final class NetworkManager {
                 SlotUpdatePayload payload = batch[i];
                 try {
                     int payloadSize = payload.texture() != null ? payload.texture().length : 0;
-                    if (bytesSent > 0 && bytesSent + payloadSize > BYTES_PER_TICK_BUDGET) {
-                        // Re-queue this and all remaining payloads — reverse order to maintain FIFO
+                    // Fix 12: Enforce budget even on the FIRST packet of the tick
+                    if (bytesSent + payloadSize > BYTES_PER_TICK_BUDGET && payloadSize > 0) {
+                        if (bytesSent == 0) {
+                            // Single oversized texture: send it but apply cooldown
+                            ServerPlayNetworking.send(player, payload);
+                            bytesSent += payloadSize;
+                            // Cooldown = how many ticks this payload "consumed"
+                            int cooldownTicks = Math.max(1, payloadSize / BYTES_PER_TICK_BUDGET);
+                            COOLDOWN_TICKS.put(uid, cooldownTicks);
+                            i++; // advance past this payload
+                        }
+                        // Re-queue remaining payloads — reverse order to maintain FIFO
                         for (int j = batch.length - 1; j >= i; j--) {
                             queue.requeueFront(batch[j]);
                         }
@@ -193,6 +212,7 @@ public final class NetworkManager {
 
             // Log when drip-feed completes for a player
             if (queue.isEmpty()) {
+                COOLDOWN_TICKS.remove(uid);
                 LOGGER.info("[CustomBlocks] Drip-feed complete for {}", player.getName().getString());
             }
         }
@@ -205,11 +225,21 @@ public final class NetworkManager {
         TextureQueue queue = PLAYER_QUEUES.remove(player.getUuid());
         if (queue != null) queue.clear();
         LAST_FULL_SYNC.remove(player.getUuid());
+        COOLDOWN_TICKS.remove(player.getUuid());
     }
 
-    /** Called when a player joins — sends full sync + mandatory resource pack. */
-    public static void onPlayerJoin(ServerPlayerEntity player) {
+    /**
+     * Called when the client sends SyncRequestPayload (Fix 7: client-initiated sync).
+     * At this point the Netty pipeline is guaranteed ready for S2C packets.
+     */
+    public static void onSyncRequest(ServerPlayerEntity player) {
         sendFullSync(player);
+    }
+
+    /** Called when a player joins — mandatory resource pack only (no sync here). */
+    public static void onPlayerJoin(ServerPlayerEntity player) {
+        // NOTE: sendFullSync is NO LONGER called here.
+        // The client will send SyncRequestPayload when ready → onSyncRequest().
 
         // ── Mandatory Resource Pack Enforcement ──────────────────────────────
         // Delayed by 40 ticks (2 seconds) to ensure the HTTP server has the pack
@@ -250,6 +280,13 @@ public final class NetworkManager {
             });
         }
     }
+
+    // ── Network Traffic Shaping (Fix 12) ──────────────────────────────────────
+    /**
+     * Per-player cooldown ticks. If > 0, that player's queue is paused to let
+     * their connection digest a large payload without choking Keep-Alive.
+     */
+    private static final ConcurrentHashMap<java.util.UUID, Integer> COOLDOWN_TICKS = new ConcurrentHashMap<>();
 
     // ── Internal ─────────────────────────────────────────────────────────────
 

@@ -643,79 +643,37 @@ public final class SlotManager {
 
 
                 // ── Safety check: prevent catastrophic texture loss ──────────
-
-                // Count how many slots in the NEW snapshot have textures vs how
-
-                // many on DISK have textures.  If we'd lose more than 10 textures,
-
-                // abort the save and write a .bak instead.
-
+                // Fix 3: Uses a lightweight textured_count.txt instead of parsing
+                // the entire 50MB slots.json. Zero memory allocation.
                 int newTextured = 0;
-
                 for (SlotData d : snapshot.slots) {
-
                     if (!"tab_icon".equals(d.customId) && d.texture != null && d.texture.length > 0)
-
                         newTextured++;
-
                 }
 
-                if (Files.exists(file)) {
-
+                Path countFile = dir.resolve("textured_count.txt");
+                int diskTextured = -1;
+                if (Files.exists(countFile)) {
                     try {
+                        diskTextured = Integer.parseInt(Files.readString(countFile, StandardCharsets.UTF_8).trim());
+                    } catch (Exception ignored) { /* will fallback to skip check */ }
+                }
 
-                        String existingJson = Files.readString(file, StandardCharsets.UTF_8);
-
-                        JsonObject existingRoot = com.google.gson.JsonParser.parseString(existingJson).getAsJsonObject();
-
-                        if (existingRoot.has("slots")) {
-
-                            int diskTextured = 0;
-
-                            for (com.google.gson.JsonElement el : existingRoot.getAsJsonArray("slots")) {
-
-                                com.google.gson.JsonObject obj = el.getAsJsonObject();
-
-                                if (obj.has("texture")) diskTextured++;
-
-                            }
-
-                            int lost = diskTextured - newTextured;
-
-                            if (lost > 10) {
-
-                                // Create a backup and REFUSE to overwrite
-
-                                Path bakFile = dir.resolve(DATA_FILE + ".bak");
-
-                                if (!Files.exists(bakFile)) {
-
-                                    Files.copy(file, bakFile);
-
-                                    LOGGER.warn("[CustomBlocks] Created backup at {} (disk had {} textured, memory has {})",
-
-                                            bakFile, diskTextured, newTextured);
-
-                                }
-
-                                LOGGER.error("[CustomBlocks] SAVE ABORTED: {} slots would lose textures ({} on disk → {} in memory). " +
-
-                                        "This is a safety check to prevent data loss. A .bak file has been preserved.",
-
-                                        lost, diskTextured, newTextured);
-
-                                return;
-
-                            }
-
+                if (diskTextured >= 0) {
+                    int lost = diskTextured - newTextured;
+                    if (lost > 10) {
+                        // Create a backup and REFUSE to overwrite
+                        Path bakFile = dir.resolve(DATA_FILE + ".bak");
+                        if (!Files.exists(bakFile)) {
+                            try { Files.copy(file, bakFile); } catch (Exception ignored) {}
+                            LOGGER.warn("[CustomBlocks] Created backup at {} (disk had {} textured, memory has {})",
+                                    bakFile, diskTextured, newTextured);
                         }
-
-                    } catch (Exception parseEx) {
-
-                        LOGGER.warn("[CustomBlocks] Could not read existing file for safety check: {}", parseEx.getMessage());
-
+                        LOGGER.error("[CustomBlocks] SAVE ABORTED: {} slots would lose textures ({} on disk → {} in memory). " +
+                                "This is a safety check to prevent data loss. A .bak file has been preserved.",
+                                lost, diskTextured, newTextured);
+                        return;
                     }
-
                 }
 
 
@@ -754,7 +712,10 @@ public final class SlotManager {
 
                 Files.move(tempFile, file, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
 
-
+                // Fix 3: Update textured_count.txt for next save's safety check
+                try {
+                    Files.writeString(countFile, String.valueOf(newTextured), StandardCharsets.UTF_8);
+                } catch (Exception ignored) { /* non-critical */ }
 
                 // Pass the EXACT same snapshot to the Resource Pack generator
 

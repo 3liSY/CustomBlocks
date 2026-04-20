@@ -93,6 +93,11 @@ public class CustomBlocksClient implements ClientModInitializer {
             }
         });
 
+        // ── Fix 7: Client-initiated sync — send "I'm ready" when connection is live
+        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
+            ClientPlayNetworking.send(new com.customblocks.network.SyncRequestPayload());
+        });
+
         // ── Disconnect → reset all join-burst state ────────────────────────────
         //
         // This is critical for players who experience a failed join and immediately
@@ -123,13 +128,42 @@ public class CustomBlocksClient implements ClientModInitializer {
                 syncDoneReceived = false;
                 joinBurst        = true;
 
-                SlotManager.clearAll();
-                TextureCache.invalidateAll();
+                // ── Fix 9: Smart merge instead of clearAll() ────────────────
+                // Step 1: Build set of server-side IDs
+                java.util.Set<String> serverIds = new java.util.HashSet<>();
                 for (FullSyncPayload.SlotEntry e : payload.entries()) {
-                    SlotManager.assignAtIndex(e.index(), e.customId(), e.displayName(), null);
-                    SlotManager.setProperties(e.customId(), e.lightLevel(), e.hardness(), e.soundType());
-                    if (e.animMeta() != null && !e.animMeta().isEmpty())
-                        SlotManager.setAnimMeta(e.customId(), e.animMeta());
+                    serverIds.add(e.customId());
+                }
+
+                // Step 2: Remove local blocks the server no longer has
+                java.util.List<String> toRemove = new java.util.ArrayList<>();
+                for (SlotData local : SlotManager.allSlots()) {
+                    if (!serverIds.contains(local.customId)) {
+                        toRemove.add(local.customId);
+                    }
+                }
+                for (String id : toRemove) {
+                    SlotManager.remove(id);
+                }
+                TextureCache.invalidateAll();  // render cache still needs refresh
+
+                // Step 3: Merge — update metadata, KEEP existing textures
+                for (FullSyncPayload.SlotEntry e : payload.entries()) {
+                    SlotData existing = SlotManager.getById(e.customId());
+                    if (existing != null) {
+                        if (existing.index != e.index()) {
+                            SlotManager.remove(e.customId());
+                            SlotManager.assignAtIndex(e.index(), e.customId(), e.displayName(), existing.texture);
+                        }
+                        SlotManager.setProperties(e.customId(), e.lightLevel(), e.hardness(), e.soundType());
+                        if (e.animMeta() != null && !e.animMeta().isEmpty())
+                            SlotManager.setAnimMeta(e.customId(), e.animMeta());
+                    } else {
+                        SlotManager.assignAtIndex(e.index(), e.customId(), e.displayName(), null);
+                        SlotManager.setProperties(e.customId(), e.lightLevel(), e.hardness(), e.soundType());
+                        if (e.animMeta() != null && !e.animMeta().isEmpty())
+                            SlotManager.setAnimMeta(e.customId(), e.animMeta());
+                    }
                 }
                 if (payload.tabIconTexture() != null)
                     SlotManager.setTabIconTexture(payload.tabIconTexture());
@@ -354,7 +388,7 @@ public class CustomBlocksClient implements ClientModInitializer {
                 String currentHash = computeTextureHash();
                 String cachedHash  = loadCachedHash(client.runDirectory);
                 boolean packExists = new File(client.runDirectory,
-                        "customblocks_generated/assets").isDirectory();
+                        "resourcepacks/customblocks_generated/assets").isDirectory();
 
                 if (currentHash.equals(cachedHash) && packExists) {
                     // CACHE HIT — textures unchanged, pack on disk is valid
@@ -421,7 +455,7 @@ public class CustomBlocksClient implements ClientModInitializer {
      * rewrites all 410+ texture PNGs to disk.
      */
     private static void scheduleAnimMetaReload(MinecraftClient client, int slotIndex, String animMeta) {
-        File packRoot = new File(client.runDirectory, "customblocks_generated");
+        File packRoot = new File(client.runDirectory, "resourcepacks/customblocks_generated");
         File mcmetaFile = new File(packRoot, "assets/customblocks/textures/block/slot_" + slotIndex + ".png.mcmeta");
 
         if (animMeta != null && !animMeta.isEmpty()) {

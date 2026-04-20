@@ -96,20 +96,16 @@ public class ColorSquareItem extends Item {
             if (colorIdx >= 0) break;
         }
 
+        String targetId;
         if (colorIdx < 0) {
-            if (player != null) {
-                player.sendMessage(Text.literal(
-                    "§c[CustomBlocks] No colour segment found in \"§f" + current.customId
-                    + "§c\". The colour word (black/yellow/green) must be its own underscore-"
-                    + "separated token, e.g. §fblock_black§c or §fblack_block§c."), true);
-                if (world instanceof ServerWorld sw) sw.playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
-            }
-            return ActionResult.FAIL;
+            // Fix 11: No colour segment found — treat as a base/colorless block.
+            // Look for a variant with the colour appended as a suffix.
+            targetId = current.customId + "_" + colorWord;
+        } else {
+            // Replace only the colour segment, keep everything else identical
+            segments[colorIdx] = colorWord;
+            targetId = String.join("_", segments);
         }
-
-        // Replace only the colour segment, keep everything else identical
-        segments[colorIdx] = colorWord;
-        String targetId = String.join("_", segments);
 
         // Already this colour?
         if (targetId.equals(current.customId)) {
