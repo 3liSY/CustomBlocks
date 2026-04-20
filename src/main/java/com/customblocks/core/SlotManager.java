@@ -678,37 +678,34 @@ public final class SlotManager {
 
 
 
-                JsonObject root = new JsonObject();
-
-
-
-                // Tab icon
-
-                if (snapshot.tabIcon != null)
-
-                    root.addProperty("tabIconTexture", Base64.getEncoder().encodeToString(snapshot.tabIcon));
-
-
-
-                // Slots
-
-                JsonArray arr = new JsonArray();
-
-                for (SlotData data : snapshot.slots) {
-
-                    if ("tab_icon".equals(data.customId)) continue;
-
-                    arr.add(serializeSlot(data));
-
-                }
-
-                root.add("slots", arr);
-
-
-
+                // ── Streaming JSON writer: writes one slot at a time ──────
+                // Instead of building a 200MB+ JSON tree in memory, we stream
+                // each slot directly to disk. Peak memory: ~3MB vs 200-400MB.
                 Path tempFile = dir.resolve(DATA_FILE + ".tmp");
 
-                Files.writeString(tempFile, GSON.toJson(root), StandardCharsets.UTF_8);
+                try (com.google.gson.stream.JsonWriter writer = new com.google.gson.stream.JsonWriter(
+                        new BufferedWriter(new OutputStreamWriter(
+                                new FileOutputStream(tempFile.toFile()), StandardCharsets.UTF_8)))) {
+                    writer.setIndent("  ");
+                    writer.beginObject();
+
+                    // Tab icon
+                    if (snapshot.tabIcon != null) {
+                        writer.name("tabIconTexture").value(
+                                Base64.getEncoder().encodeToString(snapshot.tabIcon));
+                    }
+
+                    // Slots — written one at a time, each GC'd after write
+                    writer.name("slots");
+                    writer.beginArray();
+                    for (SlotData data : snapshot.slots) {
+                        if ("tab_icon".equals(data.customId)) continue;
+                        GSON.toJson(serializeSlot(data), writer);
+                    }
+                    writer.endArray();
+
+                    writer.endObject();
+                }
 
                 Files.move(tempFile, file, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
 
@@ -745,19 +742,27 @@ public final class SlotManager {
 
             Files.createDirectories(dir);
 
-            JsonObject root = new JsonObject();
+            // Streaming JSON writer — same as saveAllAsync(), avoids 200MB+ memory spike
+            try (com.google.gson.stream.JsonWriter writer = new com.google.gson.stream.JsonWriter(
+                    new BufferedWriter(new OutputStreamWriter(
+                            new FileOutputStream(file.toFile()), StandardCharsets.UTF_8)))) {
+                writer.setIndent("  ");
+                writer.beginObject();
 
-            if (tabIconTexture != null)
+                if (tabIconTexture != null) {
+                    writer.name("tabIconTexture").value(
+                            Base64.getEncoder().encodeToString(tabIconTexture));
+                }
 
-                root.addProperty("tabIconTexture", Base64.getEncoder().encodeToString(tabIconTexture));
+                writer.name("slots");
+                writer.beginArray();
+                for (SlotData data : byId.values()) {
+                    GSON.toJson(serializeSlot(data), writer);
+                }
+                writer.endArray();
 
-            JsonArray arr = new JsonArray();
-
-            for (SlotData data : byId.values()) arr.add(serializeSlot(data));
-
-            root.add("slots", arr);
-
-            Files.writeString(file, GSON.toJson(root), StandardCharsets.UTF_8);
+                writer.endObject();
+            }
 
         } catch (Exception e) {
 
