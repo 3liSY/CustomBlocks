@@ -41,7 +41,7 @@ import java.util.concurrent.atomic.AtomicLong;
 @Environment(EnvType.CLIENT)
 public class CustomBlocksClient implements ClientModInitializer {
 
-    private static final String PACK_ENTRY = "file/customblocks_generated";
+    private static final String PACK_ENTRY = "file/CustomBlocks";
     private static final AtomicBoolean reloadInFlight  = new AtomicBoolean(false);
     private static final AtomicBoolean generateRunning = new AtomicBoolean(false);
     private static final AtomicLong    lastPacketTime  = new AtomicLong(0);
@@ -388,7 +388,7 @@ public class CustomBlocksClient implements ClientModInitializer {
                 String currentHash = computeTextureHash();
                 String cachedHash  = loadCachedHash(client.runDirectory);
                 boolean packExists = new File(client.runDirectory,
-                        "resourcepacks/customblocks_generated/assets").isDirectory();
+                        "resourcepacks/CustomBlocks/assets").isDirectory();
 
                 if (currentHash.equals(cachedHash) && packExists) {
                     // CACHE HIT — textures unchanged, pack on disk is valid
@@ -455,7 +455,7 @@ public class CustomBlocksClient implements ClientModInitializer {
      * rewrites all 410+ texture PNGs to disk.
      */
     private static void scheduleAnimMetaReload(MinecraftClient client, int slotIndex, String animMeta) {
-        File packRoot = new File(client.runDirectory, "resourcepacks/customblocks_generated");
+        File packRoot = new File(client.runDirectory, "resourcepacks/CustomBlocks");
         File mcmetaFile = new File(packRoot, "assets/customblocks/textures/block/slot_" + slotIndex + ".png.mcmeta");
 
         if (animMeta != null && !animMeta.isEmpty()) {

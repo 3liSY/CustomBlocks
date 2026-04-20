@@ -38,7 +38,7 @@ public class ResourcePackGenerator {
     public static void generate(MinecraftClient client) {
         try {
             File mcDir    = client.runDirectory;
-            File packRoot = new File(mcDir, "resourcepacks/customblocks_generated");
+            File packRoot = new File(mcDir, "resourcepacks/CustomBlocks");
             File assets   = new File(packRoot, "assets/" + MOD_ID);
 
             new File(assets, "blockstates").mkdirs();
