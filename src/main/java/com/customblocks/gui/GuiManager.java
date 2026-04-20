@@ -839,7 +839,7 @@ public class GuiManager {
                     customFps = Math.round(customFps * 10f) / 10f;
                     AnimParams ap = ANIM_PARAMS.getOrDefault(player.getUuid(), new AnimParams(10f, false, 1));
                     ANIM_PARAMS.put(player.getUuid(), new AnimParams(customFps, ap.interpolate(), ap.frameCount()));
-                    send(player, "§a[Anim] FPS set to §f" + String.format(java.util.Locale.US, "%.1f", customFps));
+                    send(player, "§a[Anim] FPS set to §f" + String.format("%.1f", customFps));
                 } catch (NumberFormatException e) {
                     send(player, "§cInvalid number. Enter a value like §f20§c or §f0.5");
                 }
@@ -1943,7 +1943,7 @@ public class GuiManager {
                     new PendingInput(InputAction.ANIM_CUSTOM_FPS, id, null, null, null, state.page()),
                     "§b§lCustom FPS",
                     new ItemStack(Items.ANVIL),
-                    String.format(java.util.Locale.US, "%.1f", fps));
+                    String.format("%.1f", fps));
                 return;
             }
             case 40 -> { interp = !interp; playClick(player); }
@@ -1982,9 +1982,9 @@ public class GuiManager {
         boolean fpsChanged = Math.abs(orig.fps() - fps) > 0.05f;
         boolean interpChanged = orig.interpolate() != interp;
         if (fpsChanged && interpChanged) {
-            ChatHelper.success(player, "Animation updated for '§f" + d.displayName + "§a' (" + String.format(java.util.Locale.US, "%.1f", fps) + " fps, blending " + (interp ? "§6ON" : "§7OFF") + "§a)");
+            ChatHelper.success(player, "Animation updated for '§f" + d.displayName + "§a' (" + String.format("%.1f", fps) + " fps, blending " + (interp ? "§6ON" : "§7OFF") + "§a)");
         } else if (fpsChanged) {
-            ChatHelper.success(player, "Animation speed updated for '§f" + d.displayName + "§a' (" + String.format(java.util.Locale.US, "%.1f", fps) + " fps)");
+            ChatHelper.success(player, "Animation speed updated for '§f" + d.displayName + "§a' (" + String.format("%.1f", fps) + " fps)");
         } else if (interpChanged) {
             ChatHelper.success(player, "Smooth blending " + (interp ? "§6enabled" : "§7disabled") + "§a for '§f" + d.displayName + "§a'");
         } else {
@@ -2009,7 +2009,7 @@ public class GuiManager {
         for (int i = 0; i < 27; i++) inv.setStack(i, glass());
 
         inv.setStack(13, uiGlint(Items.WRITABLE_BOOK, "§e§lUnsaved Changes",
-            "§7FPS: §f" + String.format(java.util.Locale.US, "%.1f", original.fps()) + " §7→ §b" + String.format(java.util.Locale.US, "%.1f", current.fps()),
+            "§7FPS: §f" + String.format("%.1f", original.fps()) + " §7→ §b" + String.format("%.1f", current.fps()),
             "§7Blending: §f" + (original.interpolate() ? "ON" : "OFF") + " §7→ §b" + (current.interpolate() ? "ON" : "OFF"),
             "", "§cDiscard these changes?"));
         inv.setStack(11, uiGlint(Items.LIME_WOOL, "§a§lYes — Discard", "§7Abandon changes and go back"));
@@ -2300,8 +2300,8 @@ public class GuiManager {
 
         // ── Row 1: The Status Dashboard ──────────────────────────────────────
         inv.setStack(4, uiGlint(Items.KNOWLEDGE_BOOK, "§b§lServer Performance",
-            "§7Avg Tick: §f" + String.format(java.util.Locale.US, "%.1f", mspt) + "ms",
-            "§7TPS: §a" + String.format(java.util.Locale.US, "%.1f", tps) + " §2/ 20.0",
+            "§7Avg Tick: §f" + String.format("%.1f", mspt) + "ms",
+            "§7TPS: §a" + String.format("%.1f", tps) + " §2/ 20.0",
             "§7Memory: §f" + usedMem + "§8/§7" + maxMem + "MB",
             "§7Players: §f" + players + " §7Online"));
 
@@ -2735,14 +2735,14 @@ public class GuiManager {
         inv.setStack(4, uiGlint(Items.NETHER_STAR, "§b§l▶ Animation Settings",
             "§7Block: §f" + blockName,
             "§7Frames: §f" + frameCount,
-            "§7Current Speed: §b" + String.format(java.util.Locale.US, "%.1f", fps) + " Hz"));
+            "§7Current Speed: §b" + String.format("%.1f", fps) + " Hz"));
 
         // ── Temporal Refinement ──────────────────────────────────────────────────
         inv.setStack(19, ui(Items.OBSIDIAN, "§c§l« §r§cSlower §8(-5 FPS)", "§7Slows the animation down"));
         inv.setStack(20, ui(Items.ARROW, "§c§l‹ §r§cSlower §8(-1 FPS)"));
 
         inv.setStack(22, uiGlint(Items.ECHO_SHARD, "§e§lAnimation Speed",
-            "§7Current Speed: §b" + String.format(java.util.Locale.US, "%.1f", fps) + " FPS",
+            "§7Current Speed: §b" + String.format("%.1f", fps) + " FPS",
             "§7Tick Delay: §f" + ticks + " §7ticks per frame",
             "",
             "§r"));

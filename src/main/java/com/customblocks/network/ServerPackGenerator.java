@@ -54,8 +54,7 @@ public class ServerPackGenerator {
             // the same index, corrupted state) cannot abort the entire pack build
             // with ZipException: duplicate entry.
             java.util.Set<String> writtenPaths = new java.util.HashSet<>();
-            File tempObj = new File(outputFile.getParentFile(), outputFile.getName() + ".tmp");
-            try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(tempObj))) {
+            try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(outputFile))) {
 
                 // pack.mcmeta
                 JsonObject pack = new JsonObject();
@@ -206,14 +205,6 @@ public class ServerPackGenerator {
                     addZipEntry(zos, "assets/" + MOD_ID + "/textures/item/tab_icon.png", PLACEHOLDER_PNG, writtenPaths);
                 }
             }
-            try {
-                java.nio.file.Files.move(tempObj.toPath(), outputFile.toPath(), 
-                    java.nio.file.StandardCopyOption.REPLACE_EXISTING, 
-                    java.nio.file.StandardCopyOption.ATOMIC_MOVE);
-            } catch (Exception moveEx) {
-                if (tempObj.exists()) tempObj.delete();
-                throw moveEx;
-            }
         } catch (Exception e) {
             CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to generate server pack ZIP", e);
         }
@@ -222,7 +213,7 @@ public class ServerPackGenerator {
     private static void addModelFace(JsonObject faces, String mcFaceName, String cbFaceName, float u1, float v1, float u2, float v2) {
         JsonObject faceObj = new JsonObject();
         com.google.gson.JsonArray uv = new com.google.gson.JsonArray();
-        uv.add(u1); uv.add(v1); uv.add(u2); uv.add(v2);
+        uv.add(0f); uv.add(0f); uv.add(16f); uv.add(16f);
         faceObj.add("uv", uv);
         faceObj.addProperty("texture", "#" + FACE_TO_MC.get(cbFaceName));
         // Removed cullface to fix rendering of custom shaped volumes

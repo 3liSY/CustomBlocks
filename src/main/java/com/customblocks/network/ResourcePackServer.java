@@ -10,6 +10,9 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.security.MessageDigest;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import net.minecraft.server.MinecraftServer;
 
 public class ResourcePackServer {
@@ -19,6 +22,16 @@ public class ResourcePackServer {
     private static String currentHash;
     private static int activePort = -1;
     private static String lastError = null;
+
+    // Single-thread executor: only ONE ZIP build runs at a time.
+    // AtomicInteger tracks pending builds — if > 1, we skip because
+    // the already-queued build will pick up the latest snapshot.
+    private static final ExecutorService PACK_BUILDER = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "CustomBlocks-PackBuilder");
+        t.setDaemon(true);
+        return t;
+    });
+    private static final AtomicInteger pendingBuilds = new AtomicInteger(0);
 
     public static int activePort() { return activePort; }
 
@@ -96,7 +109,13 @@ public class ResourcePackServer {
 
     /** Rebuilds the ZIP to disk using a consistent state snapshot. */
     public static void updatePackWithSnapshot(com.customblocks.core.SlotManager.Snapshot snapshot) {
-        new Thread(() -> {
+        // If there's already a build queued, skip — the queued build will use the latest data.
+        if (pendingBuilds.incrementAndGet() > 1) {
+            pendingBuilds.decrementAndGet();
+            CustomBlocksMod.LOGGER.info("[CustomBlocks] Pack build already queued — skipping redundant request.");
+            return;
+        }
+        PACK_BUILDER.submit(() -> {
             try {
                 java.io.File packFile = new java.io.File("customblocks_data", "customblocks_pack.zip");
                 ServerPackGenerator.generateZipWithSnapshot(snapshot, packFile);
@@ -118,12 +137,13 @@ public class ResourcePackServer {
                     }
                     currentHash = sb.toString();
                     CustomBlocksMod.LOGGER.info("[CustomBlocks] Cached internal resource pack ZIP (Atomic Update).");
-                    sendUpdateToAllPlayers();
                 }
             } catch (Exception e) {
                 CustomBlocksMod.LOGGER.error("[CustomBlocks] Error updating internal pack.", e);
+            } finally {
+                pendingBuilds.decrementAndGet();
             }
-        }, "CustomBlocks-PackBuilder").start();
+        });
     }
 
     /** Rebuilds the ZIP silently without prompting users. */
