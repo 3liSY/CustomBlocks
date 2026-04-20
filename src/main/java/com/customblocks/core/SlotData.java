@@ -46,11 +46,11 @@ public final class SlotData {
         private static float clamp(float v) { return Math.max(0f, Math.min(16f, v)); }
 
         public String toDisplayString() {
-            return String.format("%.1f,%.1f,%.1f → %.1f,%.1f,%.1f", x1, y1, z1, x2, y2, z2);
+            return String.format(java.util.Locale.US, "%.1f,%.1f,%.1f → %.1f,%.1f,%.1f", x1, y1, z1, x2, y2, z2);
         }
 
         public String toSerialString() {
-            return String.format("%.1f,%.1f,%.1f,%.1f,%.1f,%.1f", x1, y1, z1, x2, y2, z2);
+            return String.format(java.util.Locale.US, "%.1f,%.1f,%.1f,%.1f,%.1f,%.1f", x1, y1, z1, x2, y2, z2);
         }
     }
 

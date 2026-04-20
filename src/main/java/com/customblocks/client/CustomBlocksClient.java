@@ -42,19 +42,6 @@ import java.util.concurrent.atomic.AtomicLong;
 public class CustomBlocksClient implements ClientModInitializer {
 
     private static final String PACK_ENTRY = "file/customblocks_generated";
-    private static final AtomicBoolean reloadInFlight  = new AtomicBoolean(false);
-    private static final AtomicBoolean generateRunning = new AtomicBoolean(false);
-    private static final AtomicLong    lastPacketTime  = new AtomicLong(0);
-
-    // True while processing the initial join burst — suppresses individual packet reloads.
-    private static volatile boolean joinBurst        = false;
-
-    // Set to true when the server's "sync_done" sentinel arrives, signalling that all
-    // join textures have been enqueued. The waiting debounce thread breaks immediately
-    // on this flag rather than waiting out a fixed timer that can fire mid-burst on
-    // slow internet connections and cause cascading resource-pack reloads / disconnect.
-    private static volatile boolean syncDoneReceived = false;
-
     public static volatile boolean pendingCreativeRefresh = false;
 
     private static KeyBinding openGuiKey;
@@ -93,36 +80,10 @@ public class CustomBlocksClient implements ClientModInitializer {
             }
         });
 
-        // ── Disconnect → reset all join-burst state ────────────────────────────
-        //
-        // This is critical for players who experience a failed join and immediately
-        // retry. Without resetting here, stale flags from the previous connection
-        // attempt (joinBurst=true, reloadInFlight=true, etc.) bleed into the next
-        // connection, causing the new FullSyncPayload's reload to be skipped entirely.
-        //
-        // lastPacketTime is set to Long.MAX_VALUE/2 rather than 0: this makes the
-        // debounce thread's "remaining" calculation produce a huge positive value,
-        // effectively pausing it indefinitely. The next FullSyncPayload handler will
-        // reset lastPacketTime to System.currentTimeMillis(), resuming the thread
-        // correctly for the new connection.
-        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
-            joinBurst        = false;
-            syncDoneReceived = false;
-            reloadInFlight.set(false);
-            lastPacketTime.set(Long.MAX_VALUE / 2);
-            // NOTE: generateRunning is intentionally NOT reset here.
-            // Any running generate thread will see the paused lastPacketTime and
-            // will not fire until the next FullSyncPayload arrives and resets it.
-        });
-
         // ── FullSyncPayload — initial join ────────────────────────────────────
         ClientPlayNetworking.registerGlobalReceiver(FullSyncPayload.ID, (payload, context) -> {
             MinecraftClient client = context.client();
             client.execute(() -> {
-                // Reset burst flags from any previous (failed) join attempt.
-                syncDoneReceived = false;
-                joinBurst        = true;
-
                 SlotManager.clearAll();
                 TextureCache.invalidateAll();
                 for (FullSyncPayload.SlotEntry e : payload.entries()) {
@@ -133,15 +94,6 @@ public class CustomBlocksClient implements ClientModInitializer {
                 }
                 if (payload.tabIconTexture() != null)
                     SlotManager.setTabIconTexture(payload.tabIconTexture());
-
-                // Start the debounce thread. The sync_done sentinel (sent by the server
-                // after all textures are enqueued) will wake this thread early via the
-                // syncDoneReceived flag. The joinDebounceMs window acts as a fallback in
-                // case the client is connected to an older server build that does not send
-                // sync_done — so the join reload still fires eventually without getting stuck.
-                long fallbackDebounce = com.customblocks.CustomBlocksConfig.joinDebounceMs > 0
-                        ? com.customblocks.CustomBlocksConfig.joinDebounceMs : 4000L;
-                scheduleGenerateAndReload(client, fallbackDebounce);
             });
         });
 
@@ -164,7 +116,6 @@ public class CustomBlocksClient implements ClientModInitializer {
                     // while ResourcePackGenerator was still writing files to disk
                     // produced a malformed resource pack and a server-sent TCP RST.
                     case "sync_done" -> {
-                        syncDoneReceived = true;
                         return;
                     }
 
@@ -190,10 +141,6 @@ public class CustomBlocksClient implements ClientModInitializer {
                         if (payload.animMeta() != null && !payload.animMeta().isEmpty())
                             SlotManager.setAnimMeta(payload.customId(), payload.animMeta());
                         TextureCache.invalidate(payload.customId());
-                        if (!joinBurst) {
-                            scheduleAnimMetaReload(client, payload.slotIndex(), payload.animMeta());
-                            return;
-                        }
                     }
                     case "remove" -> {
                         TextureCache.invalidate(payload.customId());
@@ -234,24 +181,8 @@ public class CustomBlocksClient implements ClientModInitializer {
                     }
                     case "tabicon" -> {
                         SlotManager.setTabIconTexture(payload.texture());
-                        if (!joinBurst) scheduleGenerateAndReload(client, 2000L);
                         return;
                     }
-                }
-
-                // Only trigger reload for actions that actually change rendered appearance,
-                // and only when NOT in the initial join burst (which uses sync_done or the
-                // fallback debounce for its single deferred reload).
-                if (!joinBurst) {
-                    String action = payload.action();
-                    boolean needsReload = action.equals("add") || action.equals("retexture")
-                            || action.equals("remove") || action.equals("setface")
-                            || action.equals("clearface") || action.equals("clearfaces");
-                    if (needsReload) scheduleGenerateAndReload(client, 2000L);
-                } else {
-                    // Still in join burst — refresh the fallback debounce timer so it
-                    // doesn't fire if sync_done is somehow delayed beyond joinDebounceMs.
-                    lastPacketTime.set(System.currentTimeMillis());
                 }
             });
         });
@@ -313,147 +244,6 @@ public class CustomBlocksClient implements ClientModInitializer {
             }
         } catch (Exception e) {
             CustomBlocksMod.LOGGER.error("[CustomBlocks] bustItemGroupIconCache failed: {}", e.getMessage());
-        }
-    }
-
-    /**
-     * Debounced generate+reload.
-     * <p>
-     * The background thread polls every 200 ms for one of two exit conditions:
-     * <ol>
-     *   <li>{@link #syncDoneReceived} == true — server confirmed all join textures
-     *       have been enqueued; fire the reload immediately (normal join path).</li>
-     *   <li>Silence longer than {@code debounceMs} since the last {@link #lastPacketTime}
-     *       update — fallback for live edits and for connecting to older server builds
-     *       that do not send the sync_done sentinel.</li>
-     * </ol>
-     * <p>
-     * Only one thread runs at a time; if {@link #generateRunning} is already true,
-     * the running thread will see the updated {@link #lastPacketTime} (or the
-     * {@link #syncDoneReceived} flag) on its next 200 ms poll and act accordingly.
-     * No second thread is spawned.
-     */
-    private static void scheduleGenerateAndReload(MinecraftClient client, long debounceMs) {
-        lastPacketTime.set(System.currentTimeMillis());
-        if (generateRunning.compareAndSet(false, true)) {
-            Thread t = new Thread(() -> {
-                // Wait for sync_done signal OR debounce silence (capped poll at 200ms
-                // so we check syncDoneReceived frequently even with a long debounceMs).
-                while (true) {
-                    if (syncDoneReceived) break;
-                    long remaining = debounceMs - (System.currentTimeMillis() - lastPacketTime.get());
-                    if (remaining <= 0) break;
-                    try { Thread.sleep(Math.max(50, Math.min(remaining, 200))); }
-                    catch (InterruptedException ignored) { break; }
-                }
-                // ── Texture cache check ──────────────────────────────────
-                // Compute a hash of ALL received texture data. If it matches
-                // the hash from the last successful generation, skip the
-                // expensive generate + reloadResources() cycle entirely.
-                // This makes reconnects instant (no 2-min freeze).
-                String currentHash = computeTextureHash();
-                String cachedHash  = loadCachedHash(client.runDirectory);
-                boolean packExists = new File(client.runDirectory,
-                        "customblocks_generated/assets").isDirectory();
-
-                if (currentHash.equals(cachedHash) && packExists) {
-                    // CACHE HIT — textures unchanged, pack on disk is valid
-                    CustomBlocksMod.LOGGER.info(
-                            "[CustomBlocks] Texture cache HIT (hash={}). Skipping generation + reload.",
-                            currentHash.substring(0, 12));
-                    SlotManager.saveToClientDir(client.runDirectory);
-                    client.execute(() -> {
-                        injectPackIfNeeded(client);
-                        joinBurst        = false;
-                        syncDoneReceived = false;
-                        generateRunning.set(false);
-                        pendingCreativeRefresh = true;
-                    });
-                } else {
-                    // CACHE MISS — regenerate pack and reload resources
-                    CustomBlocksMod.LOGGER.info(
-                            "[CustomBlocks] Texture cache MISS (cur={}, cached={}, packExists={}). Regenerating.",
-                            currentHash.substring(0, Math.min(12, currentHash.length())),
-                            cachedHash  != null ? cachedHash.substring(0, Math.min(12, cachedHash.length())) : "null",
-                            packExists);
-                    SlotManager.saveToClientDir(client.runDirectory);
-                    ResourcePackGenerator.generate(client);
-                    saveCachedHash(client.runDirectory, currentHash);
-                    client.execute(() -> {
-                        injectPackIfNeeded(client);
-                        joinBurst        = false;
-                        syncDoneReceived = false;
-                        generateRunning.set(false);
-
-                        if (reloadInFlight.compareAndSet(false, true)) {
-                            client.reloadResources().thenRun(() ->
-                                client.execute(() -> {
-                                    reloadInFlight.set(false);
-                                    CustomBlocksMod.LOGGER.info("[CustomBlocks] Resources reloaded.");
-                                    pendingCreativeRefresh = true;
-                                })
-                            ).exceptionally(ex -> {
-                                client.execute(() -> {
-                                    reloadInFlight.set(false);
-                                    CustomBlocksMod.LOGGER.error("[CustomBlocks] Resource reload failed, unlocking flag.", ex);
-                                });
-                                return null;
-                            });
-                        } else {
-                            pendingCreativeRefresh = true;
-                        }
-                    });
-                }
-            }, "CustomBlocks-GenerateReload");
-            t.setDaemon(true);
-            t.start();
-        }
-        // If generateRunning is already true, the running thread will see the updated
-        // lastPacketTime on its next 200ms poll and extend or break its wait as needed.
-    }
-
-    // ── Lightweight anim-only reload ─────────────────────────────────────────
-
-    /**
-     * Fast path for animation setting changes: writes ONLY the .mcmeta file for
-     * the affected slot to the existing pack directory, then triggers a resource
-     * reload. Skips the expensive full ResourcePackGenerator.generate() that
-     * rewrites all 410+ texture PNGs to disk.
-     */
-    private static void scheduleAnimMetaReload(MinecraftClient client, int slotIndex, String animMeta) {
-        File packRoot = new File(client.runDirectory, "customblocks_generated");
-        File mcmetaFile = new File(packRoot, "assets/customblocks/textures/block/slot_" + slotIndex + ".png.mcmeta");
-
-        if (animMeta != null && !animMeta.isEmpty()) {
-            mcmetaFile.getParentFile().mkdirs();
-            try (java.io.FileWriter fw = new java.io.FileWriter(mcmetaFile, StandardCharsets.UTF_8)) {
-                fw.write(animMeta);
-            } catch (Exception e) {
-                CustomBlocksMod.LOGGER.warn("[CustomBlocks] Failed to write .mcmeta for slot_{}: {}", slotIndex, e.getMessage());
-            }
-        } else {
-            if (mcmetaFile.exists()) mcmetaFile.delete();
-        }
-
-        // Also update the texture hash on disk so the next join doesn't see a stale cache
-        String currentHash = computeTextureHash();
-        saveCachedHash(client.runDirectory, currentHash);
-
-        // Trigger resource reload to pick up the new animation timing
-        if (reloadInFlight.compareAndSet(false, true)) {
-            client.reloadResources().thenRun(() ->
-                client.execute(() -> {
-                    reloadInFlight.set(false);
-                    CustomBlocksMod.LOGGER.info("[CustomBlocks] Anim-only reload complete.");
-                    pendingCreativeRefresh = true;
-                })
-            ).exceptionally(ex -> {
-                client.execute(() -> {
-                    reloadInFlight.set(false);
-                    CustomBlocksMod.LOGGER.error("[CustomBlocks] Anim-only reload failed.", ex);
-                });
-                return null;
-            });
         }
     }
 

@@ -162,7 +162,7 @@ public class AnimBlockScreen extends Screen {
                 cx - 28, row1, 56, 20,
                 Text.literal("FPS"));
         fpsField.setMaxLength(8);
-        fpsField.setText(String.format("%.1f", targetFps));
+        fpsField.setText(String.format(java.util.Locale.US, "%.1f", targetFps));
         fpsField.setChangedListener(s -> settingsChanged = true);
         addDrawableChild(fpsField);
 
@@ -216,7 +216,7 @@ public class AnimBlockScreen extends Screen {
 
     private void setFps(float fps) {
         targetFps = fps;
-        fpsField.setText(String.format("%.1f", fps));
+        fpsField.setText(String.format(java.util.Locale.US, "%.1f", fps));
         settingsChanged = true;
     }
 
@@ -279,7 +279,7 @@ public class AnimBlockScreen extends Screen {
         float curFps = getEffectiveFps();
         String fpsStr = curFps == (int) curFps
                 ? String.valueOf((int) curFps)
-                : String.format("%.1f", curFps);
+                : String.format(java.util.Locale.US, "%.1f", curFps);
 
         ctx.drawCenteredTextWithShadow(textRenderer,
                 "Frames: " + frameCount

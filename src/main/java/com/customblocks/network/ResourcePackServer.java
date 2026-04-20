@@ -118,6 +118,7 @@ public class ResourcePackServer {
                     }
                     currentHash = sb.toString();
                     CustomBlocksMod.LOGGER.info("[CustomBlocks] Cached internal resource pack ZIP (Atomic Update).");
+                    sendUpdateToAllPlayers();
                 }
             } catch (Exception e) {
                 CustomBlocksMod.LOGGER.error("[CustomBlocks] Error updating internal pack.", e);
