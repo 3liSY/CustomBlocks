@@ -261,6 +261,10 @@ public class CustomBlocksMod implements ModInitializer {
         PayloadTypeRegistry.playS2C().register(SyncCompletePayload.ID, SyncCompletePayload.CODEC);
 
         PayloadTypeRegistry.playS2C().register(
+                com.customblocks.network.ChunkedTexturePayload.ID,
+                com.customblocks.network.ChunkedTexturePayload.CODEC);
+
+        PayloadTypeRegistry.playS2C().register(
 
                 com.customblocks.network.OpenAnimGuiPayload.ID,
 

@@ -227,7 +227,8 @@ public class RectangleToolItem extends Item {
                     if (fresh != null) {
                         NetworkManager.broadcastUpdate(server,
                             new SlotUpdatePayload("add", fresh.index, variantId, variantName,
-                                texCopy, fresh.lightLevel, fresh.hardness, fresh.soundType));
+                                texCopy, fresh.lightLevel, fresh.hardness, fresh.soundType,
+                                null, null, fresh.animMeta));
                         for (var fe : fresh.faceTextures.entrySet())
                             NetworkManager.broadcastUpdate(server,
                                 new SlotUpdatePayload("setface", fresh.index, variantId, null,

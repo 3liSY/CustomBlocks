@@ -26,11 +26,19 @@ public final class NetworkManager {
     // ── Packet size limits ───────────────────────────────────────────────────
     /** Warning threshold - textures larger than this will log a warning. */
     private static final int PACKET_WARN_SIZE = 500 * 1024; // 500KB
-    /** Hard limit - textures larger than this are rejected to prevent client crashes. */
-    private static final int PACKET_MAX_SIZE = 8 * 1024 * 1024; // 8MB (below 10MB codec limit)
+    /** Hard limit — matches Minecraft's real 1 MB packet ceiling (with margin for overhead). */
+    private static final int PACKET_MAX_SIZE = 900 * 1024; // 900KB
+
+    // ── Packet chunking (Phase 10) ──────────────────────────────────────────
+    /** Payloads with texture bytes above this threshold are auto-chunked. */
+    private static final int CHUNK_THRESHOLD = 500 * 1024; // 500KB
+    /** Max raw bytes per chunk — fits comfortably within the tick budget. */
+    private static final int CHUNK_SIZE = 200 * 1024; // 200KB
 
     // ── Per-player pending texture queues ────────────────────────────────────
     private static final ConcurrentHashMap<UUID, TextureQueue> PLAYER_QUEUES = new ConcurrentHashMap<>();
+    /** Per-player pending chunk queues (Phase 10). */
+    private static final ConcurrentHashMap<UUID, java.util.concurrent.ConcurrentLinkedDeque<ChunkedTexturePayload>> CHUNK_QUEUES = new ConcurrentHashMap<>();
 
     /** Tracks when each player last received a full sync to prevent redundant re-syncs. */
     private static final ConcurrentHashMap<UUID, Long> LAST_FULL_SYNC = new ConcurrentHashMap<>();
@@ -176,10 +184,15 @@ public final class NetworkManager {
             }
 
             TextureQueue queue = PLAYER_QUEUES.get(uid);
-            if (queue == null || queue.isEmpty()) continue;
+            java.util.concurrent.ConcurrentLinkedDeque<ChunkedTexturePayload> chunkQueue = CHUNK_QUEUES.get(uid);
+            boolean hasRegular = queue != null && !queue.isEmpty();
+            boolean hasChunks  = chunkQueue != null && !chunkQueue.isEmpty();
+            if (!hasRegular && !hasChunks) continue;
 
-            SlotUpdatePayload[] batch = queue.drain(perTick);
             int bytesSent = 0;
+
+            // ── Regular payloads ────────────────────────────────────────────
+            SlotUpdatePayload[] batch = hasRegular ? queue.drain(perTick) : new SlotUpdatePayload[0];
             int i;
             for (i = 0; i < batch.length; i++) {
                 SlotUpdatePayload payload = batch[i];
@@ -210,8 +223,28 @@ public final class NetworkManager {
                 }
             }
 
+            // ── Chunked payloads (Phase 10) ─────────────────────────────────
+            if (hasChunks) {
+                while (!chunkQueue.isEmpty()) {
+                    ChunkedTexturePayload chunk = chunkQueue.peekFirst();
+                    if (chunk == null) break;
+                    int chunkSize = chunk.chunkData() != null ? chunk.chunkData().length : 0;
+                    if (bytesSent + chunkSize > BYTES_PER_TICK_BUDGET && bytesSent > 0) break;
+                    chunkQueue.pollFirst();
+                    try {
+                        ServerPlayNetworking.send(player, chunk);
+                        bytesSent += chunkSize;
+                    } catch (Exception e) {
+                        LOGGER.warn("[CustomBlocks] Failed to send chunk to {}: {}",
+                                player.getName().getString(), e.getMessage());
+                    }
+                }
+            }
+
             // Log when drip-feed completes for a player
-            if (queue.isEmpty()) {
+            boolean regularDone = queue == null || queue.isEmpty();
+            boolean chunksDone  = chunkQueue == null || chunkQueue.isEmpty();
+            if (regularDone && chunksDone) {
                 COOLDOWN_TICKS.remove(uid);
                 LOGGER.info("[CustomBlocks] Drip-feed complete for {}", player.getName().getString());
             }
@@ -224,6 +257,7 @@ public final class NetworkManager {
     public static void onPlayerDisconnect(ServerPlayerEntity player) {
         TextureQueue queue = PLAYER_QUEUES.remove(player.getUuid());
         if (queue != null) queue.clear();
+        CHUNK_QUEUES.remove(player.getUuid());
         LAST_FULL_SYNC.remove(player.getUuid());
         COOLDOWN_TICKS.remove(player.getUuid());
     }
@@ -291,8 +325,52 @@ public final class NetworkManager {
     // ── Internal ─────────────────────────────────────────────────────────────
 
     private static void enqueueForPlayer(ServerPlayerEntity player, SlotUpdatePayload payload) {
+        if (payload == null) return;
+        byte[] tex = payload.texture();
+        if (tex != null && tex.length > CHUNK_THRESHOLD) {
+            sendChunked(player, payload);
+            return;
+        }
         if (!validatePayloadSize(payload)) return;
         getOrCreateQueue(player).enqueue(payload);
+    }
+
+    /**
+     * Split a large texture payload into multiple ChunkedTexturePayload packets
+     * (each under CHUNK_SIZE bytes) and enqueue them for drip-feed delivery.
+     * Chunk 0 carries the original payload metadata; subsequent chunks carry only data.
+     */
+    private static void sendChunked(ServerPlayerEntity player, SlotUpdatePayload payload) {
+        byte[] tex = payload.texture();
+        String transferId = UUID.randomUUID().toString();
+        int totalChunks = (tex.length + CHUNK_SIZE - 1) / CHUNK_SIZE;
+
+        java.util.concurrent.ConcurrentLinkedDeque<ChunkedTexturePayload> chunkQueue =
+                CHUNK_QUEUES.computeIfAbsent(player.getUuid(), k -> new java.util.concurrent.ConcurrentLinkedDeque<>());
+
+        for (int i = 0; i < totalChunks; i++) {
+            int offset = i * CHUNK_SIZE;
+            int length = Math.min(CHUNK_SIZE, tex.length - offset);
+            byte[] chunkData = new byte[length];
+            System.arraycopy(tex, offset, chunkData, 0, length);
+
+            ChunkedTexturePayload chunk;
+            if (i == 0) {
+                chunk = new ChunkedTexturePayload(
+                        transferId, i, totalChunks, chunkData,
+                        payload.action(), payload.slotIndex(), payload.customId(),
+                        payload.displayName(), payload.lightLevel(), payload.hardness(),
+                        payload.soundType(), payload.face(), payload.animMeta());
+            } else {
+                chunk = new ChunkedTexturePayload(
+                        transferId, i, totalChunks, chunkData,
+                        null, 0, null, null, 0, 0f, null, null, null);
+            }
+            chunkQueue.addLast(chunk);
+        }
+        LOGGER.info("[CustomBlocks] Chunked texture for {} ({} bytes → {} chunks of ~{} KB, transferId={})",
+                player.getName().getString(), tex.length, totalChunks, CHUNK_SIZE / 1024,
+                transferId.substring(0, Math.min(8, transferId.length())));
     }
 
     private static TextureQueue getOrCreateQueue(ServerPlayerEntity player) {
