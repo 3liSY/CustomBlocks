@@ -305,6 +305,114 @@ public class ResourcePackGenerator {
         }
     }
 
+    /**
+     * Write ONLY the texture PNG + mcmeta for a single slot.
+     * Blockstate + model files already exist from the initial full generate.
+     * This is 1-3 file writes instead of 2000+.
+     */
+    public static void generateSingleSlot(MinecraftClient client, int slotIndex) {
+        try {
+            File packRoot = new File(client.runDirectory, "resourcepacks/CustomBlocks");
+            File assets = new File(packRoot, "assets/" + MOD_ID);
+            String slotKey = "slot_" + slotIndex;
+            SlotData data = SlotManager.getBySlot(slotKey);
+
+            // Ensure directories exist
+            new File(assets, "textures/block").mkdirs();
+
+            // ── Default (all-faces) texture ──────────────────────────────────
+            File texDest = new File(assets, "textures/block/" + slotKey + ".png");
+            File mcmetaDest = new File(assets, "textures/block/" + slotKey + ".png.mcmeta");
+            if (data != null && data.texture != null && data.texture.length > 0) {
+                writePng(data.texture, texDest);
+                int frames = com.customblocks.ImageProcessor.getVerticalFrames(data.texture);
+                if (frames > 1) {
+                    String effectiveMeta = (data.animMeta != null && !data.animMeta.isEmpty())
+                        ? data.animMeta
+                        : com.customblocks.ImageProcessor.synthesizeDefaultMcmeta(frames);
+                    try (java.io.FileWriter fw = new java.io.FileWriter(mcmetaDest, java.nio.charset.StandardCharsets.UTF_8)) {
+                        fw.write(effectiveMeta);
+                    }
+                } else {
+                    if (mcmetaDest.exists()) mcmetaDest.delete();
+                }
+            } else {
+                Files.write(texDest.toPath(), PLACEHOLDER_PNG);
+                if (mcmetaDest.exists()) mcmetaDest.delete();
+            }
+
+            // ── Per-face textures ────────────────────────────────────────────
+            if (data != null && data.hasFaces()) {
+                for (Map.Entry<String, byte[]> face : data.faceTextures.entrySet()) {
+                    File faceDest = new File(assets,
+                            "textures/block/" + slotKey + "_" + face.getKey() + ".png");
+                    writePng(face.getValue(), faceDest);
+                    // Handle face mcmeta
+                    File faceMcmeta = new File(assets,
+                            "textures/block/" + slotKey + "_" + face.getKey() + ".png.mcmeta");
+                    try {
+                        int frames = com.customblocks.ImageProcessor.getVerticalFrames(face.getValue());
+                        if (frames > 1) {
+                            String mcmetaJson = (data.animMeta != null && !data.animMeta.isEmpty()
+                                    && data.animMeta.contains("\"frames\""))
+                                    ? data.animMeta
+                                    : com.customblocks.ImageProcessor.synthesizeDefaultMcmeta(frames);
+                            try (java.io.FileWriter fw = new java.io.FileWriter(faceMcmeta, java.nio.charset.StandardCharsets.UTF_8)) {
+                                fw.write(mcmetaJson);
+                            }
+                        } else {
+                            if (faceMcmeta.exists()) faceMcmeta.delete();
+                        }
+                    } catch (Exception ignored) {
+                        if (faceMcmeta.exists()) faceMcmeta.delete();
+                    }
+                }
+                // Inherit main texture for faces without overrides
+                if (data.texture != null && data.texture.length > 0) {
+                    for (String face : SlotData.FACE_KEYS) {
+                        if (!data.faceTextures.containsKey(face)) {
+                            File inheritDest = new File(assets,
+                                    "textures/block/" + slotKey + "_" + face + ".png");
+                            writePng(data.texture, inheritDest);
+                        }
+                    }
+                }
+            }
+
+            // ── Blockstate + model — only if missing (new slot from Rectangle tool, etc.) ──
+            File bsFile = new File(assets, "blockstates/" + slotKey + ".json");
+            if (!bsFile.exists()) {
+                new File(assets, "blockstates").mkdirs();
+                new File(assets, "models/block").mkdirs();
+                new File(assets, "models/item").mkdirs();
+                String modelRef = MOD_ID + ":block/" + slotKey;
+
+                // Blockstate
+                JsonObject variant  = new JsonObject(); variant.addProperty("model", modelRef);
+                JsonObject variants = new JsonObject(); variants.add("", variant);
+                JsonObject bs       = new JsonObject(); bs.add("variants", variants);
+                writeJson(bs, bsFile);
+
+                // Block model — simple cube_all for single-slot path
+                JsonObject bm = new JsonObject();
+                bm.addProperty("parent", "minecraft:block/cube_all");
+                JsonObject tex = new JsonObject();
+                tex.addProperty("all", MOD_ID + ":block/" + slotKey);
+                bm.add("textures", tex);
+                writeJson(bm, new File(assets, "models/block/" + slotKey + ".json"));
+
+                // Item model
+                JsonObject im = new JsonObject();
+                im.addProperty("parent", modelRef);
+                writeJson(im, new File(assets, "models/item/" + slotKey + ".json"));
+            }
+
+            CustomBlocksMod.LOGGER.info("[CustomBlocks] Single-slot generate for slot_{} complete.", slotIndex);
+        } catch (Exception e) {
+            CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to generate single slot_{}", slotIndex, e);
+        }
+    }
+
     /** Decodes image bytes (PNG, JPEG, etc) and writes as valid PNG. */
     private static void writePng(byte[] imageBytes, File dest) {
         try (NativeImage img = NativeImage.read(new ByteArrayInputStream(imageBytes))) {

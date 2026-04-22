@@ -66,6 +66,8 @@ public final class SlotManager {
 
     private static final String DATA_FILE = "slots.json";
 
+    private static final String TEXTURES_DIR = DATA_DIR + "/textures";
+
 
 
     // ── Storage ──────────────────────────────────────────────────────────────
@@ -246,6 +248,13 @@ public final class SlotManager {
 
         put(data);
 
+        // Phase 1: write texture to individual file
+        if (data.texture != null && data.texture.length > 0) {
+            final int slotIdx = data.index;
+            final byte[] texCopy = data.texture.clone();
+            IO_EXECUTOR.submit(() -> writeTextureFile(slotIdx, texCopy));
+        }
+
         return data;
 
     }
@@ -286,6 +295,22 @@ public final class SlotManager {
 
         put(updated);
 
+        // Phase 1: detect texture changes and write to file
+        if (old.texture != updated.texture) {
+            final int slotIdx = updated.index;
+            final byte[] texCopy = updated.texture != null ? updated.texture.clone() : null;
+            IO_EXECUTOR.submit(() -> writeTextureFile(slotIdx, texCopy));
+        }
+        for (String face : SlotData.FACE_KEYS) {
+            byte[] oldFace = old.faceTextures.get(face);
+            byte[] newFace = updated.faceTextures.get(face);
+            if (oldFace != newFace) {
+                final int slotIdx = updated.index;
+                final String faceName = face;
+                final byte[] faceCopy = newFace != null ? newFace.clone() : null;
+                IO_EXECUTOR.submit(() -> writeFaceTextureFile(slotIdx, faceName, faceCopy));
+            }
+        }
     }
 
 
@@ -318,7 +343,12 @@ public final class SlotManager {
 
         SlotData data = byId.remove(customId);
 
-        if (data != null) bySlot.remove("slot_" + data.index);
+        if (data != null) {
+            bySlot.remove("slot_" + data.index);
+            // Phase 1: clean up texture files
+            final int slotIdx = data.index;
+            IO_EXECUTOR.submit(() -> deleteTextureFiles(slotIdx));
+        }
 
         return data;
 
@@ -575,6 +605,55 @@ public final class SlotManager {
 
                     }
 
+                    // Phase 1: load textures from individual .dat files
+                    Path texDir = Path.of(TEXTURES_DIR);
+                    if (Files.exists(texDir)) {
+                        int texLoaded = 0, faceLoaded = 0;
+                        for (SlotData d : new ArrayList<>(byId.values())) {
+                            // Load main texture from file if not already present from legacy Base64
+                            if (d.texture == null || d.texture.length == 0) {
+                                byte[] tex = readTextureFile(d.index);
+                                if (tex != null) {
+                                    put(d.withTexture(tex));
+                                    texLoaded++;
+                                    d = byId.get(d.customId); // re-fetch after put
+                                }
+                            }
+                            // Load face textures from files
+                            for (String face : SlotData.FACE_KEYS) {
+                                if (!d.faceTextures.containsKey(face)) {
+                                    byte[] faceTex = readFaceTextureFile(d.index, face);
+                                    if (faceTex != null) {
+                                        put(d.withFaceTexture(face, faceTex));
+                                        faceLoaded++;
+                                        d = byId.get(d.customId); // re-fetch after put
+                                    }
+                                }
+                            }
+                        }
+                        if (texLoaded > 0 || faceLoaded > 0) {
+                            LOGGER.info("[CustomBlocks] Loaded {} textures and {} face textures from files.", texLoaded, faceLoaded);
+                        }
+                    }
+
+                    // Phase 1: one-time migration — if textures dir doesn't exist but slots have textures,
+                    // write all textures to individual files
+                    if (!Files.exists(texDir)) {
+                        int migrated = 0;
+                        for (SlotData d : byId.values()) {
+                            if (d.texture != null && d.texture.length > 0) {
+                                writeTextureFile(d.index, d.texture);
+                                migrated++;
+                            }
+                            for (var face : d.faceTextures.entrySet()) {
+                                writeFaceTextureFile(d.index, face.getKey(), face.getValue());
+                            }
+                        }
+                        if (migrated > 0) {
+                            LOGGER.info("[CustomBlocks] Migration complete: wrote {} texture files to {}.", migrated, texDir);
+                        }
+                    }
+
                 }
 
             }
@@ -757,7 +836,7 @@ public final class SlotManager {
                 writer.name("slots");
                 writer.beginArray();
                 for (SlotData data : byId.values()) {
-                    GSON.toJson(serializeSlot(data), writer);
+                    GSON.toJson(serializeSlotWithTextures(data), writer);
                 }
                 writer.endArray();
 
@@ -850,10 +929,7 @@ public final class SlotManager {
 
         obj.addProperty("displayName", d.displayName);
 
-        if (d.texture != null)
-
-            obj.addProperty("texture", Base64.getEncoder().encodeToString(d.texture));
-
+        // Phase 1: textures are stored as separate .dat files, not inline Base64
         obj.addProperty("lightLevel", d.lightLevel);
 
         obj.addProperty("hardness", d.hardness);
@@ -870,16 +946,12 @@ public final class SlotManager {
 
 
 
-        // Face textures
-
+        // Phase 1: face textures are stored as separate .dat files, not inline Base64
+        // We still record WHICH faces have overrides (keys only) so loadAll() knows to look for files
         if (d.hasFaces()) {
-
-            JsonObject faces = new JsonObject();
-
-            d.faceTextures.forEach((k, v) -> faces.addProperty(k, Base64.getEncoder().encodeToString(v)));
-
-            obj.add("faceTextures", faces);
-
+            JsonArray faceKeys = new JsonArray();
+            d.faceTextures.keySet().forEach(faceKeys::add);
+            obj.add("faceKeys", faceKeys);
         }
 
 
@@ -900,6 +972,27 @@ public final class SlotManager {
 
         return obj;
 
+    }
+
+    /**
+     * Client-side serialization — includes textures as inline Base64.
+     * The client has no texture files directory, so it needs textures in the JSON
+     * for cache hash computation and offline access.
+     */
+    private static JsonObject serializeSlotWithTextures(SlotData d) {
+        JsonObject obj = serializeSlot(d);
+        // Add texture as Base64
+        if (d.texture != null && d.texture.length > 0) {
+            obj.addProperty("texture", Base64.getEncoder().encodeToString(d.texture));
+        }
+        // Add face textures as Base64
+        if (d.hasFaces()) {
+            obj.remove("faceKeys"); // remove keys-only format
+            JsonObject faces = new JsonObject();
+            d.faceTextures.forEach((k, v) -> faces.addProperty(k, Base64.getEncoder().encodeToString(v)));
+            obj.add("faceTextures", faces);
+        }
+        return obj;
     }
 
 
@@ -984,6 +1077,108 @@ public final class SlotManager {
 
 
 
+    // ── Phase 3: Server-side texture hash ──────────────────────────────────
+
+    private static volatile String cachedTextureHash = null;
+
+    /**
+     * Compute a SHA-256 hash of all slot IDs + texture bytes + animMeta + face textures.
+     * Same algorithm as the client-side computeTextureHash() in CustomBlocksClient.
+     * Result is cached and invalidated on any slot mutation.
+     */
+    public static String computeTextureHash() {
+        String cached = cachedTextureHash;
+        if (cached != null) return cached;
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            for (SlotData data : allSlots()) {
+                md.update(data.customId.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                if (data.texture != null) md.update(data.texture);
+                if (data.animMeta != null) md.update(data.animMeta.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                for (var entry : data.faceTextures.entrySet()) {
+                    md.update(entry.getKey().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    md.update(entry.getValue());
+                }
+            }
+            cached = java.util.HexFormat.of().formatHex(md.digest());
+            cachedTextureHash = cached;
+            return cached;
+        } catch (Exception e) {
+            LOGGER.warn("[CustomBlocks] Server hash computation failed: {}", e.getMessage());
+            return "";
+        }
+    }
+
+    /** Invalidate cached hash — called whenever slots change. */
+    private static void invalidateHash() { cachedTextureHash = null; }
+
+    // ── Texture file I/O (Phase 1: separate texture files) ─────────────────
+
+    /** Write a single texture file to disk. Called when a texture changes — NOT on every save. */
+    private static void writeTextureFile(int slotIndex, byte[] data) {
+        try {
+            Path dir = Path.of(TEXTURES_DIR);
+            Files.createDirectories(dir);
+            if (data != null && data.length > 0) {
+                Files.write(dir.resolve("slot_" + slotIndex + ".dat"), data);
+            } else {
+                Files.deleteIfExists(dir.resolve("slot_" + slotIndex + ".dat"));
+            }
+        } catch (Exception e) {
+            LOGGER.error("[CustomBlocks] Failed to write texture for slot_{}", slotIndex, e);
+        }
+    }
+
+    /** Write a face texture file. */
+    private static void writeFaceTextureFile(int slotIndex, String face, byte[] data) {
+        try {
+            Path dir = Path.of(TEXTURES_DIR);
+            Files.createDirectories(dir);
+            if (data != null && data.length > 0) {
+                Files.write(dir.resolve("slot_" + slotIndex + "_" + face + ".dat"), data);
+            } else {
+                Files.deleteIfExists(dir.resolve("slot_" + slotIndex + "_" + face + ".dat"));
+            }
+        } catch (Exception e) {
+            LOGGER.error("[CustomBlocks] Failed to write face texture for slot_{}_{}", slotIndex, face, e);
+        }
+    }
+
+    /** Delete all texture files for a slot. */
+    private static void deleteTextureFiles(int slotIndex) {
+        try {
+            Path dir = Path.of(TEXTURES_DIR);
+            Files.deleteIfExists(dir.resolve("slot_" + slotIndex + ".dat"));
+            for (String face : SlotData.FACE_KEYS) {
+                Files.deleteIfExists(dir.resolve("slot_" + slotIndex + "_" + face + ".dat"));
+            }
+        } catch (Exception e) {
+            LOGGER.error("[CustomBlocks] Failed to delete textures for slot_{}", slotIndex, e);
+        }
+    }
+
+    /** Read a texture file from disk. Returns null if not found. */
+    private static byte[] readTextureFile(int slotIndex) {
+        try {
+            Path file = Path.of(TEXTURES_DIR, "slot_" + slotIndex + ".dat");
+            return Files.exists(file) ? Files.readAllBytes(file) : null;
+        } catch (Exception e) {
+            LOGGER.error("[CustomBlocks] Failed to read texture for slot_{}", slotIndex, e);
+            return null;
+        }
+    }
+
+    /** Read a face texture file from disk. Returns null if not found. */
+    private static byte[] readFaceTextureFile(int slotIndex, String face) {
+        try {
+            Path file = Path.of(TEXTURES_DIR, "slot_" + slotIndex + "_" + face + ".dat");
+            return Files.exists(file) ? Files.readAllBytes(file) : null;
+        } catch (Exception e) {
+            LOGGER.error("[CustomBlocks] Failed to read face texture for slot_{}_{}", slotIndex, face, e);
+            return null;
+        }
+    }
+
     // ── Internal ─────────────────────────────────────────────────────────────
 
 
@@ -993,6 +1188,8 @@ public final class SlotManager {
         byId.put(data.customId, data);
 
         bySlot.put("slot_" + data.index, data);
+
+        invalidateHash();
 
     }
 

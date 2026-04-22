@@ -26,19 +26,22 @@ public final class NetworkManager {
     // ── Packet size limits ───────────────────────────────────────────────────
     /** Warning threshold - textures larger than this will log a warning. */
     private static final int PACKET_WARN_SIZE = 500 * 1024; // 500KB
-    /** Hard limit — matches Minecraft's real 1 MB packet ceiling (with margin for overhead). */
-    private static final int PACKET_MAX_SIZE = 900 * 1024; // 900KB
-
-    // ── Packet chunking (Phase 10) ──────────────────────────────────────────
-    /** Payloads with texture bytes above this threshold are auto-chunked. */
+    /**
+     * Hard limit per single (unchunked) payload. Minecraft's real limit is
+     * 1,048,576 bytes (1 MB) — the previous 8 MB value was useless because
+     * Minecraft killed the connection before our check even mattered.
+     * 900 KB leaves room for packet framing overhead.
+     */
+    private static final int PACKET_MAX_SIZE = 900 * 1024; // 900KB (below MC's 1MB hard limit)
+    /** Payloads with textures above this threshold are automatically chunked. */
     private static final int CHUNK_THRESHOLD = 500 * 1024; // 500KB
-    /** Max raw bytes per chunk — fits comfortably within the tick budget. */
-    private static final int CHUNK_SIZE = 200 * 1024; // 200KB
+    /** Max bytes per chunk — well under Minecraft's 1 MB limit. */
+    private static final int CHUNK_SIZE = 500 * 1024; // 500KB
+    /** Max total reassembly size — prevents abuse. */
+    private static final int MAX_CHUNKED_TOTAL = 10 * 1024 * 1024; // 10MB
 
     // ── Per-player pending texture queues ────────────────────────────────────
     private static final ConcurrentHashMap<UUID, TextureQueue> PLAYER_QUEUES = new ConcurrentHashMap<>();
-    /** Per-player pending chunk queues (Phase 10). */
-    private static final ConcurrentHashMap<UUID, java.util.concurrent.ConcurrentLinkedDeque<ChunkedTexturePayload>> CHUNK_QUEUES = new ConcurrentHashMap<>();
 
     /** Tracks when each player last received a full sync to prevent redundant re-syncs. */
     private static final ConcurrentHashMap<UUID, Long> LAST_FULL_SYNC = new ConcurrentHashMap<>();
@@ -163,7 +166,7 @@ public final class NetworkManager {
 
     /** Max bytes of texture data to send per player per tick. Prevents saturating
      *  the game socket on shared hosting with limited bandwidth. */
-    private static final int BYTES_PER_TICK_BUDGET = 256 * 1024; // 256KB
+    private static final int BYTES_PER_TICK_BUDGET = 512 * 1024; // 512KB (Phase 5)
 
     /**
      * Called every server tick. Drains pending payloads and sends them,
@@ -184,20 +187,15 @@ public final class NetworkManager {
             }
 
             TextureQueue queue = PLAYER_QUEUES.get(uid);
-            java.util.concurrent.ConcurrentLinkedDeque<ChunkedTexturePayload> chunkQueue = CHUNK_QUEUES.get(uid);
-            boolean hasRegular = queue != null && !queue.isEmpty();
-            boolean hasChunks  = chunkQueue != null && !chunkQueue.isEmpty();
-            if (!hasRegular && !hasChunks) continue;
+            if (queue == null || queue.isEmpty()) continue;
 
+            net.minecraft.network.packet.CustomPayload[] batch = queue.drain(perTick);
             int bytesSent = 0;
-
-            // ── Regular payloads ────────────────────────────────────────────
-            SlotUpdatePayload[] batch = hasRegular ? queue.drain(perTick) : new SlotUpdatePayload[0];
             int i;
             for (i = 0; i < batch.length; i++) {
-                SlotUpdatePayload payload = batch[i];
+                net.minecraft.network.packet.CustomPayload payload = batch[i];
                 try {
-                    int payloadSize = payload.texture() != null ? payload.texture().length : 0;
+                    int payloadSize = TextureQueue.payloadByteSize(payload);
                     // Fix 12: Enforce budget even on the FIRST packet of the tick
                     if (bytesSent + payloadSize > BYTES_PER_TICK_BUDGET && payloadSize > 0) {
                         if (bytesSent == 0) {
@@ -223,28 +221,8 @@ public final class NetworkManager {
                 }
             }
 
-            // ── Chunked payloads (Phase 10) ─────────────────────────────────
-            if (hasChunks) {
-                while (!chunkQueue.isEmpty()) {
-                    ChunkedTexturePayload chunk = chunkQueue.peekFirst();
-                    if (chunk == null) break;
-                    int chunkSize = chunk.chunkData() != null ? chunk.chunkData().length : 0;
-                    if (bytesSent + chunkSize > BYTES_PER_TICK_BUDGET && bytesSent > 0) break;
-                    chunkQueue.pollFirst();
-                    try {
-                        ServerPlayNetworking.send(player, chunk);
-                        bytesSent += chunkSize;
-                    } catch (Exception e) {
-                        LOGGER.warn("[CustomBlocks] Failed to send chunk to {}: {}",
-                                player.getName().getString(), e.getMessage());
-                    }
-                }
-            }
-
             // Log when drip-feed completes for a player
-            boolean regularDone = queue == null || queue.isEmpty();
-            boolean chunksDone  = chunkQueue == null || chunkQueue.isEmpty();
-            if (regularDone && chunksDone) {
+            if (queue.isEmpty()) {
                 COOLDOWN_TICKS.remove(uid);
                 LOGGER.info("[CustomBlocks] Drip-feed complete for {}", player.getName().getString());
             }
@@ -257,7 +235,6 @@ public final class NetworkManager {
     public static void onPlayerDisconnect(ServerPlayerEntity player) {
         TextureQueue queue = PLAYER_QUEUES.remove(player.getUuid());
         if (queue != null) queue.clear();
-        CHUNK_QUEUES.remove(player.getUuid());
         LAST_FULL_SYNC.remove(player.getUuid());
         COOLDOWN_TICKS.remove(player.getUuid());
     }
@@ -265,8 +242,36 @@ public final class NetworkManager {
     /**
      * Called when the client sends SyncRequestPayload (Fix 7: client-initiated sync).
      * At this point the Netty pipeline is guaranteed ready for S2C packets.
+     *
+     * Phase 3: If the client's cached texture hash matches the server's, skip the
+     * entire drip-feed and send metadata + sync_done only. This makes rejoins instant.
      */
-    public static void onSyncRequest(ServerPlayerEntity player) {
+    public static void onSyncRequest(ServerPlayerEntity player, String clientHash) {
+        if (clientHash != null && !clientHash.isEmpty()) {
+            String serverHash = SlotManager.computeTextureHash();
+            if (clientHash.equals(serverHash)) {
+                LOGGER.info("[CustomBlocks] Hash match for {} (hash={}). Skipping drip-feed.",
+                        player.getName().getString(), serverHash.substring(0, Math.min(12, serverHash.length())));
+                // Send metadata-only FullSyncPayload so client has slot names/properties
+                List<FullSyncPayload.SlotEntry> entries = new ArrayList<>();
+                for (SlotData data : SlotManager.allSlots()) {
+                    entries.add(new FullSyncPayload.SlotEntry(
+                            data.index, data.customId, data.displayName,
+                            null, data.lightLevel, data.hardness, data.soundType, data.animMeta));
+                }
+                byte[] tabIcon = SlotManager.getTabIconTexture();
+                ServerPlayNetworking.send(player, new FullSyncPayload(entries, tabIcon));
+                // Send immediate sync_done — no drip-feed needed
+                TextureQueue queue = getOrCreateQueue(player);
+                queue.enqueue(new SlotUpdatePayload("sync_done", -1, "", null,
+                        new byte[0], 0, 0f, "stone"));
+                return;
+            }
+            LOGGER.info("[CustomBlocks] Hash mismatch for {} (client={}, server={}). Full drip-feed.",
+                    player.getName().getString(),
+                    clientHash.substring(0, Math.min(12, clientHash.length())),
+                    serverHash.substring(0, Math.min(12, serverHash.length())));
+        }
         sendFullSync(player);
     }
 
@@ -328,6 +333,7 @@ public final class NetworkManager {
         if (payload == null) return;
         byte[] tex = payload.texture();
         if (tex != null && tex.length > CHUNK_THRESHOLD) {
+            // Auto-chunk: texture exceeds threshold → split into ChunkedTexturePayload pieces
             sendChunked(player, payload);
             return;
         }
@@ -336,18 +342,29 @@ public final class NetworkManager {
     }
 
     /**
-     * Split a large texture payload into multiple ChunkedTexturePayload packets
-     * (each under CHUNK_SIZE bytes) and enqueue them for drip-feed delivery.
-     * Chunk 0 carries the original payload metadata; subsequent chunks carry only data.
+     * Splits a large {@link SlotUpdatePayload} into multiple
+     * {@link ChunkedTexturePayload} packets and enqueues each one into
+     * the player's drip-feed queue. The client reassembles them by
+     * {@code transferId}.
      */
     private static void sendChunked(ServerPlayerEntity player, SlotUpdatePayload payload) {
         byte[] tex = payload.texture();
-        String transferId = UUID.randomUUID().toString();
+        if (tex == null || tex.length == 0) return;
+
+        if (tex.length > MAX_CHUNKED_TOTAL) {
+            LOGGER.error("[CustomBlocks] Texture too large even for chunking: {} bytes (max {}). Slot={}, action={}",
+                    tex.length, MAX_CHUNKED_TOTAL, payload.slotIndex(), payload.action());
+            return;
+        }
+
+        String transferId = java.util.UUID.randomUUID().toString();
         int totalChunks = (tex.length + CHUNK_SIZE - 1) / CHUNK_SIZE;
 
-        java.util.concurrent.ConcurrentLinkedDeque<ChunkedTexturePayload> chunkQueue =
-                CHUNK_QUEUES.computeIfAbsent(player.getUuid(), k -> new java.util.concurrent.ConcurrentLinkedDeque<>());
+        LOGGER.info("[CustomBlocks] Chunking texture for {} → {} chunks ({} bytes). transferId={}, slot={}, action={}, face={}",
+                player.getName().getString(), totalChunks, tex.length,
+                transferId.substring(0, 8), payload.slotIndex(), payload.action(), payload.face());
 
+        TextureQueue queue = getOrCreateQueue(player);
         for (int i = 0; i < totalChunks; i++) {
             int offset = i * CHUNK_SIZE;
             int length = Math.min(CHUNK_SIZE, tex.length - offset);
@@ -356,24 +373,26 @@ public final class NetworkManager {
 
             ChunkedTexturePayload chunk;
             if (i == 0) {
+                // Chunk 0 carries full metadata
                 chunk = new ChunkedTexturePayload(
                         transferId, i, totalChunks, chunkData,
                         payload.action(), payload.slotIndex(), payload.customId(),
                         payload.displayName(), payload.lightLevel(), payload.hardness(),
                         payload.soundType(), payload.face(), payload.animMeta());
             } else {
+                // Subsequent chunks: minimal metadata
                 chunk = new ChunkedTexturePayload(
                         transferId, i, totalChunks, chunkData,
                         null, 0, null, null, 0, 0f, null, null, null);
             }
-            chunkQueue.addLast(chunk);
+            queue.enqueueChunk(chunk);
         }
-        LOGGER.info("[CustomBlocks] Chunked texture for {} ({} bytes → {} chunks of ~{} KB, transferId={})",
-                player.getName().getString(), tex.length, totalChunks, CHUNK_SIZE / 1024,
-                transferId.substring(0, Math.min(8, transferId.length())));
     }
 
     private static TextureQueue getOrCreateQueue(ServerPlayerEntity player) {
         return PLAYER_QUEUES.computeIfAbsent(player.getUuid(), k -> new TextureQueue());
     }
+
+    /** Expose chunk threshold for diagnostic logging. */
+    public static int getChunkThreshold() { return CHUNK_THRESHOLD; }
 }

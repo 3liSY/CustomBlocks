@@ -345,9 +345,11 @@ public class CustomBlocksMod implements ModInitializer {
                 com.customblocks.network.SyncRequestPayload.ID,
                 (payload, context) -> {
                     context.server().execute(() -> {
-                        LOGGER.info("[CustomBlocks] Received sync request from {}",
-                                context.player().getName().getString());
-                        NetworkManager.onSyncRequest(context.player());
+                        LOGGER.info("[CustomBlocks] Received sync request from {} (hash={})",
+                                context.player().getName().getString(),
+                                payload.textureHash() != null && payload.textureHash().length() > 12
+                                    ? payload.textureHash().substring(0, 12) + "..." : payload.textureHash());
+                        NetworkManager.onSyncRequest(context.player(), payload.textureHash());
                     });
                 }
         );

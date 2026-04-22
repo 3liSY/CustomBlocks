@@ -24,7 +24,7 @@ import java.util.Queue;
 /**
  * Central image utility for CustomBlocks.
  *
- * Supports PNG, JPG, GIF (including animated), BMP, and WebP (via TwelveMonkeys).
+ * Supports PNG, JPG, GIF (including animated), BMP, and WebP (via URL rewriting + wsrv.nl proxy).
  * All images are:
  *  1. Downloaded with format rewriting for common CDNs.
  *  2. Converted to PNG (alpha preserved).
@@ -42,10 +42,8 @@ public final class ImageProcessor {
         public boolean isAnimated() { return frameCount > 1; }
     }
 
-    // TwelveMonkeys auto-registers WebP and other providers at class-load time.
     static {
         System.setProperty("java.awt.headless", "true");
-        ImageIO.scanForPlugins();
     }
 
     /** Flood-fill considers a pixel "background" if it is transparent or near-white. */
@@ -73,6 +71,19 @@ public final class ImageProcessor {
             throw new IOException("§eThe link worked, but there was nothing there! §7The image might have been deleted. Try uploading a new one.");
 
         try {
+            // Phase 9: Detect video (MP4/MOV) before image processing
+            if (isVideoFile(raw)) {
+                if (raw.length > MAX_VIDEO_SIZE)
+                    throw new IOException("§eVideo too large! §7Max is §f5 MB§7 — try a shorter clip or lower resolution.");
+                ProcessResult video = processVideo(raw, targetSize);
+                if (video != null && video.isAnimated()) {
+                    if (isBrokenTexture(video.bytes))
+                        throw new IOException("§eGot the video, but frame-stitching came out broken. §7Check the server log for the exact reason.");
+                    return video;
+                }
+                throw new IOException("§eCouldn't extract frames from that video. §7Only §fMP4§7 and §fMOV§7 with H.264 video are supported. The server log has details.");
+            }
+
             // Detect animated format (GIF, APNG, animated WebP)
             if (isAnimatedImage(raw)) {
                 ProcessResult anim = processAnimation(raw, targetSize);
@@ -202,12 +213,52 @@ public final class ImageProcessor {
             throw new IOException("§eGot nothing back from §f" + domain + "§e! §7The image was probably deleted. Try a different link.");
         if (body.length > 20_971_520)
             throw new IOException("§eToo big! §7This image is §f" + (body.length / 1_048_576) + " MB§7 but the max is §f20 MB§7. Shrink it first or use a smaller image.");
+
+        // Phase 6: If the downloaded bytes are WebP (not handled by Java's ImageIO natively),
+        // re-download through wsrv.nl proxy to convert to PNG or GIF (for animated WebP).
+        if (isWebP(body)) {
+            CustomBlocksMod.LOGGER.info("[CustomBlocks] WebP detected, converting via wsrv.nl proxy");
+            try {
+                String encoded = java.net.URLEncoder.encode(fetchUrl, java.nio.charset.StandardCharsets.UTF_8);
+                String output = isAnimatedWebP(body) ? "gif&n=-1" : "png";
+                String proxyUrl = "https://wsrv.nl/?url=" + encoded + "&output=" + output;
+                HttpRequest proxyReq = HttpRequest.newBuilder()
+                        .uri(URI.create(proxyUrl))
+                        .header("User-Agent", "CustomBlocksMod/2.0")
+                        .timeout(Duration.ofSeconds(CustomBlocksConfig.downloadTimeoutSeconds))
+                        .build();
+                HttpResponse<byte[]> proxyRes = HTTP.send(proxyReq, HttpResponse.BodyHandlers.ofByteArray());
+                if (proxyRes.statusCode() >= 200 && proxyRes.statusCode() < 300
+                        && proxyRes.body() != null && proxyRes.body().length > 0) {
+                    return proxyRes.body();
+                }
+                CustomBlocksMod.LOGGER.warn("[CustomBlocks] wsrv.nl proxy returned status {}", proxyRes.statusCode());
+            } catch (Exception proxyEx) {
+                CustomBlocksMod.LOGGER.warn("[CustomBlocks] wsrv.nl proxy failed: {}", proxyEx.getMessage());
+            }
+            // Proxy failed — return original bytes and let ImageIO try (will fail without TwelveMonkeys)
+        }
+
         return body;
+    }
+
+    /** Check if raw bytes have a WebP header (RIFF....WEBP). */
+    private static boolean isWebP(byte[] raw) {
+        return raw.length > 12
+                && raw[0] == 'R' && raw[1] == 'I' && raw[2] == 'F' && raw[3] == 'F'
+                && raw[8] == 'W' && raw[9] == 'E' && raw[10] == 'B' && raw[11] == 'P';
+    }
+
+    /** Check if WebP bytes contain an ANIM chunk (animated). */
+    private static boolean isAnimatedWebP(byte[] raw) {
+        if (!isWebP(raw)) return false;
+        String head = new String(raw, 0, Math.min(200, raw.length));
+        return head.contains("ANIM");
     }
 
     /**
      * Convert any supported format to PNG, preserving the alpha channel exactly.
-     * TwelveMonkeys on the classpath adds WebP, TIFF, PSD, and more.
+     * Java natively handles PNG, JPG, GIF, and BMP. WebP is converted upstream via wsrv.nl proxy.
      */
     public static byte[] toPng(byte[] raw) throws IOException {
         BufferedImage img = ImageIO.read(new ByteArrayInputStream(raw));
@@ -364,6 +415,142 @@ public final class ImageProcessor {
         if (CustomBlocksConfig.bgRemovalTolerance <= 0) return false;
         double distance = deltaE(rgbToLab(argb), LAB_WHITE);
         return distance <= CustomBlocksConfig.bgRemovalTolerance;
+    }
+
+    // ── Phase 9: Video-to-texture (MP4/MOV) ────────────────────────────────────
+
+    /** Max video frames to extract. */
+    private static final int MAX_VIDEO_FRAMES = 200;
+    /** Max video duration to process (seconds). */
+    private static final double MAX_VIDEO_SECONDS = 10.0;
+    /** Max video file size (5 MB). */
+    private static final int MAX_VIDEO_SIZE = 5 * 1024 * 1024;
+
+    /**
+     * Detect MP4/MOV by the ISO Base Media File Format 'ftyp' box.
+     * Bytes 4-7 must be 'f','t','y','p'.
+     */
+    public static boolean isVideoFile(byte[] raw) {
+        return raw.length > 8
+                && raw[4] == 'f' && raw[5] == 't' && raw[6] == 'y' && raw[7] == 'p';
+    }
+
+    /**
+     * Extract frames from an MP4/MOV file using jcodec, build a vertical PNG strip
+     * with mcmeta — identical output format to animated GIFs.
+     *
+     * Safeguards: max 200 frames, max 10 seconds, max 5 MB input, OOM-safe, timeout.
+     */
+    public static ProcessResult processVideo(byte[] raw, int frameSize) {
+        frameSize = Math.max(16, Math.min(MAX_SIZE, frameSize));
+        long startTime = System.currentTimeMillis();
+
+        if (raw.length > MAX_VIDEO_SIZE) {
+            CustomBlocksMod.LOGGER.warn("[CustomBlocks] Video too large: {} bytes (max {})", raw.length, MAX_VIDEO_SIZE);
+            return null;
+        }
+
+        java.io.File tmpFile = null;
+        try {
+            // jcodec needs a seekable channel — write to a temp file
+            tmpFile = java.io.File.createTempFile("cb_video_", ".mp4");
+            tmpFile.deleteOnExit();
+            java.nio.file.Files.write(tmpFile.toPath(), raw);
+
+            org.jcodec.common.io.SeekableByteChannel ch = org.jcodec.common.io.NIOUtils.readableChannel(tmpFile);
+            org.jcodec.api.FrameGrab grab;
+            try {
+                grab = org.jcodec.api.FrameGrab.createFrameGrab(ch);
+            } catch (Exception e) {
+                ch.close();
+                throw e;
+            }
+
+            if (grab.getVideoTrack() == null || grab.getVideoTrack().getMeta() == null) {
+                ch.close();
+                CustomBlocksMod.LOGGER.warn("[CustomBlocks] Video has no readable video track");
+                return null;
+            }
+
+            // Determine video duration and frame rate for timing
+            double duration = grab.getVideoTrack().getMeta().getTotalDuration();
+            double capDuration = Math.min(duration, MAX_VIDEO_SECONDS);
+            int totalVideoFrames = grab.getVideoTrack().getMeta().getTotalFrames();
+            double fps = totalVideoFrames > 0 && duration > 0 ? totalVideoFrames / duration : 30.0;
+
+            // Calculate how many frames to extract (capped)
+            int framesToExtract = Math.min(MAX_VIDEO_FRAMES, (int)(capDuration * fps));
+            framesToExtract = Math.max(1, framesToExtract);
+
+            // Calculate tick duration per frame (20 ticks/second)
+            int ticksPerFrame = Math.max(1, (int) Math.round(20.0 / fps));
+
+            CustomBlocksMod.LOGGER.info("[CustomBlocks] Video: {}s, ~{} fps, extracting {} frames",
+                    String.format("%.1f", duration), (int) fps, framesToExtract);
+
+            java.util.List<BufferedImage> frames = new java.util.ArrayList<>();
+            for (int i = 0; i < framesToExtract; i++) {
+                // Timeout check
+                if (System.currentTimeMillis() - startTime > ANIM_TIMEOUT_MS) {
+                    CustomBlocksMod.LOGGER.warn("[CustomBlocks] Video processing timeout after {}ms (frame {})", ANIM_TIMEOUT_MS, i);
+                    break;
+                }
+                // Memory check
+                Runtime rt = Runtime.getRuntime();
+                long free = rt.freeMemory() + (rt.maxMemory() - rt.totalMemory());
+                if (free < MIN_FREE_HEAP_BYTES) {
+                    CustomBlocksMod.LOGGER.warn("[CustomBlocks] Low heap ({} MB free) — stopping video at frame {}", free / (1024 * 1024), i);
+                    break;
+                }
+
+                org.jcodec.common.model.Picture pic = grab.getNativeFrame();
+                if (pic == null) break;
+                BufferedImage img = org.jcodec.scale.AWTUtil.toBufferedImage(pic);
+                if (img == null) break;
+                frames.add(img);
+            }
+
+            if (frames.isEmpty()) {
+                CustomBlocksMod.LOGGER.warn("[CustomBlocks] Video: no frames extracted");
+                return null;
+            }
+
+            CustomBlocksMod.LOGGER.info("[CustomBlocks] Video: extracted {} frames, building strip", frames.size());
+
+            // Build vertical strip (same format as GIF animations)
+            BufferedImage strip = new BufferedImage(frameSize, frameSize * frames.size(), BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = strip.createGraphics();
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            for (int i = 0; i < frames.size(); i++) {
+                g.drawImage(frames.get(i), 0, i * frameSize, frameSize, frameSize, null);
+            }
+            g.dispose();
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ImageIO.write(strip, "PNG", baos);
+
+            // Build mcmeta with per-frame timing
+            StringBuilder mcmeta = new StringBuilder("{\"animation\":{\"interpolate\":false,\"frames\":[");
+            for (int i = 0; i < frames.size(); i++) {
+                if (i > 0) mcmeta.append(",");
+                mcmeta.append("{\"index\":").append(i).append(",\"time\":").append(ticksPerFrame).append("}");
+            }
+            mcmeta.append("]}}");
+
+            return new ProcessResult(baos.toByteArray(), mcmeta.toString(), frames.size());
+        } catch (OutOfMemoryError oom) {
+            CustomBlocksMod.LOGGER.error("[CustomBlocks] OOM during video processing — try a shorter video or lower resolution");
+            return null;
+        } catch (Exception e) {
+            CustomBlocksMod.LOGGER.error("[CustomBlocks] Video processing failed", e);
+            return null;
+        } finally {
+            if (tmpFile != null) {
+                try { tmpFile.delete(); } catch (Exception ignored) {}
+            }
+        }
     }
 
     /** Detects if the image is likely animated (GIF, APNG, animated WebP). */

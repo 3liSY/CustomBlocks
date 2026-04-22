@@ -7,9 +7,7 @@ import com.customblocks.CustomBlocksMod;
 import com.customblocks.core.SlotData;
 import com.customblocks.core.SlotManager;
 import com.customblocks.block.SlotBlock;
-import com.customblocks.client.gui.CustomBlocksScreen;
 import com.customblocks.client.texture.TextureCache;
-import com.customblocks.network.ChunkedTexturePayload;
 import com.customblocks.network.FullSyncPayload;
 import com.customblocks.network.SlotUpdatePayload;
 import net.fabricmc.api.ClientModInitializer;
@@ -17,17 +15,15 @@ import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.ingame.CreativeInventoryScreen;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.util.InputUtil;
 import net.minecraft.util.hit.BlockHitResult;
 import java.util.Map;
-import org.lwjgl.glfw.GLFW;
+
+import com.customblocks.network.ChunkedTexturePayload;
 
 import java.io.File;
 import java.io.IOException;
@@ -36,6 +32,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -58,23 +55,22 @@ public class CustomBlocksClient implements ClientModInitializer {
 
     public static volatile boolean pendingCreativeRefresh = false;
 
-    // ── Chunk reassembly buffers (Phase 10) ──────────────────────────────────
-    /** Buffered chunks keyed by transferId. Each entry holds the received chunks + metadata from chunk 0. */
-    private static final java.util.concurrent.ConcurrentHashMap<String, ChunkBuffer> CHUNK_BUFFERS = new java.util.concurrent.ConcurrentHashMap<>();
-    /** Max total reassembled size per transfer (10 MB). */
-    private static final int MAX_REASSEMBLY_SIZE = 10 * 1024 * 1024;
-    /** Max concurrent transfers. */
-    private static final int MAX_CONCURRENT_TRANSFERS = 10;
-    /** Chunk timeout in milliseconds. */
+    // ── Chunk reassembly state ───────────────────────────────────────────────
+    /** Max concurrent chunk transfers (safety cap). */
+    private static final int MAX_CONCURRENT_TRANSFERS = 5;
+    /** Timeout for incomplete chunk transfers (ms). */
     private static final long CHUNK_TIMEOUT_MS = 30_000;
+    /** Max reassembled texture size (bytes). */
+    private static final int MAX_REASSEMBLY_SIZE = 10 * 1024 * 1024; // 10MB
 
-    /** Holds partial chunk data for one in-flight transfer. */
+    /** Buffers in-flight chunk transfers, keyed by transferId. */
+    private static final ConcurrentHashMap<String, ChunkBuffer> CHUNK_BUFFERS = new ConcurrentHashMap<>();
+
+    /** Holds the state for a single chunked transfer. */
     private static final class ChunkBuffer {
         final int totalChunks;
         final byte[][] chunks;
-        final long createdAt;
-        int receivedCount;
-        int totalBytes;
+        final long startTime;
         // Metadata from chunk 0
         String action;
         int slotIndex;
@@ -85,39 +81,37 @@ public class CustomBlocksClient implements ClientModInitializer {
         String soundType;
         String face;
         String animMeta;
+        int receivedCount;
 
         ChunkBuffer(int totalChunks) {
             this.totalChunks = totalChunks;
             this.chunks = new byte[totalChunks][];
-            this.createdAt = System.currentTimeMillis();
+            this.startTime = System.currentTimeMillis();
         }
 
         boolean isComplete() { return receivedCount >= totalChunks; }
-        boolean isExpired()  { return System.currentTimeMillis() - createdAt > CHUNK_TIMEOUT_MS; }
+
+        boolean isTimedOut() { return System.currentTimeMillis() - startTime > CHUNK_TIMEOUT_MS; }
 
         byte[] reassemble() {
-            byte[] result = new byte[totalBytes];
+            int total = 0;
+            for (byte[] c : chunks) {
+                if (c == null) return null;
+                total += c.length;
+            }
+            if (total > MAX_REASSEMBLY_SIZE) return null;
+            byte[] result = new byte[total];
             int offset = 0;
-            for (byte[] chunk : chunks) {
-                if (chunk == null) return null;
-                System.arraycopy(chunk, 0, result, offset, chunk.length);
-                offset += chunk.length;
+            for (byte[] c : chunks) {
+                System.arraycopy(c, 0, result, offset, c.length);
+                offset += c.length;
             }
             return result;
         }
     }
 
-    private static KeyBinding openGuiKey;
-
     @Override
     public void onInitializeClient() {
-
-        openGuiKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.customblocks.open_gui",
-                InputUtil.Type.KEYSYM,
-                GLFW.GLFW_KEY_B,
-                "category.customblocks"
-        ));
 
         ClientLifecycleEvents.CLIENT_STARTED.register(client -> {
             SlotManager.loadFromClientDir(client.runDirectory);
@@ -126,10 +120,6 @@ public class CustomBlocksClient implements ClientModInitializer {
         });
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            while (openGuiKey.wasPressed()) {
-                if (client.currentScreen == null)
-                    client.setScreen(new CustomBlocksScreen());
-            }
             if (pendingCreativeRefresh && client.player != null) {
                 pendingCreativeRefresh = false;
                 bustItemGroupIconCache();
@@ -145,7 +135,10 @@ public class CustomBlocksClient implements ClientModInitializer {
 
         // ── Fix 7: Client-initiated sync — send "I'm ready" when connection is live
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
-            ClientPlayNetworking.send(new com.customblocks.network.SyncRequestPayload());
+            // Phase 3: send cached texture hash so server can skip drip-feed if unchanged
+            String cachedHash = loadCachedHash(client.runDirectory);
+            ClientPlayNetworking.send(new com.customblocks.network.SyncRequestPayload(
+                    cachedHash != null ? cachedHash : ""));
         });
 
         // ── Disconnect → reset all join-burst state ────────────────────────────
@@ -232,112 +225,7 @@ public class CustomBlocksClient implements ClientModInitializer {
         // ── SlotUpdatePayload ─────────────────────────────────────────────────
         ClientPlayNetworking.registerGlobalReceiver(SlotUpdatePayload.ID, (payload, context) -> {
             MinecraftClient client = context.client();
-            client.execute(() -> {
-                switch (payload.action()) {
-
-                    // ── sync_done sentinel ────────────────────────────────────
-                    // The server enqueues this as the very last item after all join
-                    // textures have been queued. On receipt, we signal the waiting
-                    // debounce thread to break out of its sleep loop and fire the
-                    // resource-pack reload immediately (within one 200ms poll cycle).
-                    //
-                    // This is the primary fix for the disconnect regression: previously
-                    // the 4-second debounce would fire mid-burst on internet connections,
-                    // setting joinBurst=false and causing every subsequent texture packet
-                    // to trigger its own 2-second reload. Multiple concurrent reloads
-                    // while ResourcePackGenerator was still writing files to disk
-                    // produced a malformed resource pack and a server-sent TCP RST.
-                    case "sync_done" -> {
-                        syncDoneReceived = true;
-                        return;
-                    }
-
-                    case "add" -> {
-                        if (SlotManager.getById(payload.customId()) != null)
-                            SlotManager.updateTexture(payload.customId(), payload.texture());
-                        else
-                            SlotManager.assignAtIndex(payload.slotIndex(), payload.customId(),
-                                    payload.displayName(), payload.texture());
-                        SlotManager.setProperties(payload.customId(),
-                                payload.lightLevel(), payload.hardness(), payload.soundType());
-                        if (payload.animMeta() != null && !payload.animMeta().isEmpty())
-                            SlotManager.setAnimMeta(payload.customId(), payload.animMeta());
-                        TextureCache.invalidate(payload.customId());
-                    }
-                    case "retexture" -> {
-                        SlotManager.updateTexture(payload.customId(), payload.texture());
-                        if (payload.animMeta() != null && !payload.animMeta().isEmpty())
-                            SlotManager.setAnimMeta(payload.customId(), payload.animMeta());
-                        TextureCache.invalidate(payload.customId());
-                    }
-                    case "animsettings" -> {
-                        if (payload.animMeta() != null && !payload.animMeta().isEmpty())
-                            SlotManager.setAnimMeta(payload.customId(), payload.animMeta());
-                        TextureCache.invalidate(payload.customId());
-                        if (!joinBurst) {
-                            scheduleAnimMetaReload(client, payload.slotIndex(), payload.animMeta());
-                            return;
-                        }
-                    }
-                    case "remove" -> {
-                        TextureCache.invalidate(payload.customId());
-                        SlotManager.remove(payload.customId());
-                    }
-                    case "rename"  -> SlotManager.rename(payload.customId(), payload.displayName());
-                    case "setprop" -> SlotManager.setProperties(payload.customId(),
-                            payload.lightLevel(), payload.hardness(), payload.soundType());
-                    case "setface" -> {
-                        if (payload.face() != null && payload.texture() != null) {
-                            SlotManager.setFaceTexture(payload.customId(), payload.face(), payload.texture());
-                            TextureCache.invalidate(payload.customId());
-                        }
-                    }
-                    case "clearface" -> {
-                        if (payload.face() != null)
-                            SlotManager.clearFaceTexture(payload.customId(), payload.face());
-                        TextureCache.invalidate(payload.customId());
-                    }
-                    case "clearfaces" -> {
-                        SlotManager.clearAllFaces(payload.customId());
-                        TextureCache.invalidate(payload.customId());
-                    }
-                    case "setshape" -> {
-                        if (payload.shapeData() != null) {
-                            java.util.List<SlotData.ShapeBox> boxes = new java.util.ArrayList<>();
-                            if (!payload.shapeData().equals("full")) {
-                                for (String part : payload.shapeData().split(";")) {
-                                    try { boxes.add(SlotData.ShapeBox.parse(part)); } catch (Exception ignored) {}
-                                }
-                            }
-                            SlotManager.setShape(payload.customId(), boxes.isEmpty() ? null : boxes);
-                        }
-                    }
-                    case "setcollision" -> {
-                        boolean hasCollision = !"false".equals(payload.shapeData());
-                        SlotManager.setCollision(payload.customId(), hasCollision);
-                    }
-                    case "tabicon" -> {
-                        SlotManager.setTabIconTexture(payload.texture());
-                        if (!joinBurst) scheduleGenerateAndReload(client, 2000L);
-                        return;
-                    }
-                }
-
-                // Only trigger reload for actions that actually change rendered appearance,
-                // and only when NOT in the initial join burst (which uses sync_done or the
-                // fallback debounce for its single deferred reload).
-                if (!joinBurst) {
-                    String action = payload.action();
-                    boolean needsReload = action.equals("add") || action.equals("retexture")
-                            || action.equals("remove") || action.equals("setface")
-                            || action.equals("clearface") || action.equals("clearfaces");
-                    if (needsReload) scheduleGenerateAndReload(client, 2000L);
-                } else {
-                    // Still in join burst — refresh the fallback debounce timer so it
-                    // doesn't fire if sync_done is somehow delayed beyond joinDebounceMs.
-                    lastPacketTime.set(System.currentTimeMillis());
-                }
-            });
+            client.execute(() -> processSlotUpdatePayload(client, payload));
         });
 
         // ── OpenAnimGuiPayload — server tells client to open animation settings ──
@@ -355,44 +243,32 @@ public class CustomBlocksClient implements ClientModInitializer {
             });
         });
 
-        // ── ChunkedTexturePayload — reassembly (Phase 10) ─────────────────────
+        // ── ChunkedTexturePayload — reassemble chunked textures ─────────────
         ClientPlayNetworking.registerGlobalReceiver(ChunkedTexturePayload.ID, (payload, context) -> {
             MinecraftClient client = context.client();
             client.execute(() -> {
-                // Keep debounce timer alive while chunks arrive
-                lastPacketTime.set(System.currentTimeMillis());
-
                 String tid = payload.transferId();
 
-                // Expire stale buffers
-                CHUNK_BUFFERS.entrySet().removeIf(e -> e.getValue().isExpired());
+                // Keep debounce alive while chunks are arriving — prevents premature resource pack gen
+                lastPacketTime.set(System.currentTimeMillis());
 
-                // Guard against too many concurrent transfers
+                // Clean up timed-out buffers
+                CHUNK_BUFFERS.entrySet().removeIf(e -> e.getValue().isTimedOut());
+
+                // Reject if too many concurrent transfers
                 if (!CHUNK_BUFFERS.containsKey(tid) && CHUNK_BUFFERS.size() >= MAX_CONCURRENT_TRANSFERS) {
-                    CustomBlocksMod.LOGGER.warn("[CustomBlocks] Too many concurrent chunk transfers — dropping {}", tid);
+                    CustomBlocksMod.LOGGER.warn("[CustomBlocks] Chunk transfer rejected — too many concurrent transfers (max {})", MAX_CONCURRENT_TRANSFERS);
+                    return;
+                }
+
+                // Validate chunk index
+                if (payload.chunkIndex() < 0 || payload.chunkIndex() >= payload.totalChunks()) {
+                    CustomBlocksMod.LOGGER.warn("[CustomBlocks] Invalid chunk index {} / {} for transfer {}",
+                            payload.chunkIndex(), payload.totalChunks(), tid.substring(0, 8));
                     return;
                 }
 
                 ChunkBuffer buf = CHUNK_BUFFERS.computeIfAbsent(tid, k -> new ChunkBuffer(payload.totalChunks()));
-
-                // Validate
-                if (payload.chunkIndex() < 0 || payload.chunkIndex() >= buf.totalChunks) {
-                    CustomBlocksMod.LOGGER.warn("[CustomBlocks] Invalid chunk index {} for transfer {}", payload.chunkIndex(), tid);
-                    return;
-                }
-                if (buf.chunks[payload.chunkIndex()] != null) return; // duplicate
-
-                // Store chunk data
-                buf.chunks[payload.chunkIndex()] = payload.chunkData();
-                buf.receivedCount++;
-                buf.totalBytes += payload.chunkData().length;
-
-                // Safety: reject if reassembled size would exceed limit
-                if (buf.totalBytes > MAX_REASSEMBLY_SIZE) {
-                    CustomBlocksMod.LOGGER.warn("[CustomBlocks] Chunk transfer {} exceeds {} MB — discarding", tid, MAX_REASSEMBLY_SIZE / (1024 * 1024));
-                    CHUNK_BUFFERS.remove(tid);
-                    return;
-                }
 
                 // Store metadata from chunk 0
                 if (payload.chunkIndex() == 0) {
@@ -407,25 +283,31 @@ public class CustomBlocksClient implements ClientModInitializer {
                     buf.animMeta    = payload.animMeta();
                 }
 
-                // Check if all chunks arrived
+                // Store chunk data (skip if already received — idempotent)
+                if (buf.chunks[payload.chunkIndex()] == null) {
+                    buf.chunks[payload.chunkIndex()] = payload.chunkData();
+                    buf.receivedCount++;
+                }
+
+                // Check if all chunks have arrived
                 if (buf.isComplete()) {
                     CHUNK_BUFFERS.remove(tid);
                     byte[] fullTexture = buf.reassemble();
                     if (fullTexture == null) {
-                        CustomBlocksMod.LOGGER.error("[CustomBlocks] Chunk reassembly failed for transfer {}", tid);
+                        CustomBlocksMod.LOGGER.error("[CustomBlocks] Chunk reassembly failed for transfer {} (exceeded max size or missing chunks)", tid.substring(0, 8));
                         return;
                     }
 
-                    CustomBlocksMod.LOGGER.info("[CustomBlocks] Reassembled {} bytes from {} chunks (transfer {})",
-                            fullTexture.length, buf.totalChunks, tid.substring(0, Math.min(8, tid.length())));
+                    CustomBlocksMod.LOGGER.info("[CustomBlocks] Chunk reassembly complete: transfer={}, {} bytes, action={}, slot={}, face={}",
+                            tid.substring(0, 8), fullTexture.length, buf.action, buf.slotIndex, buf.face);
 
-                    // Build a SlotUpdatePayload from the reassembled data and process it
-                    // through the existing handler by re-dispatching
+                    // Create a normal SlotUpdatePayload from the reassembled data
+                    // and process through the EXISTING handler logic
                     SlotUpdatePayload reassembled = new SlotUpdatePayload(
                             buf.action, buf.slotIndex, buf.customId, buf.displayName,
                             fullTexture, buf.lightLevel, buf.hardness, buf.soundType,
                             buf.face, null, buf.animMeta);
-                    processReassembledPayload(client, reassembled);
+                    processSlotUpdatePayload(client, reassembled);
                 }
             });
         });
@@ -476,14 +358,19 @@ public class CustomBlocksClient implements ClientModInitializer {
     }
 
     /**
-     * Process a reassembled chunked payload. Applies the same slot/texture mutations
-     * as the main SlotUpdatePayload handler, then triggers a debounced resource-pack
-     * regeneration. Called on the client main thread after all chunks arrive.
+     * Processes a single {@link SlotUpdatePayload}. Extracted so both the direct
+     * SlotUpdatePayload handler and the chunk-reassembly handler can share the
+     * same logic without duplication.
      */
-    private static void processReassembledPayload(MinecraftClient client, SlotUpdatePayload payload) {
-        if (payload == null || payload.action() == null) return;
-
+    private static void processSlotUpdatePayload(MinecraftClient client, SlotUpdatePayload payload) {
         switch (payload.action()) {
+
+            // ── sync_done sentinel ────────────────────────────────────
+            case "sync_done" -> {
+                syncDoneReceived = true;
+                return;
+            }
+
             case "add" -> {
                 if (SlotManager.getById(payload.customId()) != null)
                     SlotManager.updateTexture(payload.customId(), payload.texture());
@@ -502,21 +389,119 @@ public class CustomBlocksClient implements ClientModInitializer {
                     SlotManager.setAnimMeta(payload.customId(), payload.animMeta());
                 TextureCache.invalidate(payload.customId());
             }
+            case "animsettings" -> {
+                if (payload.animMeta() != null && !payload.animMeta().isEmpty())
+                    SlotManager.setAnimMeta(payload.customId(), payload.animMeta());
+                TextureCache.invalidate(payload.customId());
+                if (!joinBurst) {
+                    scheduleAnimMetaReload(client, payload.slotIndex(), payload.animMeta());
+                    return;
+                }
+            }
+            case "remove" -> {
+                TextureCache.invalidate(payload.customId());
+                SlotManager.remove(payload.customId());
+            }
+            case "rename"  -> SlotManager.rename(payload.customId(), payload.displayName());
+            case "setprop" -> SlotManager.setProperties(payload.customId(),
+                    payload.lightLevel(), payload.hardness(), payload.soundType());
             case "setface" -> {
                 if (payload.face() != null && payload.texture() != null) {
                     SlotManager.setFaceTexture(payload.customId(), payload.face(), payload.texture());
                     TextureCache.invalidate(payload.customId());
                 }
             }
-            default -> {
-                CustomBlocksMod.LOGGER.warn("[CustomBlocks] Unexpected chunked action: {}", payload.action());
+            case "clearface" -> {
+                if (payload.face() != null)
+                    SlotManager.clearFaceTexture(payload.customId(), payload.face());
+                TextureCache.invalidate(payload.customId());
+            }
+            case "clearfaces" -> {
+                SlotManager.clearAllFaces(payload.customId());
+                TextureCache.invalidate(payload.customId());
+            }
+            case "setshape" -> {
+                if (payload.shapeData() != null) {
+                    java.util.List<SlotData.ShapeBox> boxes = new java.util.ArrayList<>();
+                    if (!payload.shapeData().equals("full")) {
+                        for (String part : payload.shapeData().split(";")) {
+                            try { boxes.add(SlotData.ShapeBox.parse(part)); } catch (Exception ignored) {}
+                        }
+                    }
+                    SlotManager.setShape(payload.customId(), boxes.isEmpty() ? null : boxes);
+                }
+            }
+            case "setcollision" -> {
+                boolean hasCollision = !"false".equals(payload.shapeData());
+                SlotManager.setCollision(payload.customId(), hasCollision);
+            }
+            case "tabicon" -> {
+                SlotManager.setTabIconTexture(payload.texture());
+                if (!joinBurst) scheduleGenerateAndReload(client, 2000L);
                 return;
             }
         }
 
-        // Chunked payloads always trigger a reload (they're never part of the join burst —
-        // the join burst uses regular SlotUpdatePayloads which are always < 500 KB per slot).
-        scheduleGenerateAndReload(client, 2000L);
+        // Only trigger reload for actions that actually change rendered appearance,
+        // and only when NOT in the initial join burst.
+        if (!joinBurst) {
+            String action = payload.action();
+            // Phase 2: fast path for add/retexture — single-slot generate instead of full rebuild
+            if (action.equals("add") || action.equals("retexture")) {
+                scheduleSingleSlotReload(client, payload.slotIndex(), 500L);
+            } else {
+                boolean needsReload = action.equals("remove") || action.equals("setface")
+                        || action.equals("clearface") || action.equals("clearfaces");
+                if (needsReload) scheduleGenerateAndReload(client, 2000L);
+            }
+        } else {
+            // Still in join burst — refresh the fallback debounce timer
+            lastPacketTime.set(System.currentTimeMillis());
+        }
+    }
+
+    /**
+     * Fast path: write ONLY the changed slot's texture to the pack directory,
+     * skip saveToClientDir (heavy), skip full generate (heavy), then reload.
+     */
+    private static void scheduleSingleSlotReload(MinecraftClient client, int slotIndex, long debounceMs) {
+        lastPacketTime.set(System.currentTimeMillis());
+        if (generateRunning.compareAndSet(false, true)) {
+            Thread t = new Thread(() -> {
+                // Short debounce — wait for any rapid follow-up packets
+                try { Thread.sleep(debounceMs); } catch (InterruptedException ignored) {}
+
+                // Write ONLY this slot's texture to the pack
+                ResourcePackGenerator.generateSingleSlot(client, slotIndex);
+
+                // Save client-side data + update the texture hash
+                SlotManager.saveToClientDir(client.runDirectory);
+                String currentHash = computeTextureHash();
+                saveCachedHash(client.runDirectory, currentHash);
+
+                // Trigger reload
+                client.execute(() -> {
+                    generateRunning.set(false);
+                    if (reloadInFlight.compareAndSet(false, true)) {
+                        client.reloadResources().thenRun(() ->
+                            client.execute(() -> {
+                                reloadInFlight.set(false);
+                                CustomBlocksMod.LOGGER.info("[CustomBlocks] Single-slot reload complete for slot_{}.", slotIndex);
+                                pendingCreativeRefresh = true;
+                            })
+                        ).exceptionally(ex -> {
+                            client.execute(() -> {
+                                reloadInFlight.set(false);
+                                CustomBlocksMod.LOGGER.error("[CustomBlocks] Single-slot reload failed.", ex);
+                            });
+                            return null;
+                        });
+                    }
+                });
+            }, "CustomBlocks-SingleSlotReload");
+            t.setDaemon(true);
+            t.start();
+        }
     }
 
     /**

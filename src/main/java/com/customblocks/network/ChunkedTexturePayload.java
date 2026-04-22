@@ -8,20 +8,22 @@ import net.minecraft.util.Identifier;
 /**
  * Server → Client chunked texture transfer.
  * <p>
- * When a texture payload exceeds 500 KB, the server splits it into multiple
- * chunks. Each chunk is sent as a separate packet (well under Minecraft's
- * 1 MB hard limit). The client reassembles them by {@code transferId}.
+ * When a texture exceeds the chunking threshold (500 KB), the server splits it
+ * into multiple {@code ChunkedTexturePayload} packets. The client buffers them
+ * by {@code transferId} and reassembles the full byte array once all chunks
+ * have arrived, then processes the result through the normal
+ * {@link SlotUpdatePayload} handler.
  * <p>
- * Metadata fields (action, customId, displayName, etc.) are populated on
- * chunk 0 only. Later chunks carry only the raw bytes + transfer bookkeeping.
+ * Metadata fields (action, customId, etc.) are only meaningful on chunk 0;
+ * subsequent chunks carry empty/default metadata to save bandwidth.
  */
 public record ChunkedTexturePayload(
         String transferId,    // unique UUID per transfer
         int    chunkIndex,    // 0-based piece index
-        int    totalChunks,   // total pieces
+        int    totalChunks,   // total number of pieces
         byte[] chunkData,     // raw bytes for this piece
-        // ── Metadata (only meaningful on chunk 0) ────────────────────────────
-        String action,        // "add", "retexture", "setface", etc.
+        // ── Metadata (only populated on chunk 0) ────────────────────────────
+        String action,
         int    slotIndex,
         String customId,
         String displayName,
@@ -41,14 +43,14 @@ public record ChunkedTexturePayload(
                 buf.writeVarInt(value.chunkIndex());
                 buf.writeVarInt(value.totalChunks());
                 buf.writeByteArray(value.chunkData());
-                // Metadata — always written but empty on non-zero chunks
+                // Metadata
                 buf.writeString(value.action()      != null ? value.action()      : "");
                 buf.writeVarInt(value.slotIndex());
                 buf.writeString(value.customId()     != null ? value.customId()     : "");
                 buf.writeString(value.displayName()  != null ? value.displayName()  : "");
                 buf.writeVarInt(value.lightLevel());
                 buf.writeFloat(value.hardness());
-                buf.writeString(value.soundType()    != null ? value.soundType()    : "");
+                buf.writeString(value.soundType()    != null ? value.soundType()    : "stone");
                 buf.writeString(value.face()         != null ? value.face()         : "");
                 buf.writeString(value.animMeta()     != null ? value.animMeta()     : "");
             },
@@ -57,6 +59,7 @@ public record ChunkedTexturePayload(
                 int    chunkIndex  = buf.readVarInt();
                 int    totalChunks = buf.readVarInt();
                 byte[] chunkData   = buf.readByteArray(1_048_576); // max 1 MB per chunk read
+                // Metadata
                 String action      = buf.readString();
                 int    slotIndex   = buf.readVarInt();
                 String customId    = buf.readString();
@@ -73,7 +76,7 @@ public record ChunkedTexturePayload(
                         customId.isEmpty()    ? null : customId,
                         displayName.isEmpty() ? null : displayName,
                         lightLevel, hardness,
-                        soundType.isEmpty()   ? null : soundType,
+                        soundType.isEmpty()   ? "stone" : soundType,
                         face.isEmpty()        ? null : face,
                         animMeta.isEmpty()    ? null : animMeta
                 );

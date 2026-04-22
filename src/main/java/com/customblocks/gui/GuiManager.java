@@ -112,6 +112,15 @@ public class GuiManager {
 
     // ── Screen open helpers ──────────────────────────────────────────────────
 
+    /** Phase 8: Consolidated helper — sets state + opens a CbScreenHandler in one call. */
+    private static void openScreenFromGuiState(ServerPlayerEntity player, GuiState state,
+                                                SimpleInventory inv, String title) {
+        STATES.put(player.getUuid(), state);
+        openScreen(player, new SimpleNamedScreenHandlerFactory(
+            (s, pi, p) -> new CbScreenHandler(s, pi, inv),
+            Text.literal(title)));
+    }
+
     private static void openScreen(ServerPlayerEntity player, SimpleNamedScreenHandlerFactory factory) {
         REOPENING_SCREENS.add(player.getUuid());
         player.openHandledScreen(factory);
@@ -193,15 +202,11 @@ public class GuiManager {
 
     public static void openToolsGui(ServerPlayerEntity player) {
         pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.tools());
-        openScreen(player, new SimpleNamedScreenHandlerFactory((syncId, playerInv, p) -> new CbScreenHandler(syncId, playerInv, buildToolsGui(player)), Text.literal("§d§lMagic Items & Tools")));
+        openScreenFromGuiState(player, GuiState.tools(), buildToolsGui(player), "§d§lMagic Items & Tools");
     }
 
     public static void openMain(ServerPlayerEntity player, int page) {
-        STATES.put(player.getUuid(), GuiState.main(page));
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildMain(player, STATES.getOrDefault(player.getUuid(), GuiState.main(0)).page())),
-            Text.literal("§b§l✦ §r§fCustomBlocks Dashboard")));
+        openScreenFromGuiState(player, GuiState.main(page), buildMain(player, page), "§b§l✦ §r§fCustomBlocks Dashboard");
     }
 
     public static void openEditorPicker(ServerPlayerEntity player) { openEditorPicker(player, 0); }
@@ -210,11 +215,7 @@ public class GuiManager {
         int max   = total == 0 ? 0 : Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
         page = Math.max(0, Math.min(page, max));
         pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.picker(page));
-        final int fp = page;
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildPicker(fp, false)),
-            Text.literal("§b§l▶ §r§fPick a Block")));
+        openScreenFromGuiState(player, GuiState.picker(page), buildPicker(page, false), "§b§l▶ §r§fPick a Block");
     }
 
     public static void openEditor(ServerPlayerEntity player, String id, int returnPage, boolean fromCommand) {
@@ -222,12 +223,9 @@ public class GuiManager {
         if (d == null) { openMain(player, returnPage); return; }
         trackRecentBlock(player.getUuid(), id);
         if (!fromCommand) pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), fromCommand
-            ? GuiState.editorFromCommand(id)
-            : GuiState.editor(id, returnPage));
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildEditor(d, false)),
-            Text.literal("§e§l✎ §r§fBlock Editor §8— " + d.displayName)));
+        openScreenFromGuiState(player,
+            fromCommand ? GuiState.editorFromCommand(id) : GuiState.editor(id, returnPage),
+            buildEditor(d, false), "§e§l✎ §r§fBlock Editor §8— " + d.displayName);
     }
 
     public static void openEditor(ServerPlayerEntity player, String id, int returnPage) {
@@ -238,20 +236,14 @@ public class GuiManager {
         SlotData d = SlotManager.getById(id);
         if (d == null) { openMain(player, returnPage); return; }
         pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.faceEditor(id, returnPage));
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildFaceEditor(d)),
-            Text.literal("§d§l⬡ §r§fFace Editor §8— " + d.displayName)));
+        openScreenFromGuiState(player, GuiState.faceEditor(id, returnPage), buildFaceEditor(d), "§d§l⬡ §r§fFace Editor §8— " + d.displayName);
     }
 
     public static void openShapeEditor(ServerPlayerEntity player, String id, int returnPage) {
         SlotData d = SlotManager.getById(id);
         if (d == null) { openMain(player, returnPage); return; }
         pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.shapeEditor(id, returnPage));
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildShapeEditor(d, 0)),
-            Text.literal("§5§l⬡ §r§fShape Editor §8— " + d.displayName)));
+        openScreenFromGuiState(player, GuiState.shapeEditor(id, returnPage), buildShapeEditor(d, 0), "§5§l⬡ §r§fShape Editor §8— " + d.displayName);
     }
 
     public static void openSearchPicker(ServerPlayerEntity player, String query, int page) {
@@ -264,19 +256,12 @@ public class GuiManager {
         int max = total == 0 ? 0 : Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
         page = Math.max(0, Math.min(page, max));
         pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.searchPicker(page));
-        final int fp = page;
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildSearchPicker(fp, q)),
-            Text.literal("§b§l🔍 §r§fSearch: §7" + query + " §8(" + total + " found)")));
+        openScreenFromGuiState(player, GuiState.searchPicker(page), buildSearchPicker(page, q), "§b§l🔍 §r§fSearch: §7" + query + " §8(" + total + " found)");
     }
 
     public static void openMaintenanceMenu(ServerPlayerEntity player) {
         pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.maintenance());
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildMaintenanceMenu(player)),
-            Text.literal("§b§l✦ §r§fServer Tools")));
+        openScreenFromGuiState(player, GuiState.maintenance(), buildMaintenanceMenu(player), "§b§l✦ §r§fServer Tools");
     }
 
     private static SimpleInventory buildResourceHub(ServerPlayerEntity player) {
@@ -309,10 +294,7 @@ public class GuiManager {
 
     public static void openAssistantControl(ServerPlayerEntity player) {
         pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.assistantControl());
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, px) -> new CbScreenHandler(s, pi, buildAssistantControl(player)),
-            Text.literal("§b§l✦ §r§fAI Assistant")));
+        openScreenFromGuiState(player, GuiState.assistantControl(), buildAssistantControl(player), "§b§l✦ §r§fAI Assistant");
     }
 
     private static SimpleInventory buildAssistantControl(ServerPlayerEntity player) {
@@ -380,49 +362,33 @@ public class GuiManager {
 
     public static void openHelpGui(ServerPlayerEntity player) {
         pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.help());
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildHelpGui()),
-            Text.literal("§a§l✦ §r§fHelp & Commands")));
+        openScreenFromGuiState(player, GuiState.help(), buildHelpGui(), "§a§l✦ §r§fHelp & Commands");
     }
 
     public static void openPropertiesGui(ServerPlayerEntity player, String id, int returnPage) {
         SlotData d = SlotManager.getById(id);
         if (d == null) { openMain(player, returnPage); return; }
         pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.properties(id, returnPage));
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildPropertiesGui(d)),
-            Text.literal("§6§l⚙ §r§fBlock Properties §8— " + d.displayName)));
+        openScreenFromGuiState(player, GuiState.properties(id, returnPage), buildPropertiesGui(d), "§6§l⚙ §r§fBlock Properties §8— " + d.displayName);
     }
 
     public static void openSoundMenu(ServerPlayerEntity player, String id, int returnPage) {
         SlotData d = SlotManager.getById(id);
         if (d == null) { openMain(player, returnPage); return; }
         pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.sound(id, returnPage));
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildSoundMenu(d)),
-            Text.literal("§e§l♫ §r§fSound Selector §8— " + d.displayName)));
+        openScreenFromGuiState(player, GuiState.sound(id, returnPage), buildSoundMenu(d), "§e§l♫ §r§fSound Selector §8— " + d.displayName);
     }
 
     public static void openTabIconPicker(ServerPlayerEntity player, int page) {
         int total = sortedBlocks().size();
         int max   = total == 0 ? 0 : Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
         page = Math.max(0, Math.min(page, max));
-        STATES.put(player.getUuid(), GuiState.picker(page));
-        final int fp = page;
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildPicker(fp, false)),
-            Text.literal("§b§l▶ §r§fPick Tab Icon §7(ESC = back)")));
+        openScreenFromGuiState(player, GuiState.picker(page), buildPicker(page, false), "§b§l▶ §r§fPick Tab Icon §7(ESC = back)");
     }
 
     public static void openResourceHub(ServerPlayerEntity player) {
         pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.resourceCenter());
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildResourceHub(player)),
-            Text.literal("§b§l✦ §r§fResource Pack")));
+        openScreenFromGuiState(player, GuiState.resourceCenter(), buildResourceHub(player), "§b§l✦ §r§fResource Pack");
     }
 
     public static void openBrokenBlocks(ServerPlayerEntity player) { openBrokenBlocks(player, 0); }
@@ -431,11 +397,7 @@ public class GuiManager {
         int max   = total == 0 ? 0 : Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
         page = Math.max(0, Math.min(page, max));
         pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.pickerBroken(page));
-        final int fp = page;
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildPicker(fp, true)),
-            Text.literal("§6§l✦ §r§fBroken Block Finder")));
+        openScreenFromGuiState(player, GuiState.pickerBroken(page), buildPicker(page, true), "§6§l✦ §r§fBroken Block Finder");
     }
 
     public static List<SlotData> brokenBlocks() {
@@ -1019,10 +981,7 @@ public class GuiManager {
 
     public static void openMagicItemsGui(ServerPlayerEntity player) {
         pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.magicItems());
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, px) -> new CbScreenHandler(s, pi, buildMagicItemsGui()),
-            Text.literal("§6§l✦ §r§fMagic Items")));
+        openScreenFromGuiState(player, GuiState.magicItems(), buildMagicItemsGui(), "§6§l✦ §r§fMagic Items");
     }
 
     private static SimpleInventory buildMagicItemsGui() {
@@ -1073,10 +1032,7 @@ public class GuiManager {
 
     public static void openConfigWarningGui(ServerPlayerEntity player, boolean pushBack) {
         if (pushBack) pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.configWarning());
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, px) -> new CbScreenHandler(s, pi, buildConfigWarningGui()),
-            Text.literal("§6§l⚠ §r§fServer Config Warning")));
+        openScreenFromGuiState(player, GuiState.configWarning(), buildConfigWarningGui(), "§6§l⚠ §r§fServer Config Warning");
     }
 
     private static SimpleInventory buildConfigWarningGui() {
@@ -1106,10 +1062,7 @@ public class GuiManager {
 
     public static void openConfigGui(ServerPlayerEntity player, boolean pushBack) {
         if (pushBack) pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.configGui());
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, px) -> new CbScreenHandler(s, pi, buildConfigGui()),
-            Text.literal("§6§l⚙ §r§fServer Config")));
+        openScreenFromGuiState(player, GuiState.configGui(), buildConfigGui(), "§6§l⚙ §r§fServer Config");
     }
 
     private static SimpleInventory buildConfigGui() {
@@ -1221,10 +1174,7 @@ public class GuiManager {
 
     public static void openUndoPicker(ServerPlayerEntity player, int page) {
         pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.undoPicker(page));
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, px) -> new CbScreenHandler(s, pi, buildUndoPicker(player)),
-            Text.literal("§6§l↩ §r§fUndo / Redo History")));
+        openScreenFromGuiState(player, GuiState.undoPicker(page), buildUndoPicker(player), "§6§l↩ §r§fUndo / Redo History");
     }
 
     private static SimpleInventory buildUndoPicker(ServerPlayerEntity player) {
@@ -1690,7 +1640,6 @@ public class GuiManager {
 
     public static void openHelpCategory(ServerPlayerEntity player, int category) {
         pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.helpCategory(category));
         String title = switch (category) {
             case 1 -> "§e§l✦ §r§fCreating Blocks";
             case 2 -> "§b§l✦ §r§fTextures & Design";
@@ -1699,9 +1648,7 @@ public class GuiManager {
             case 5 -> "§a§l✦ §r§fServer & Data";
             default -> "§f§lHelp";
         };
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildHelpCategory(category)),
-            Text.literal(title)));
+        openScreenFromGuiState(player, GuiState.helpCategory(category), buildHelpCategory(category), title);
     }
 
     private static void handleHelpCategoryClick(ServerPlayerEntity player, GuiState state, int slot) {
@@ -1879,10 +1826,8 @@ public class GuiManager {
     private static void reopenShapeEditor(ServerPlayerEntity player, String id, int rp, int boxPage) {
         SlotData d = SlotManager.getById(id);
         if (d==null) { openMain(player,rp); return; }
-        STATES.put(player.getUuid(), GuiState.shapeEditor(id,rp).withShapeBoxPage(boxPage));
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s,pi,p)->new CbScreenHandler(s,pi,buildShapeEditor(d,boxPage)),
-            Text.literal("§5§l⬡ §r§fShape Editor §8— §5"+d.displayName+" §7(ESC = back)")));
+        openScreenFromGuiState(player, GuiState.shapeEditor(id,rp).withShapeBoxPage(boxPage),
+            buildShapeEditor(d,boxPage), "§5§l⬡ §r§fShape Editor §8— §5"+d.displayName+" §7(ESC = back)");
     }
 
     // ── Anim GUI ─────────────────────────────────────────────────────────────
@@ -1915,10 +1860,9 @@ public class GuiManager {
         final float finalFps = fps; final boolean finalInterp = interp; final int finalFrames = frameCount;
         ANIM_PARAMS.put(player.getUuid(), new AnimParams(fps, interp, frameCount));
         ANIM_ORIGINAL_PARAMS.put(player.getUuid(), new AnimParams(fps, interp, frameCount));
-        STATES.put(player.getUuid(), GuiState.animGui(id, returnPage));
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildAnimGui(id, finalFps, finalInterp, finalFrames)),
-            Text.literal("§b§l▶ §r§fAnimation Settings §8— §b" + d.displayName)));
+        openScreenFromGuiState(player, GuiState.animGui(id, returnPage),
+            buildAnimGui(id, finalFps, finalInterp, finalFrames),
+            "§b§l▶ §r§fAnimation Settings §8— §b" + d.displayName);
     }
 
     private static void handleAnimGuiClick(ServerPlayerEntity player, GuiState state, int slot) {
@@ -2001,7 +1945,6 @@ public class GuiManager {
     }
 
     private static void openAnimConfirmAbandon(ServerPlayerEntity player, String id, int returnPage) {
-        STATES.put(player.getUuid(), GuiState.animConfirmAbandon(id, returnPage));
         AnimParams current = ANIM_PARAMS.getOrDefault(player.getUuid(), new AnimParams(10f, false, 1));
         AnimParams original = ANIM_ORIGINAL_PARAMS.getOrDefault(player.getUuid(), current);
 
@@ -2016,9 +1959,7 @@ public class GuiManager {
         inv.setStack(15, uiGlint(Items.RED_WOOL, "§c§lNo — Keep Editing", "§7Return to animation settings"));
 
         playClick(player);
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, inv),
-            Text.literal("§c§l⚠ §r§fAbandon Changes?")));
+        openScreenFromGuiState(player, GuiState.animConfirmAbandon(id, returnPage), inv, "§c§l⚠ §r§fAbandon Changes?");
     }
 
     private static void handleAnimConfirmAbandonClick(ServerPlayerEntity player, GuiState state, int slot) {
@@ -2048,10 +1989,9 @@ public class GuiManager {
         AnimParams p = ANIM_PARAMS.getOrDefault(player.getUuid(), new AnimParams(10f, false, 1));
         SlotData d = SlotManager.getById(id);
         String title = d != null ? d.displayName : id;
-        STATES.put(player.getUuid(), GuiState.animGui(id, returnPage));
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, pp) -> new CbScreenHandler(s, pi, buildAnimGui(id, p.fps(), p.interpolate(), p.frameCount())),
-            Text.literal("§b§l▶ §r§fAnimation Settings §8— §b" + title)));
+        openScreenFromGuiState(player, GuiState.animGui(id, returnPage),
+            buildAnimGui(id, p.fps(), p.interpolate(), p.frameCount()),
+            "§b§l▶ §r§fAnimation Settings §8— §b" + title);
     }
 
     // ── Bulk Delete GUI ────────────────────────────────────────────────────────
@@ -2061,12 +2001,8 @@ public class GuiManager {
         int max = total == 0 ? 0 : Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
         page = Math.max(0, Math.min(page, max));
         pushBackStack(player.getUuid());
-        STATES.put(player.getUuid(), GuiState.bulkDelete(page));
         Set<String> selected = BULK_DELETE_SELECTIONS.computeIfAbsent(player.getUuid(), k -> ConcurrentHashMap.newKeySet());
-        final int fp = page;
-        openScreen(player, new SimpleNamedScreenHandlerFactory(
-            (s, pi, p) -> new CbScreenHandler(s, pi, buildBulkDeleteGui(fp, selected)),
-            Text.literal("§c§l⚠ §r§fBulk Delete §8— Select blocks to remove")));
+        openScreenFromGuiState(player, GuiState.bulkDelete(page), buildBulkDeleteGui(page, selected), "§c§l⚠ §r§fBulk Delete §8— Select blocks to remove");
     }
 
     private static SimpleInventory buildBulkDeleteGui(int page, Set<String> selected) {

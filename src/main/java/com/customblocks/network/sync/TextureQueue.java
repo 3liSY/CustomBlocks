@@ -1,6 +1,8 @@
 package com.customblocks.network.sync;
 
+import com.customblocks.network.ChunkedTexturePayload;
 import com.customblocks.network.SlotUpdatePayload;
+import net.minecraft.network.packet.CustomPayload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,8 +20,8 @@ public final class TextureQueue {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("CustomBlocks");
 
-    /** Ordered queue of payloads waiting to be sent. */
-    private final ConcurrentLinkedDeque<SlotUpdatePayload> queue = new ConcurrentLinkedDeque<>();
+    /** Ordered queue of payloads waiting to be sent (SlotUpdatePayload or ChunkedTexturePayload). */
+    private final ConcurrentLinkedDeque<CustomPayload> queue = new ConcurrentLinkedDeque<>();
 
     /**
      * Tracks the latest payload per slot-action key to enable deduplication.
@@ -46,24 +48,33 @@ public final class TextureQueue {
     }
 
     /**
+     * Enqueue a chunk payload. Chunks are NEVER deduplicated — each chunk
+     * is a unique piece of a larger transfer.
+     */
+    public void enqueueChunk(ChunkedTexturePayload chunk) {
+        queue.addLast(chunk);
+    }
+
+    /**
      * Drain up to {@code maxCount} payloads from the queue.
      * Returns them in FIFO order.
      */
-    public SlotUpdatePayload[] drain(int maxCount) {
+    public CustomPayload[] drain(int maxCount) {
         int count = Math.min(maxCount, queue.size());
-        if (count <= 0) return new SlotUpdatePayload[0];
+        if (count <= 0) return new CustomPayload[0];
 
-        SlotUpdatePayload[] result = new SlotUpdatePayload[count];
+        CustomPayload[] result = new CustomPayload[count];
         for (int i = 0; i < count; i++) {
-            SlotUpdatePayload p = queue.pollFirst();
+            CustomPayload p = queue.pollFirst();
             if (p == null) {
-                // Queue shrank concurrently — return what we have
-                SlotUpdatePayload[] trimmed = new SlotUpdatePayload[i];
+                CustomPayload[] trimmed = new CustomPayload[i];
                 System.arraycopy(result, 0, trimmed, 0, i);
                 return trimmed;
             }
             result[i] = p;
-            latest.remove(dedupeKey(p));
+            if (p instanceof SlotUpdatePayload sup) {
+                latest.remove(dedupeKey(sup));
+            }
         }
         return result;
     }
@@ -72,7 +83,7 @@ public final class TextureQueue {
      * Push a payload back to the FRONT of the queue. Used when the
      * bytes-per-tick budget is exceeded — the payload will be sent next tick.
      */
-    public void requeueFront(SlotUpdatePayload payload) {
+    public void requeueFront(CustomPayload payload) {
         queue.addFirst(payload);
     }
 
@@ -90,6 +101,19 @@ public final class TextureQueue {
     public void clear() {
         queue.clear();
         latest.clear();
+    }
+
+    /**
+     * Extract the byte size of a payload for budget tracking.
+     * Works for both {@link SlotUpdatePayload} and {@link ChunkedTexturePayload}.
+     */
+    public static int payloadByteSize(CustomPayload payload) {
+        if (payload instanceof SlotUpdatePayload sup) {
+            return sup.texture() != null ? sup.texture().length : 0;
+        } else if (payload instanceof ChunkedTexturePayload chunk) {
+            return chunk.chunkData() != null ? chunk.chunkData().length : 0;
+        }
+        return 0;
     }
 
     /**
