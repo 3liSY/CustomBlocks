@@ -439,9 +439,12 @@ public class CustomBlocksMod implements ModInitializer {
         // ── Player join → full sync via NetworkManager ───────────────────────
 
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
-
-            NetworkManager.onPlayerJoin(handler.player);
-
+            try {
+                NetworkManager.onPlayerJoin(handler.player);
+            } catch (Exception e) {
+                LOGGER.error("[CustomBlocks] Error during player join for {}",
+                        handler.player.getName().getString(), e);
+            }
         });
 
 
