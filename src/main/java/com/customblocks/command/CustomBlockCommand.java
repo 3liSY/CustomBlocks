@@ -53,6 +53,7 @@ public class CustomBlockCommand {
         CommandRegistrationCallback.EVENT.register((dispatcher, reg, env) -> {
             LiteralArgumentBuilder<ServerCommandSource> tree = CommandManager.literal("customblock")
                 .requires(src -> PermissionHelper.canUse(src))
+                .executes(ctx -> cmdGui(ctx.getSource()))
 
                 // ── create / createurl ──────────────────────────────────────
                 .then(CommandManager.literal("create")
@@ -467,6 +468,7 @@ public class CustomBlockCommand {
             dispatcher.register(tree);
             dispatcher.register(CommandManager.literal("cb")
                 .requires(src -> PermissionHelper.canUse(src))
+                .executes(ctx -> cmdGui(ctx.getSource()))
                 .redirect(dispatcher.getRoot().getChild("customblock")));
         });
     }
