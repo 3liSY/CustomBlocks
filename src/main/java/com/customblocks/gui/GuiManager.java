@@ -1524,12 +1524,8 @@ public class GuiManager {
                     }
                     String jsonStr = obj.toString();
 
-                    // SHA-256 hash → 12-char hex code
-                    java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
-                    byte[] hashBytes = md.digest(jsonStr.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                    StringBuilder hexSb = new StringBuilder();
-                    for (int i = 0; i < 6; i++) hexSb.append(String.format("%02x", hashBytes[i]));
-                    String hash = hexSb.toString();
+                    // Generate share code using mixed alphabet
+                    String hash = com.customblocks.command.CustomBlockCommand.generateShareCode(jsonStr);
 
                     // Write to server file
                     java.nio.file.Path exportDir = java.nio.file.Path.of("config/customblocks/exports");

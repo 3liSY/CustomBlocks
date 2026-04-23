@@ -36,6 +36,21 @@ import java.util.concurrent.Executors;
 public class CustomBlockCommand {
     private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(2);
 
+    // Mixed alphabet for share codes — excludes filesystem-unsafe chars (/ \ : ? * " < > |)
+    private static final String SHARE_ALPHABET =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%&";
+
+    /** Generates a 12-char code from SHA-256 hash of the input. */
+    public static String generateShareCode(String input) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] hashBytes = md.digest(input.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(12);
+            for (int i = 0; i < 12; i++) sb.append(SHARE_ALPHABET.charAt((hashBytes[i] & 0xFF) % SHARE_ALPHABET.length()));
+            return sb.toString();
+        } catch (Exception e) { throw new RuntimeException(e); }
+    }
+
     private static final SuggestionProvider<ServerCommandSource> BLOCK_SUGGESTIONS =
             (ctx, builder) -> { for (String id : SlotManager.allSlots().stream().map(d -> d.customId).collect(java.util.stream.Collectors.toList())) builder.suggest(id); return builder.buildFuture(); };
 
@@ -622,12 +637,8 @@ public class CustomBlockCommand {
             }
             String jsonStr = obj.toString();
 
-            // Save to server-side file and generate short hash code
-            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
-            byte[] hashBytes = md.digest(jsonStr.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            StringBuilder hexSb = new StringBuilder();
-            for (int i = 0; i < 6; i++) hexSb.append(String.format("%02x", hashBytes[i]));
-            String hash = hexSb.toString();
+            // Generate share code using mixed alphabet
+            String hash = generateShareCode(jsonStr);
 
             java.nio.file.Path exportDir = java.nio.file.Path.of("config/customblocks/exports");
             java.nio.file.Files.createDirectories(exportDir);
