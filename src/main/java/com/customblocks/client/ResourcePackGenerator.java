@@ -419,9 +419,9 @@ public class ResourcePackGenerator {
             dest.getParentFile().mkdirs();
             img.writeTo(dest.toPath());
         } catch (Exception e) {
-            try { Files.write(dest.toPath(), imageBytes); }
+            try { Files.write(dest.toPath(), PLACEHOLDER_PNG); }
             catch (Exception ignored) {}
-            CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not decode image for {}, wrote raw bytes", dest.getName());
+            CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not decode image for {}, wrote placeholder PNG", dest.getName());
         }
     }
 
