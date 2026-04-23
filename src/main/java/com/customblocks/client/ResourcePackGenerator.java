@@ -379,11 +379,10 @@ public class ResourcePackGenerator {
                 }
             }
 
-            // ── Blockstate + model — only if missing (new slot from Rectangle tool, etc.) ──
+            // ── Blockstate + item model — only if missing (static files) ──────
             File bsFile = new File(assets, "blockstates/" + slotKey + ".json");
             if (!bsFile.exists()) {
                 new File(assets, "blockstates").mkdirs();
-                new File(assets, "models/block").mkdirs();
                 new File(assets, "models/item").mkdirs();
                 String modelRef = MOD_ID + ":block/" + slotKey;
 
@@ -393,19 +392,68 @@ public class ResourcePackGenerator {
                 JsonObject bs       = new JsonObject(); bs.add("variants", variants);
                 writeJson(bs, bsFile);
 
-                // Block model — simple cube_all for single-slot path
-                JsonObject bm = new JsonObject();
-                bm.addProperty("parent", "minecraft:block/cube_all");
-                JsonObject tex = new JsonObject();
-                tex.addProperty("all", MOD_ID + ":block/" + slotKey);
-                bm.add("textures", tex);
-                writeJson(bm, new File(assets, "models/block/" + slotKey + ".json"));
-
                 // Item model
                 JsonObject im = new JsonObject();
                 im.addProperty("parent", modelRef);
                 writeJson(im, new File(assets, "models/item/" + slotKey + ".json"));
             }
+
+            // ── Block model — ALWAYS regenerate (depends on face textures) ───
+            new File(assets, "models/block").mkdirs();
+            String modelRef = MOD_ID + ":block/" + slotKey;
+            JsonObject bm = new JsonObject();
+            if (data != null && data.isShaped()) {
+                // Shaped block — explicit elements[], no parent
+                JsonObject tex = new JsonObject();
+                tex.addProperty("particle", MOD_ID + ":block/" + slotKey);
+                for (String face : SlotData.FACE_KEYS) {
+                    String mcFace = FACE_TO_MC.get(face);
+                    String texRef = data.faceTextures.containsKey(face)
+                            ? MOD_ID + ":block/" + slotKey + "_" + face
+                            : MOD_ID + ":block/" + slotKey;
+                    tex.addProperty(mcFace, texRef);
+                }
+                bm.add("textures", tex);
+                com.google.gson.JsonArray elements = new com.google.gson.JsonArray();
+                for (SlotData.ShapeBox box : data.shapeBoxes) {
+                    JsonObject el = new JsonObject();
+                    com.google.gson.JsonArray from = new com.google.gson.JsonArray();
+                    from.add(box.x1()); from.add(box.y1()); from.add(box.z1());
+                    com.google.gson.JsonArray to = new com.google.gson.JsonArray();
+                    to.add(box.x2()); to.add(box.y2()); to.add(box.z2());
+                    el.add("from", from);
+                    el.add("to", to);
+                    JsonObject faces = new JsonObject();
+                    float x1 = box.x1(), y1 = box.y1(), z1 = box.z1();
+                    float x2 = box.x2(), y2 = box.y2(), z2 = box.z2();
+                    addFaceWithUV(faces, "down",   "bottom", x1, z1, x2, z2);
+                    addFaceWithUV(faces, "up",     "top",    x1, z1, x2, z2);
+                    addFaceWithUV(faces, "north",  "north",  16 - x2, 16 - y2, 16 - x1, 16 - y1);
+                    addFaceWithUV(faces, "south",  "south",  x1, 16 - y2, x2, 16 - y1);
+                    addFaceWithUV(faces, "west",   "west",   z1, 16 - y2, z2, 16 - y1);
+                    addFaceWithUV(faces, "east",   "east",   16 - z2, 16 - y2, 16 - z1, 16 - y1);
+                    el.add("faces", faces);
+                    elements.add(el);
+                }
+                bm.add("elements", elements);
+            } else if (data != null && data.hasFaces()) {
+                // Per-face textures — use cube parent with individual face refs
+                bm.addProperty("parent", "minecraft:block/cube");
+                JsonObject tex = new JsonObject();
+                tex.addProperty("particle", MOD_ID + ":block/" + slotKey);
+                for (String face : SlotData.FACE_KEYS) {
+                    String mcFace = FACE_TO_MC.get(face);
+                    tex.addProperty(mcFace, MOD_ID + ":block/" + slotKey + "_" + face);
+                }
+                bm.add("textures", tex);
+            } else {
+                // Simple cube_all — single texture on all faces
+                bm.addProperty("parent", "minecraft:block/cube_all");
+                JsonObject tex = new JsonObject();
+                tex.addProperty("all", MOD_ID + ":block/" + slotKey);
+                bm.add("textures", tex);
+            }
+            writeJson(bm, new File(assets, "models/block/" + slotKey + ".json"));
 
             CustomBlocksMod.LOGGER.info("[CustomBlocks] Single-slot generate for slot_{} complete.", slotIndex);
         } catch (Exception e) {
