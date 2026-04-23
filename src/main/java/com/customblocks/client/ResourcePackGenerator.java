@@ -54,6 +54,8 @@ public class ResourcePackGenerator {
             JsonObject meta = new JsonObject();
             meta.add("pack", pack);
             writeJson(meta, new File(packRoot, "pack.mcmeta"));
+            // ── Cleanup: delete stale files for slots with no data ──────────
+            cleanupStaleSlotFiles(assets);
 
             for (int i = 0; i < com.customblocks.CustomBlocksConfig.maxSlots; i++) {
                 String slotKey  = "slot_" + i;
@@ -458,6 +460,43 @@ public class ResourcePackGenerator {
             CustomBlocksMod.LOGGER.info("[CustomBlocks] Single-slot generate for slot_{} complete.", slotIndex);
         } catch (Exception e) {
             CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to generate single slot_{}", slotIndex, e);
+        }
+    }
+
+    /**
+     * Deletes stale resource pack files for slot indices that have no SlotData.
+     * This prevents ~1500 unnecessary placeholder files from bloating the atlas.
+     */
+    private static void cleanupStaleSlotFiles(File assets) {
+        int deleted = 0;
+        String[][] dirs = {
+            {"textures/block", "slot_"},
+            {"blockstates", "slot_"},
+            {"models/block", "slot_"},
+            {"models/item", "slot_"}
+        };
+        for (String[] entry : dirs) {
+            File dir = new File(assets, entry[0]);
+            if (!dir.exists()) continue;
+            File[] files = dir.listFiles();
+            if (files == null) continue;
+            for (File f : files) {
+                String name = f.getName();
+                if (!name.startsWith(entry[1])) continue;
+                try {
+                    // Extract slot index from "slot_123.png", "slot_123_north.png", "slot_123.json", etc.
+                    String afterPrefix = name.substring(entry[1].length());
+                    String numPart = afterPrefix.split("[_.]")[0];
+                    int idx = Integer.parseInt(numPart);
+                    if (SlotManager.getBySlot("slot_" + idx) == null) {
+                        f.delete();
+                        deleted++;
+                    }
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+        if (deleted > 0) {
+            CustomBlocksMod.LOGGER.info("[CustomBlocks] Cleanup: deleted {} stale slot files.", deleted);
         }
     }
 
