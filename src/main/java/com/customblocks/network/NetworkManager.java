@@ -117,7 +117,8 @@ public final class NetworkManager {
                     data.lightLevel, data.hardness, data.soundType, data.animMeta));
         }
         byte[] tabIcon = SlotManager.getTabIconTexture();
-        FullSyncPayload syncPayload = new FullSyncPayload(entries, tabIcon);
+        FullSyncPayload syncPayload = new FullSyncPayload(entries, tabIcon,
+                com.customblocks.CustomBlocksConfig.maxSlots);
         ServerPlayNetworking.send(player, syncPayload);
 
         // Drip-feed ALL textures so the client has them for resource-pack generation.
@@ -260,7 +261,8 @@ public final class NetworkManager {
                             null, data.lightLevel, data.hardness, data.soundType, data.animMeta));
                 }
                 byte[] tabIcon = SlotManager.getTabIconTexture();
-                ServerPlayNetworking.send(player, new FullSyncPayload(entries, tabIcon));
+                ServerPlayNetworking.send(player, new FullSyncPayload(entries, tabIcon,
+                        com.customblocks.CustomBlocksConfig.maxSlots));
                 // Send immediate sync_done — no drip-feed needed
                 TextureQueue queue = getOrCreateQueue(player);
                 queue.enqueue(new SlotUpdatePayload("sync_done", -1, "", null,

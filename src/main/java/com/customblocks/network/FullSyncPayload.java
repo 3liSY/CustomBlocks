@@ -14,7 +14,12 @@ import java.util.List;
  * Textures are NOT included — they are drip-fed via {@link SlotUpdatePayload} after the sync.
  * This keeps the join payload small (< 100KB even with 2048 slots).
  */
-public record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture) implements CustomPayload {
+public record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture, int maxSlots) implements CustomPayload {
+
+    /** Legacy constructor without maxSlots (backward compat). */
+    public FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture) {
+        this(entries, tabIconTexture, 0);
+    }
 
     public static final Id<FullSyncPayload> ID =
             new Id<>(Identifier.of("customblocks", "full_sync"));
@@ -50,6 +55,7 @@ public record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture) im
                     buf.writeString(e.animMeta()  != null ? e.animMeta()  : "");
                 }
                 buf.writeByteArray(value.tabIconTexture() != null ? value.tabIconTexture() : new byte[0]);
+                buf.writeVarInt(value.maxSlots());
             },
             buf -> {
                 int size = buf.readVarInt();
@@ -68,8 +74,9 @@ public record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture) im
                             animMeta.isEmpty() ? null : animMeta));
                 }
                 byte[] tabIcon = buf.readByteArray(10_485_760);
+                int maxSlots = buf.readableBytes() > 0 ? buf.readVarInt() : 0;
                 if (buf.readableBytes() > 0) buf.skipBytes(buf.readableBytes());
-                return new FullSyncPayload(entries, tabIcon.length > 0 ? tabIcon : null);
+                return new FullSyncPayload(entries, tabIcon.length > 0 ? tabIcon : null, maxSlots);
             }
     );
 

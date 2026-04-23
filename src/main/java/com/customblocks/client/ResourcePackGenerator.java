@@ -57,7 +57,8 @@ public class ResourcePackGenerator {
             // ── Cleanup: delete stale files for slots with no data ──────────
             cleanupStaleSlotFiles(assets);
 
-            for (int i = 0; i < com.customblocks.CustomBlocksConfig.maxSlots; i++) {
+            int effectiveMax = CustomBlocksClient.effectiveMaxSlots();
+            for (int i = 0; i < effectiveMax; i++) {
                 String slotKey  = "slot_" + i;
                 String modelRef = MOD_ID + ":block/" + slotKey;
                 SlotData data = SlotManager.getBySlot(slotKey);

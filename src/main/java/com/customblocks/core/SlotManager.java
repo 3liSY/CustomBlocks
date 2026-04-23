@@ -605,6 +605,38 @@ public final class SlotManager {
 
                     }
 
+                    // ── Duplicate slot index repair ─────────────────────
+                    {
+                        Map<Integer, String> indexToId = new HashMap<>();
+                        List<String> toReassign = new ArrayList<>();
+                        for (SlotData d : new ArrayList<>(byId.values())) {
+                            String existing = indexToId.put(d.index, d.customId);
+                            if (existing != null) {
+                                LOGGER.warn("[CustomBlocks] Duplicate slot index {} claimed by '{}' and '{}'. Will reassign '{}'.",
+                                        d.index, existing, d.customId, d.customId);
+                                toReassign.add(d.customId);
+                            }
+                        }
+                        for (String id : toReassign) {
+                            SlotData d = byId.get(id);
+                            if (d == null) continue;
+                            int oldIdx = d.index;
+                            byId.remove(id);
+                            bySlot.remove("slot_" + oldIdx);
+                            int newIdx = findFreeSlot();
+                            if (newIdx >= 0) {
+                                put(d.withIndex(newIdx));
+                                LOGGER.info("[CustomBlocks] Reassigned '{}' from slot {} → slot {}", id, oldIdx, newIdx);
+                            } else {
+                                LOGGER.error("[CustomBlocks] No free slot for '{}' — block dropped!", id);
+                            }
+                        }
+                        if (!toReassign.isEmpty()) {
+                            LOGGER.info("[CustomBlocks] {} duplicate(s) repaired. Saving corrected data.", toReassign.size());
+                            saveAll();  // trigger debounced save to persist the fix
+                        }
+                    }
+
                     // Phase 1: load textures from individual .dat files
                     Path texDir = Path.of(TEXTURES_DIR);
                     if (Files.exists(texDir)) {

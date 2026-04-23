@@ -41,8 +41,9 @@ public class CustomBlocksClient implements ClientModInitializer {
 
     private static final String PACK_ENTRY = "file/CustomBlocks";
     private static final AtomicBoolean reloadInFlight  = new AtomicBoolean(false);
-    private static final AtomicBoolean generateRunning = new AtomicBoolean(false);
-    private static final AtomicLong    lastPacketTime  = new AtomicLong(0);
+    private static final AtomicBoolean generateRunning   = new AtomicBoolean(false);
+    private static final AtomicBoolean pendingFullReload = new AtomicBoolean(false);
+    private static final AtomicLong    lastPacketTime    = new AtomicLong(0);
 
     // True while processing the initial join burst — suppresses individual packet reloads.
     private static volatile boolean joinBurst        = false;
@@ -54,6 +55,14 @@ public class CustomBlocksClient implements ClientModInitializer {
     private static volatile boolean syncDoneReceived = false;
 
     public static volatile boolean pendingCreativeRefresh = false;
+
+    /** Server's maxSlots, synced via FullSyncPayload. 0 = not yet received. */
+    private static volatile int serverMaxSlots = 0;
+
+    /** Returns the effective maxSlots for resource pack generation. */
+    public static int effectiveMaxSlots() {
+        return serverMaxSlots > 0 ? serverMaxSlots : com.customblocks.CustomBlocksConfig.maxSlots;
+    }
 
     // ── Chunk reassembly state ───────────────────────────────────────────────
     /** Max concurrent chunk transfers (safety cap). */
@@ -210,6 +219,8 @@ public class CustomBlocksClient implements ClientModInitializer {
                 }
                 if (payload.tabIconTexture() != null)
                     SlotManager.setTabIconTexture(payload.tabIconTexture());
+                if (payload.maxSlots() > 0)
+                    serverMaxSlots = payload.maxSlots();
 
                 // Start the debounce thread. The sync_done sentinel (sent by the server
                 // after all textures are enqueued) will wake this thread early via the
@@ -482,6 +493,10 @@ public class CustomBlocksClient implements ClientModInitializer {
                 // Trigger reload
                 client.execute(() -> {
                     generateRunning.set(false);
+                    if (pendingFullReload.compareAndSet(true, false)) {
+                        scheduleGenerateAndReload(client, 500L);
+                        return;
+                    }
                     if (reloadInFlight.compareAndSet(false, true)) {
                         client.reloadResources().thenRun(() ->
                             client.execute(() -> {
@@ -555,6 +570,10 @@ public class CustomBlocksClient implements ClientModInitializer {
                         joinBurst        = false;
                         syncDoneReceived = false;
                         generateRunning.set(false);
+                        if (pendingFullReload.compareAndSet(true, false)) {
+                            scheduleGenerateAndReload(client, 500L);
+                            return;
+                        }
                         pendingCreativeRefresh = true;
                     });
                 } else {
@@ -572,6 +591,10 @@ public class CustomBlocksClient implements ClientModInitializer {
                         joinBurst        = false;
                         syncDoneReceived = false;
                         generateRunning.set(false);
+                        if (pendingFullReload.compareAndSet(true, false)) {
+                            scheduleGenerateAndReload(client, 500L);
+                            return;
+                        }
 
                         if (reloadInFlight.compareAndSet(false, true)) {
                             client.reloadResources().thenRun(() ->
@@ -595,9 +618,11 @@ public class CustomBlocksClient implements ClientModInitializer {
             }, "CustomBlocks-GenerateReload");
             t.setDaemon(true);
             t.start();
+        } else {
+            // generateRunning is already true — mark a pending full reload so it retries
+            // after the current generate/reload cycle completes.
+            pendingFullReload.set(true);
         }
-        // If generateRunning is already true, the running thread will see the updated
-        // lastPacketTime on its next 200ms poll and extend or break its wait as needed.
     }
 
     // ── Lightweight anim-only reload ─────────────────────────────────────────
