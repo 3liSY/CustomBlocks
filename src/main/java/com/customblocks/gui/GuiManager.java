@@ -1500,37 +1500,53 @@ public class GuiManager {
                 openEditor(player, newId, rp);
             }
             case 43 -> {
-                // Share button — GZIP-compressed export with texture bytes
-                com.google.gson.JsonObject obj = new com.google.gson.JsonObject();
-                obj.addProperty("customId", d.customId);
-                obj.addProperty("displayName", d.displayName);
-                obj.addProperty("light", d.lightLevel);
-                obj.addProperty("hard", d.hardness);
-                obj.addProperty("sound", d.soundType);
-                if (d.animMeta != null) obj.addProperty("anim", d.animMeta);
-                if (d.noCollision) obj.addProperty("ncol", true);
-                if (d.isShaped() && d.shapeBoxes != null) {
-                    com.google.gson.JsonArray boxes = new com.google.gson.JsonArray();
-                    for (SlotData.ShapeBox box : d.shapeBoxes) boxes.add(box.toSerialString());
-                    obj.add("shape", boxes);
-                }
-                if (d.texture != null) obj.addProperty("tex", java.util.Base64.getEncoder().encodeToString(d.texture));
-                if (d.hasFaces()) {
-                    com.google.gson.JsonObject faces = new com.google.gson.JsonObject();
-                    for (var fe : d.faceTextures.entrySet())
-                        faces.addProperty(fe.getKey(), java.util.Base64.getEncoder().encodeToString(fe.getValue()));
-                    obj.add("faces", faces);
-                }
+                // Share button — hash-based file export (safe for any texture size)
                 try {
-                    byte[] json = obj.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
-                    java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-                    try (java.util.zip.GZIPOutputStream gz = new java.util.zip.GZIPOutputStream(baos)) { gz.write(json); }
-                    String code = "CB2!" + java.util.Base64.getEncoder().encodeToString(baos.toByteArray());
-                    player.sendMessage(Text.literal("§a[CB] Share code for '§f" + d.displayName + "§a':"), false);
-                    player.sendMessage(Text.literal("§7Import with: §b/cb importblock <code>"), false);
-                    player.sendMessage(Text.literal("§b§n" + code).styled(s -> s
-                        .withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.COPY_TO_CLIPBOARD, code))
-                        .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, Text.literal("§eClick to copy to clipboard")))), false);
+                    com.google.gson.JsonObject obj = new com.google.gson.JsonObject();
+                    obj.addProperty("customId", d.customId);
+                    obj.addProperty("displayName", d.displayName);
+                    obj.addProperty("light", d.lightLevel);
+                    obj.addProperty("hard", d.hardness);
+                    obj.addProperty("sound", d.soundType);
+                    if (d.animMeta != null) obj.addProperty("anim", d.animMeta);
+                    if (d.noCollision) obj.addProperty("ncol", true);
+                    if (d.isShaped() && d.shapeBoxes != null) {
+                        com.google.gson.JsonArray boxes = new com.google.gson.JsonArray();
+                        for (SlotData.ShapeBox box : d.shapeBoxes) boxes.add(box.toSerialString());
+                        obj.add("shape", boxes);
+                    }
+                    if (d.texture != null) obj.addProperty("tex", java.util.Base64.getEncoder().encodeToString(d.texture));
+                    if (d.hasFaces()) {
+                        com.google.gson.JsonObject faces = new com.google.gson.JsonObject();
+                        for (var fe : d.faceTextures.entrySet())
+                            faces.addProperty(fe.getKey(), java.util.Base64.getEncoder().encodeToString(fe.getValue()));
+                        obj.add("faces", faces);
+                    }
+                    String jsonStr = obj.toString();
+
+                    // SHA-256 hash → 12-char hex code
+                    java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+                    byte[] hashBytes = md.digest(jsonStr.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    StringBuilder hexSb = new StringBuilder();
+                    for (int i = 0; i < 6; i++) hexSb.append(String.format("%02x", hashBytes[i]));
+                    String hash = hexSb.toString();
+
+                    // Write to server file
+                    java.nio.file.Path exportDir = java.nio.file.Path.of("config/customblocks/exports");
+                    java.nio.file.Files.createDirectories(exportDir);
+                    java.nio.file.Files.writeString(exportDir.resolve(hash + ".json"),
+                        jsonStr, java.nio.charset.StandardCharsets.UTF_8);
+
+                    // Send short, clickable code (15 chars, not 918KB)
+                    String code = "CB~" + hash;
+                    net.minecraft.text.MutableText clickable = Text.literal("§b§n" + code)
+                        .styled(s -> s
+                            .withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.COPY_TO_CLIPBOARD, code))
+                            .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, Text.literal("§eClick to copy"))));
+                    net.minecraft.text.MutableText line = Text.literal("§0§l[§b§lCB§0§l] §a[Share] §f'§b" + d.customId + "§f' ready! ")
+                        .append(clickable);
+                    player.sendMessage(line, false);
+                    player.sendMessage(Text.literal("§7Import with: §b/cb importblock " + code), false);
                     playSuccess(player);
                 } catch (Exception ex) { send(player, "§c[CB] Share failed: " + ex.getMessage()); }
             }
