@@ -607,28 +607,34 @@ public final class SlotManager {
 
                     // ── Duplicate slot index repair ─────────────────────
                     {
-                        Map<Integer, String> indexToId = new HashMap<>();
-                        List<String> toReassign = new ArrayList<>();
+                        // indexToKeeper: slot index → first customId that claimed it
+                        Map<Integer, String> indexToKeeper = new HashMap<>();
+                        // Each entry: [0]=duplicate ID to reassign, [1]=keeper ID that stays
+                        List<String[]> toReassign = new ArrayList<>();
                         for (SlotData d : new ArrayList<>(byId.values())) {
-                            String existing = indexToId.put(d.index, d.customId);
+                            String existing = indexToKeeper.putIfAbsent(d.index, d.customId);
                             if (existing != null) {
                                 LOGGER.warn("[CustomBlocks] Duplicate slot index {} claimed by '{}' and '{}'. Will reassign '{}'.",
                                         d.index, existing, d.customId, d.customId);
-                                toReassign.add(d.customId);
+                                toReassign.add(new String[]{d.customId, existing});
                             }
                         }
-                        for (String id : toReassign) {
-                            SlotData d = byId.get(id);
+                        for (String[] pair : toReassign) {
+                            SlotData d = byId.get(pair[0]);
                             if (d == null) continue;
                             int oldIdx = d.index;
-                            byId.remove(id);
+                            // Remove the duplicate from both maps
+                            byId.remove(pair[0]);
                             bySlot.remove("slot_" + oldIdx);
+                            // Restore the keeper's bySlot entry so findFreeSlot() won't reuse it
+                            SlotData keeper = byId.get(pair[1]);
+                            if (keeper != null) bySlot.put("slot_" + oldIdx, keeper);
                             int newIdx = findFreeSlot();
                             if (newIdx >= 0) {
                                 put(d.withIndex(newIdx));
-                                LOGGER.info("[CustomBlocks] Reassigned '{}' from slot {} → slot {}", id, oldIdx, newIdx);
+                                LOGGER.info("[CustomBlocks] Reassigned '{}' from slot {} → slot {}", pair[0], oldIdx, newIdx);
                             } else {
-                                LOGGER.error("[CustomBlocks] No free slot for '{}' — block dropped!", id);
+                                LOGGER.error("[CustomBlocks] No free slot for '{}' — block dropped!", pair[0]);
                             }
                         }
                         if (!toReassign.isEmpty()) {
