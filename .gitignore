@@ -11,3 +11,5 @@ run/
 Thumbs.db
 *.log
 local.properties
+.wrangler/
+cloud-vault-worker/.wrangler/
