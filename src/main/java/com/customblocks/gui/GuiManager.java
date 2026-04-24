@@ -1543,7 +1543,29 @@ public class GuiManager {
                         .append(clickable);
                     player.sendMessage(line, false);
                     player.sendMessage(Text.literal("§7Import with: §b/cb importblock " + code), false);
-                    playSuccess(player);
+
+                    // === SHARE CELEBRATION (§ 2B Sensory Layer) ===
+                    // Title + subtitle — cinematic "Shared!" moment
+                    player.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.play.TitleS2CPacket(
+                        Text.literal("§a§lShared!")));
+                    player.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.play.SubtitleS2CPacket(
+                        Text.literal("§7" + code)));
+                    player.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.play.TitleFadeS2CPacket(
+                        10, 40, 20)); // fade-in, stay, fade-out (ticks)
+
+                    // Action bar — guide the player
+                    player.sendMessage(Text.literal("§a✔ Click the code in chat to copy!"), true);
+
+                    // Green sparkles around player
+                    ((ServerWorld) player.getWorld()).spawnParticles(
+                        net.minecraft.particle.ParticleTypes.HAPPY_VILLAGER,
+                        player.getX(), player.getY() + 1, player.getZ(),
+                        20, 0.5, 0.5, 0.5, 0.1);
+
+                    // Achievement unlock sound — loud and celebratory
+                    player.getServerWorld().playSound(null, player.getBlockPos(),
+                        net.minecraft.sound.SoundEvents.UI_TOAST_CHALLENGE_COMPLETE,
+                        net.minecraft.sound.SoundCategory.PLAYERS, 1.0f, 1.0f);
                 } catch (Exception ex) { send(player, "§c[CB] Share failed: " + ex.getMessage()); }
             }
             case 52 -> {
