@@ -1,0 +1,11 @@
+{
+	"name": "cb-cloud-vault",
+	"main": "src/index.js",
+	"compatibility_date": "2026-04-24",
+	"kv_namespaces": [
+		{
+			"binding": "BLOCKS",
+			"id": "ee49b7a0d7584b539b1c986bdf8428ee"
+		}
+	]
+}

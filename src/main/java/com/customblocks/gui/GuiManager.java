@@ -19,6 +19,7 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.screen.SimpleNamedScreenHandlerFactory;
+import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -26,6 +27,9 @@ import net.minecraft.text.Text;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -40,6 +44,9 @@ import java.util.concurrent.Executors;
 public class GuiManager {
     private static final Logger LOGGER = LoggerFactory.getLogger("CustomBlocks");
     private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(2);
+    private static final java.net.http.HttpClient HTTP = java.net.http.HttpClient.newBuilder()
+        .connectTimeout(java.time.Duration.ofSeconds(5))
+        .build();
 
     private static final String MHF_LEFT = "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvMzdhZWU5YTc1YmYwZGY3ODk3MTgzMDE1Y2NhMGIyYTdkNzU1YzYzMzg4ZmYwMTc1MmQ1ZjQ0MTlmYzY0NSJ9fX0=";
     private static final String MHF_RIGHT = "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvNjgyYWQxYjljYjRkZDIxMjU5YzBkNzVhYTMxNWZmMzg5YzNjZWY3NTJiZTM5NDkzMzgxNjRiYWM4NGE5NmUifX19";
@@ -55,13 +62,20 @@ public class GuiManager {
     }
 
     private record AnimParams(float fps, boolean interpolate, int frameCount) {}
+    private record FaceImportPending(String blockId, String face, int returnPage, String importDir, long expiresAt) {}
     private static final Map<UUID, AnimParams> ANIM_PARAMS = new ConcurrentHashMap<>();
     private static final Map<UUID, AnimParams> ANIM_ORIGINAL_PARAMS = new ConcurrentHashMap<>();
+    private static final Map<UUID, FaceImportPending> FACE_IMPORTS = new ConcurrentHashMap<>();
 
     private static final Map<UUID, Long> SHAPE_CREATE_COOLDOWN = new ConcurrentHashMap<>();
     private static final long SHAPE_COOLDOWN_MS = 500;
     private static final Map<UUID, Long> CLICK_COOLDOWN = new ConcurrentHashMap<>();
     private static final long CLICK_COOLDOWN_MS = 100;
+    private static final long FACE_IMPORT_TIMEOUT_MS = 5 * 60_000L;
+    private static final int FACE_IMPORT_POLL_TICKS = 40;
+    private static final String FACE_IMPORT_FOLDER = "config/customblocks/import";
+    private static final String FACE_IMPORT_REQUESTS_DIR = "faces";
+    private static int faceImportTickCounter = 0;
 
     public enum InputAction {
         SET_LIGHT,
@@ -92,6 +106,8 @@ public class GuiManager {
     private static final Map<UUID, CbScreenHandler> HANDLERS = new ConcurrentHashMap<>();
     private static final Map<UUID, Set<String>> BULK_DELETE_SELECTIONS = new ConcurrentHashMap<>();
     private static final Map<UUID, String> SEARCH_QUERIES = new ConcurrentHashMap<>();
+    private static final Map<UUID, String> FACE_CHANGE_SELECTIONS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Integer> FACE_CHANGE_RETURN_PAGES = new ConcurrentHashMap<>();
     private static final Map<UUID, Deque<String>> RECENT_BLOCKS = new ConcurrentHashMap<>();
     private static final int MAX_RECENT = 3;
 
@@ -190,12 +206,15 @@ public class GuiManager {
         STATES.remove(uuid);
         BACK_STACK.remove(uuid);
         PENDING.remove(uuid);
+        FACE_IMPORTS.remove(uuid);
         HANDLERS.remove(uuid);
         ANIM_PARAMS.remove(uuid);
         ANIM_ORIGINAL_PARAMS.remove(uuid);
         SHAPE_CREATE_COOLDOWN.remove(uuid);
         CLICK_COOLDOWN.remove(uuid);
         BULK_DELETE_SELECTIONS.remove(uuid);
+        FACE_CHANGE_SELECTIONS.remove(uuid);
+        FACE_CHANGE_RETURN_PAGES.remove(uuid);
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -237,6 +256,48 @@ public class GuiManager {
         if (d == null) { openMain(player, returnPage); return; }
         pushBackStack(player.getUuid());
         openScreenFromGuiState(player, GuiState.faceEditor(id, returnPage), buildFaceEditor(d), "§d§l⬡ §r§fFace Editor §8— " + d.displayName);
+    }
+
+    private static void reopenFaceEditor(ServerPlayerEntity player, String id, int returnPage) {
+        SlotData d = SlotManager.getById(id);
+        if (d == null) { openMain(player, returnPage); return; }
+        openScreenFromGuiState(player, GuiState.faceEditor(id, returnPage), buildFaceEditor(d), "Â§dÂ§lâ¬¡ Â§rÂ§fFace Editor Â§8â€” " + d.displayName);
+    }
+
+    public static void openFaceChangeSelect(ServerPlayerEntity player, String id, int returnPage) {
+        SlotData d = SlotManager.getById(id);
+        if (d == null) { openMain(player, returnPage); return; }
+        FACE_CHANGE_RETURN_PAGES.put(player.getUuid(), returnPage);
+        pushBackStack(player.getUuid());
+        openScreenFromGuiState(player, GuiState.faceChangeSelect(id, returnPage),
+            buildFaceChangeSelect(d), "\u00A75\u00A7l\u2726 \u00A7r\u00A7fCopy Face From Another Block \u00A78\u2014 " + d.displayName);
+    }
+
+    private static void reopenFaceChangeSelect(ServerPlayerEntity player, String id, int returnPage) {
+        SlotData d = SlotManager.getById(id);
+        if (d == null) { openMain(player, returnPage); return; }
+        FACE_CHANGE_RETURN_PAGES.put(player.getUuid(), returnPage);
+        openScreenFromGuiState(player, GuiState.faceChangeSelect(id, returnPage),
+            buildFaceChangeSelect(d), "\u00A75\u00A7l\u2726 \u00A7r\u00A7fCopy Face From Another Block \u00A78\u2014 " + d.displayName);
+    }
+
+    private static void openFaceChangePicker(ServerPlayerEntity player, String id, String face, int page) {
+        SlotData d = SlotManager.getById(id);
+        if (d == null) { openMain(player, FACE_CHANGE_RETURN_PAGES.getOrDefault(player.getUuid(), 0)); return; }
+        FACE_CHANGE_SELECTIONS.put(player.getUuid(), face);
+        pushBackStack(player.getUuid());
+        openScreenFromGuiState(player, GuiState.faceChangePicker(id, page),
+            buildFaceChangePicker(d, face, page),
+            "\u00A75\u00A7l\u2726 \u00A7r\u00A7fPick Source Block \u00A78\u2014 \u00A7b" + face.toUpperCase(Locale.ROOT));
+    }
+
+    private static void reopenFaceChangePicker(ServerPlayerEntity player, String id, String face, int page) {
+        SlotData d = SlotManager.getById(id);
+        if (d == null) { openMain(player, FACE_CHANGE_RETURN_PAGES.getOrDefault(player.getUuid(), 0)); return; }
+        FACE_CHANGE_SELECTIONS.put(player.getUuid(), face);
+        openScreenFromGuiState(player, GuiState.faceChangePicker(id, page),
+            buildFaceChangePicker(d, face, page),
+            "\u00A75\u00A7l\u2726 \u00A7r\u00A7fPick Source Block \u00A78\u2014 \u00A7b" + face.toUpperCase(Locale.ROOT));
     }
 
     public static void openShapeEditor(ServerPlayerEntity player, String id, int returnPage) {
@@ -412,6 +473,9 @@ public class GuiManager {
                 case PICKER -> openEditorPicker(player, state.page());
                 case EDITOR -> openEditor(player, state.editingId(), state.page(), state.fromCommand());
                 case FACE_EDITOR -> openFaceEditor(player, state.editingId(), state.page());
+                case FACE_CHANGE_SELECT -> openFaceChangeSelect(player, state.editingId(), state.page());
+                case FACE_CHANGE_PICKER -> reopenFaceChangePicker(player, state.editingId(),
+                    FACE_CHANGE_SELECTIONS.getOrDefault(player.getUuid(), "top"), state.page());
                 case SHAPE_EDITOR -> openShapeEditor(player, state.editingId(), state.page());
                 case MAINTENANCE_MENU -> openMaintenanceMenu(player);
                 case HELP_MENU -> openHelpGui(player);
@@ -443,7 +507,7 @@ public class GuiManager {
 
     // ── Click dispatch ───────────────────────────────────────────────────────
 
-    public static void handleClick(ServerPlayerEntity player, int slot, int button) {
+    public static void handleClick(ServerPlayerEntity player, int slot, int button, SlotActionType actionType) {
         long now = System.currentTimeMillis();
         Long lastClick = CLICK_COOLDOWN.put(player.getUuid(), now);
         if (lastClick != null && now - lastClick < CLICK_COOLDOWN_MS) return;
@@ -460,7 +524,9 @@ public class GuiManager {
                 case RESOURCE_CENTER -> handleResourceHubClick(player, state, slot);
                 case ASSISTANT_CONTROL -> handleAssistantControlClick(player, state, slot);
                 case EDITOR       -> handleEditorClick(player, state, slot, button);
-                case FACE_EDITOR  -> handleFaceEditorClick(player, state, slot, button);
+                case FACE_EDITOR  -> handleFaceEditorClick(player, state, slot, button, actionType == SlotActionType.QUICK_MOVE);
+                case FACE_CHANGE_SELECT -> handleFaceChangeSelectClick(player, state, slot);
+                case FACE_CHANGE_PICKER -> handleFaceChangePickerClick(player, state, slot);
                 case SHAPE_EDITOR -> handleShapeEditorClick(player, state, slot, button);
                 case MAINTENANCE_MENU -> handleMaintenanceClick(player, state, slot);
                 case HELP_MENU      -> handleHelpClick(player, state, slot);
@@ -820,6 +886,7 @@ public class GuiManager {
                         case "texturePayloadsPerTick" -> CustomBlocksConfig.texturePayloadsPerTick = Math.max(1, Math.min(50, Integer.parseInt(text)));
                         case "resourcePackPort" -> CustomBlocksConfig.resourcePackPort = Math.max(0, Math.min(65535, Integer.parseInt(text)));
                         case "reloadDebounceMs" -> CustomBlocksConfig.reloadDebounceMs = Math.max(500, Math.min(10000, Long.parseLong(text)));
+                        case "cloudShareUrl" -> CustomBlocksConfig.cloudShareUrl = text.trim();
                         case "aiName" -> CustomBlocksConfig.aiName = text.replace("&", "§");
                         case "rpPromptMessage" -> CustomBlocksConfig.rpPromptMessage = text;
                         case "rpKickMessage" -> CustomBlocksConfig.rpKickMessage = text;
@@ -868,7 +935,42 @@ public class GuiManager {
     }
 
     public static boolean hasPending(ServerPlayerEntity player)  { return PENDING.containsKey(player.getUuid()); }
-    public static void clearState(ServerPlayerEntity player) { STATES.remove(player.getUuid()); PENDING.remove(player.getUuid()); BACK_STACK.remove(player.getUuid()); }
+    public static void clearState(ServerPlayerEntity player) { STATES.remove(player.getUuid()); PENDING.remove(player.getUuid()); FACE_IMPORTS.remove(player.getUuid()); FACE_CHANGE_SELECTIONS.remove(player.getUuid()); FACE_CHANGE_RETURN_PAGES.remove(player.getUuid()); BACK_STACK.remove(player.getUuid()); }
+
+    public static void checkPendingFaceImports(MinecraftServer server) {
+        if (FACE_IMPORTS.isEmpty()) {
+            faceImportTickCounter = 0;
+            return;
+        }
+        if (++faceImportTickCounter < FACE_IMPORT_POLL_TICKS) return;
+        faceImportTickCounter = 0;
+
+        long now = System.currentTimeMillis();
+        List<Map.Entry<UUID, FaceImportPending>> expired = new ArrayList<>();
+        List<Map.Entry<UUID, FaceImportPending>> active = new ArrayList<>();
+        for (var entry : FACE_IMPORTS.entrySet()) {
+            if (entry.getValue().expiresAt() <= now) expired.add(entry);
+            else active.add(entry);
+        }
+
+        expired.sort(Comparator.comparing(entry -> entry.getKey().toString()));
+        for (var entry : expired) {
+            if (FACE_IMPORTS.remove(entry.getKey(), entry.getValue())) {
+                notifyFaceImportExpired(server, entry.getKey(), entry.getValue());
+            }
+        }
+        if (active.isEmpty()) return;
+
+        active.sort(Comparator.comparing(entry -> entry.getKey().toString()));
+        for (var entry : active) {
+            Path importDir = Path.of(entry.getValue().importDir());
+            if (!Files.isDirectory(importDir)) continue;
+            List<Path> images = listSupportedImportFiles(importDir);
+            if (images.isEmpty()) continue;
+            if (!FACE_IMPORTS.remove(entry.getKey(), entry.getValue())) continue;
+            processPendingFaceImport(server, entry.getKey(), entry.getValue(), images.get(0));
+        }
+    }
 
     // ── Click handlers ────────────────────────────────────────────────────────
 
@@ -1072,6 +1174,7 @@ public class GuiManager {
         inv.setStack(10, toggleItem("Auto-Send Texture Pack", CustomBlocksConfig.rpEnforceOnJoin, "Require the texture pack when players join"));
         inv.setStack(11, toggleItem("AI System Ready", CustomBlocksConfig.aiEnabled, "Keep the AI assistant system enabled"));
         inv.setStack(12, toggleItem("AI Status Halo", CustomBlocksConfig.aiHologram, "Show a floating status label above the assistant"));
+        inv.setStack(13, toggleItem("Cloud Share", CustomBlocksConfig.cloudShareEnabled, "Upload and fetch share codes from the Cloud Vault"));
         // Row 2: Numbers
         inv.setStack(19, numItem("Block Capacity", CustomBlocksConfig.maxSlots, "How many custom blocks this server can hold (restart required)"));
         inv.setStack(20, numItem("Texture Quality", CustomBlocksConfig.defaultTextureSize, "Default resolution used when new textures are processed"));
@@ -1087,6 +1190,7 @@ public class GuiManager {
         inv.setStack(30, strItem("Pack Required Message", truncate(CustomBlocksConfig.rpKickMessage, 30), "Message shown if the server requires the texture pack"));
         inv.setStack(31, strItem("History Mode", CustomBlocksConfig.undoMode, "Choose whether undo history is shared or per-player"));
         inv.setStack(32, strItem("AI Style", CustomBlocksConfig.aiStyle, "Visual style for the assistant AI"));
+        inv.setStack(33, strItem("Cloud Vault URL", truncate(CustomBlocksConfig.normalizedCloudShareUrl(), 30), "Base URL used for cross-server share codes"));
         // Row 5: Back
         inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
         return inv;
@@ -1140,6 +1244,12 @@ public class GuiManager {
                 send(player, "§a[Config] aiHologram = " + CustomBlocksConfig.aiHologram);
                 openConfigGui(player, false);
             }
+            case 13 -> {
+                CustomBlocksConfig.cloudShareEnabled = !CustomBlocksConfig.cloudShareEnabled;
+                CustomBlocksConfig.save();
+                send(player, "Â§a[Config] cloudShareEnabled = " + CustomBlocksConfig.cloudShareEnabled);
+                openConfigGui(player, false);
+            }
             // Numbers
             case 19 -> configPrompt(player, "maxSlots", "Block Capacity (1-8192):");
             case 20 -> configPrompt(player, "defaultTextureSize", "Texture Quality (16-256):");
@@ -1155,6 +1265,7 @@ public class GuiManager {
             case 30 -> configPrompt(player, "rpKickMessage", "Pack Required Message:");
             case 31 -> configPrompt(player, "undoMode", "History Mode (global / per_player / both):");
             case 32 -> configPrompt(player, "aiStyle", "AI Style:");
+            case 33 -> configPrompt(player, "cloudShareUrl", "Cloud Vault URL:");
             case 45 -> openMain(player, 0);
         }
     }
@@ -1532,6 +1643,7 @@ public class GuiManager {
                     java.nio.file.Files.createDirectories(exportDir);
                     java.nio.file.Files.writeString(exportDir.resolve(hash + ".json"),
                         jsonStr, java.nio.charset.StandardCharsets.UTF_8);
+                    uploadShareToCloud(hash, jsonStr);
 
                     // Send short, clickable code (15 chars, not 918KB)
                     String code = "CB~" + hash;
@@ -1540,6 +1652,8 @@ public class GuiManager {
                             .withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.COPY_TO_CLIPBOARD, code))
                             .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, Text.literal("§eClick to copy"))));
                     net.minecraft.text.MutableText line = Text.literal("§0§l[§b§lCB§0§l] §a[Share] §f'§b" + d.customId + "§f' ready! ")
+                        .append(clickable);
+                    line = Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7fBlock shared! \u00A77Code below \u00A7a\u2714 ")
                         .append(clickable);
                     player.sendMessage(line, false);
                     player.sendMessage(Text.literal("§7Import with: §b/cb importblock " + code), false);
@@ -1563,9 +1677,7 @@ public class GuiManager {
                         20, 0.5, 0.5, 0.5, 0.1);
 
                     // Achievement unlock sound — loud and celebratory
-                    player.getServerWorld().playSound(null, player.getBlockPos(),
-                        net.minecraft.sound.SoundEvents.UI_TOAST_CHALLENGE_COMPLETE,
-                        net.minecraft.sound.SoundCategory.PLAYERS, 1.0f, 1.0f);
+                    player.playSound(net.minecraft.sound.SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
                 } catch (Exception ex) { send(player, "§c[CB] Share failed: " + ex.getMessage()); }
             }
             case 52 -> {
@@ -1746,19 +1858,20 @@ public class GuiManager {
         }
     }
 
-    private static void handleFaceEditorClick(ServerPlayerEntity player, GuiState state, int slot, int button) {
+    private static void handleFaceEditorClick(ServerPlayerEntity player, GuiState state, int slot, int button, boolean shiftClick) {
         String id = state.editingId(); int rp = state.page();
         SlotData d = SlotManager.getById(id);
         if (d==null) { openMain(player,rp); return; }
         UUID uuid = player.getUuid();
         switch (slot) {
             case 0  -> openEditor(player,id,rp);
-            case 9  -> promptFace(player,id,"top",   rp,false); case 10 -> promptFace(player,id,"top",   rp,true);
-            case 11 -> promptFace(player,id,"bottom",rp,false); case 12 -> promptFace(player,id,"bottom",rp,true);
-            case 13 -> promptFace(player,id,"north", rp,false); case 14 -> promptFace(player,id,"north", rp,true);
-            case 15 -> promptFace(player,id,"south", rp,false); case 16 -> promptFace(player,id,"south", rp,true);
-            case 17 -> promptFace(player,id,"east",  rp,false); case 18 -> promptFace(player,id,"east",  rp,true);
-            case 19 -> promptFace(player,id,"west",  rp,false); case 20 -> promptFace(player,id,"west",  rp,true);
+            case 9  -> { if (shiftClick) startPendingFaceImport(player,id,"top",rp); else promptFace(player,id,"top",rp,false); } case 10 -> promptFace(player,id,"top",   rp,true);
+            case 11 -> { if (shiftClick) startPendingFaceImport(player,id,"bottom",rp); else promptFace(player,id,"bottom",rp,false); } case 12 -> promptFace(player,id,"bottom",rp,true);
+            case 13 -> { if (shiftClick) startPendingFaceImport(player,id,"north",rp); else promptFace(player,id,"north",rp,false); } case 14 -> promptFace(player,id,"north", rp,true);
+            case 15 -> { if (shiftClick) startPendingFaceImport(player,id,"south",rp); else promptFace(player,id,"south",rp,false); } case 16 -> promptFace(player,id,"south", rp,true);
+            case 17 -> { if (shiftClick) startPendingFaceImport(player,id,"east",rp); else promptFace(player,id,"east",rp,false); } case 18 -> promptFace(player,id,"east",  rp,true);
+            case 19 -> { if (shiftClick) startPendingFaceImport(player,id,"west",rp); else promptFace(player,id,"west",rp,false); } case 20 -> promptFace(player,id,"west",  rp,true);
+            case 24 -> openFaceChangeSelect(player, id, rp);
             case 27 -> clearFace(player,d,"top");    case 28 -> clearFace(player,d,"bottom");
             case 29 -> clearFace(player,d,"north");  case 30 -> clearFace(player,d,"south");
             case 31 -> clearFace(player,d,"east");   case 32 -> clearFace(player,d,"west");
@@ -1773,6 +1886,45 @@ public class GuiManager {
     }
 
     // ── Shape helpers ────────────────────────────────────────────────────────
+
+    private static void handleFaceChangeSelectClick(ServerPlayerEntity player, GuiState state, int slot) {
+        String id = state.editingId();
+        int rp = state.page();
+        switch (slot) {
+            case 0, 45 -> reopenFaceEditor(player, id, rp);
+            case 9 -> { playFaceCopySelect(player); openFaceChangePicker(player, id, "top", 0); }
+            case 11 -> { playFaceCopySelect(player); openFaceChangePicker(player, id, "bottom", 0); }
+            case 13 -> { playFaceCopySelect(player); openFaceChangePicker(player, id, "north", 0); }
+            case 15 -> { playFaceCopySelect(player); openFaceChangePicker(player, id, "south", 0); }
+            case 17 -> { playFaceCopySelect(player); openFaceChangePicker(player, id, "east", 0); }
+            case 19 -> { playFaceCopySelect(player); openFaceChangePicker(player, id, "west", 0); }
+        }
+    }
+
+    private static void handleFaceChangePickerClick(ServerPlayerEntity player, GuiState state, int slot) {
+        String targetId = state.editingId();
+        String face = FACE_CHANGE_SELECTIONS.getOrDefault(player.getUuid(), "top");
+        int rp = FACE_CHANGE_RETURN_PAGES.getOrDefault(player.getUuid(), 0);
+        if (slot == 0 || slot == 45) {
+            reopenFaceChangeSelect(player, targetId, rp);
+            return;
+        }
+        if (slot == 47 && state.page() > 0) {
+            reopenFaceChangePicker(player, targetId, face, state.page() - 1);
+            return;
+        }
+        if (slot == 51) {
+            reopenFaceChangePicker(player, targetId, face, state.page() + 1);
+            return;
+        }
+        if (slot >= 18 && slot <= 35) {
+            List<SlotData> blocks = sortedBlocks();
+            int idx = state.page() * BLOCKS_PER_PAGE + (slot - 18);
+            if (idx < blocks.size()) {
+                copyFaceFromSource(player, targetId, face, blocks.get(idx).customId, state.page(), rp);
+            }
+        }
+    }
 
     private static void createShapeVariant(ServerPlayerEntity player, SlotData d, String id,
                                             String preset, int rp, int boxPage) {
@@ -2668,10 +2820,19 @@ public class GuiManager {
         Item[] fi={Items.WHITE_CONCRETE,Items.LIGHT_GRAY_CONCRETE,Items.CYAN_CONCRETE,Items.BLUE_CONCRETE,Items.PURPLE_CONCRETE,Items.MAGENTA_CONCRETE};
         for (int fi2=0;fi2<6;fi2++) {
             boolean has=d.faceTextures.containsKey(faces[fi2][0]); String st=has?"§aOverride ACTIVE":"§7Default texture";
-            inv.setStack(es[fi2],uiGlint(fi[fi2],"§a✏ Edit §f"+faces[fi2][1]+" §7(in place)",st,"§8Modifies block directly","§8Click → paste URL"));
+            inv.setStack(es[fi2],uiGlint(fi[fi2],"§a✏ Edit §f"+faces[fi2][1]+" §7(in place)",st,"§8Modifies block directly","§7Left-click §f→ paste URL","§dShift-click §f→ import from folder"));
             inv.setStack(vs[fi2],ui(Items.PAPER,"§b✦ Variant §f"+faces[fi2][1],st,"§8Creates new block with this face","§8Original untouched","§8Click → paste URL"));
         }
         for(int s:new int[]{21,22,23,24,25,26}) inv.setStack(s,glass());
+        inv.setStack(22, uiGlint(Items.AMETHYST_SHARD, "\u00A7dFolder Magic",
+            "\u00A77Shift-click any \u00A7fEdit \u00A77face button",
+            "\u00A77then drop your image into the",
+            "\u00A77personal import folder shown in chat",
+            "\u00A775 minute timeout"));
+        inv.setStack(24, uiGlint(Items.ECHO_SHARD, "\u00A75Copy From Another Block",
+            "\u00A77Choose a face, then pick a source block",
+            "\u00A77to borrow that side's texture instantly",
+            "\u00A78Click to open the face-copy picker"));
         inv.setStack(27,ui(Items.WHITE_STAINED_GLASS_PANE,"§c✕ Clear TOP",faceStatus(d,"top")));
         inv.setStack(28,ui(Items.LIGHT_GRAY_STAINED_GLASS_PANE,"§c✕ Clear BOTTOM",faceStatus(d,"bottom")));
         inv.setStack(29,ui(Items.CYAN_STAINED_GLASS_PANE,"§c✕ Clear NORTH",faceStatus(d,"north")));
@@ -2685,6 +2846,91 @@ public class GuiManager {
         inv.setStack(47,ui(Items.ORANGE_CONCRETE,"§6⊘ Clear ALL Overrides","§7Reverts every face to default texture"));
         for(int i=48;i<=52;i++) inv.setStack(i,glass());
         inv.setStack(53,uiGlint(Items.CHEST,"§a▶ Give 1x","§7Gives 1x §f"+d.displayName));
+        return inv;
+    }
+
+    private static SimpleInventory buildFaceChangeSelect(SlotData d) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Face Editor", "§8(or press ESC)"));
+        inv.setStack(4, uiGlint(Items.NETHER_STAR, "§6§oYour masterpiece awaits",
+            "§7Target block: §f" + d.displayName,
+            "§7Choose which face should borrow a texture"));
+
+        ItemStack preview = CustomBlocksMod.safeSlotItem(d.index) != null
+            ? new ItemStack(CustomBlocksMod.safeSlotItem(d.index))
+            : new ItemStack(Items.NETHER_STAR);
+        preview.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§f§l" + d.displayName).styled(s -> s.withItalic(false)));
+        preview.set(DataComponentTypes.LORE, new LoreComponent(List.of(
+            lore("§7ID: §b" + d.customId),
+            lore("§7Pick a face below, then choose a source block"),
+            lore("§8Exact face match first, otherwise main texture"))));
+        inv.setStack(22, preview);
+
+        inv.setStack(9, faceChangeButton("TOP", "The crown of your creation"));
+        inv.setStack(11, faceChangeButton("BOTTOM", "The foundation upon which it rests"));
+        inv.setStack(13, faceChangeButton("NORTH", "The face that greets the world"));
+        inv.setStack(15, faceChangeButton("SOUTH", "The side that watches your back"));
+        inv.setStack(17, faceChangeButton("EAST", "The edge that catches the sunrise"));
+        inv.setStack(19, faceChangeButton("WEST", "The edge that keeps the dusk"));
+
+        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Face Editor", "§8Return without copying"));
+        inv.setStack(49, ui(Items.PAPER, "§7Click a Face",
+            "§7Step 1: pick the target face",
+            "§7Step 2: choose the source block",
+            "§7Step 3: texture copies instantly"));
+        return inv;
+    }
+
+    private static SimpleInventory buildFaceChangePicker(SlotData target, String face, int page) {
+        SimpleInventory inv = new SimpleInventory(54);
+        List<SlotData> blocks = sortedBlocks();
+        int total = blocks.size();
+        int maxPage = total == 0 ? 0 : Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
+        page = Math.max(0, Math.min(page, maxPage));
+
+        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Face Choice", "§8Return to face selection"));
+        for (int i = 1; i <= 3; i++) inv.setStack(i, glass());
+        inv.setStack(4, uiGlint(Items.NETHER_STAR, "§5§lCopy to §f" + face.toUpperCase(Locale.ROOT),
+            "§7Target block: §f" + target.displayName,
+            "§7Choose a source block below"));
+        for (int i = 5; i <= 8; i++) inv.setStack(i, glass());
+        for (int i = 9; i <= 17; i++) inv.setStack(i, ui(Items.PURPLE_STAINED_GLASS_PANE, "§r"));
+
+        int start = page * BLOCKS_PER_PAGE;
+        for (int i = 0; i < BLOCKS_PER_PAGE; i++) {
+            int invSlot = 18 + i;
+            int dataIdx = start + i;
+            if (dataIdx >= blocks.size()) {
+                inv.setStack(invSlot, glass());
+                continue;
+            }
+
+            SlotData source = blocks.get(dataIdx);
+            ItemStack item = CustomBlocksMod.safeSlotItem(source.index) != null
+                ? new ItemStack(CustomBlocksMod.safeSlotItem(source.index))
+                : new ItemStack(Items.BRICKS);
+            item.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§f§l" + source.displayName).styled(st -> st.withItalic(false)));
+
+            boolean exactFace = source.faceTextures.containsKey(face);
+            boolean hasTexture = exactFace || source.texture != null;
+            List<Text> lore = new ArrayList<>();
+            lore.add(lore("§7ID: §b" + source.customId));
+            lore.add(lore(exactFace
+                ? "§dUsing its " + face.toUpperCase(Locale.ROOT) + " override"
+                : "§7Falls back to the block's main texture"));
+            lore.add(lore(hasTexture
+                ? "§aClick to copy onto " + target.displayName
+                : "§cNo usable texture on this block"));
+            item.set(DataComponentTypes.LORE, new LoreComponent(lore));
+            inv.setStack(invSlot, item);
+        }
+
+        for (int i = 36; i <= 44; i++) inv.setStack(i, ui(Items.PURPLE_STAINED_GLASS_PANE, "§r"));
+        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Face Choice", "§8Return without copying"));
+        inv.setStack(47, page > 0 ? uiGlint(Items.ARROW, "§7◀ Previous Page", "§8Go to page " + page) : glass());
+        inv.setStack(49, ui(Items.PAPER, "§7Page §f" + (page + 1) + " §7/ §f" + (maxPage + 1), "§7Sources: §f" + total));
+        inv.setStack(51, page < maxPage ? uiGlint(Items.ARROW, "§7Next Page ▶", "§8Go to page " + (page + 2)) : glass());
         return inv;
     }
 
@@ -2777,6 +3023,7 @@ public class GuiManager {
                  "reloadDebounceMs" -> Items.REPEATER;
             case "undoMode" -> Items.COMPARATOR;
             case "aiStyle" -> com.customblocks.assistant.AssistantManager.getStyleDisplayItem(CustomBlocksConfig.aiStyle);
+            case "cloudShareUrl" -> Items.ENDER_PEARL;
             default -> Items.NAME_TAG;
         };
         return new ItemStack(item);
@@ -2792,6 +3039,7 @@ public class GuiManager {
             case "texturePayloadsPerTick" -> String.valueOf(CustomBlocksConfig.texturePayloadsPerTick);
             case "resourcePackPort" -> String.valueOf(CustomBlocksConfig.resourcePackPort);
             case "reloadDebounceMs" -> String.valueOf(CustomBlocksConfig.reloadDebounceMs);
+            case "cloudShareUrl" -> CustomBlocksConfig.normalizedCloudShareUrl();
             case "aiName" -> stripFormattingCodes(CustomBlocksConfig.aiName);
             case "rpPromptMessage" -> CustomBlocksConfig.rpPromptMessage;
             case "rpKickMessage" -> CustomBlocksConfig.rpKickMessage;
@@ -2812,6 +3060,25 @@ public class GuiManager {
         String mode = variant ? "§b(creates variant — original untouched)" : "§a(modifies this block)";
         send(player, "§6[GUI] §ePaste URL for §f"+face.toUpperCase()+" §eof '§f"+blockId+"§e' "+mode+":");
         send(player, "§7Type §ccancel §7to abort.");
+    }
+
+    private static void startPendingFaceImport(ServerPlayerEntity player, String blockId, String face, int rp) {
+        Path importDir = nextFaceImportDir(player.getUuid(), face);
+        try {
+            Files.createDirectories(importDir);
+        } catch (IOException e) {
+            playError(player);
+            player.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7cCouldn't prepare the import folder. \u00A77" + e.getMessage()), false);
+            reopenFaceEditor(player, blockId, rp);
+            return;
+        }
+
+        FACE_IMPORTS.put(player.getUuid(), new FaceImportPending(
+            blockId, face, rp, importDir.toString(), System.currentTimeMillis() + FACE_IMPORT_TIMEOUT_MS));
+        closeForPrompt(player);
+        playFaceImportStart(player);
+        player.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7fDrop your image into the \u00A7bimport folder\u00A7f. \u00A77You have 5 minutes."), false);
+        player.sendMessage(Text.literal("\u00A77Target face: \u00A7b" + face.toUpperCase(Locale.ROOT) + " \u00A78\u2022 \u00A77Folder: \u00A7b" + displayPath(importDir)), false);
     }
 
     private static void clearFace(ServerPlayerEntity player, SlotData d, String face) {
@@ -2862,13 +3129,294 @@ public class GuiManager {
         return c+"_"+(System.currentTimeMillis()%10000);
     }
 
+    private static List<Path> listSupportedImportFiles(Path importDir) {
+        try (var stream = Files.list(importDir)) {
+            return stream
+                .filter(Files::isRegularFile)
+                .filter(GuiManager::isSupportedImportFile)
+                .sorted(Comparator.comparing(path -> path.getFileName().toString().toLowerCase(Locale.ROOT)))
+                .toList();
+        } catch (IOException e) {
+            LOGGER.warn("[CustomBlocks] Failed to scan face import folder '{}': {}", importDir, e.getMessage());
+            return List.of();
+        }
+    }
+
+    private static boolean isSupportedImportFile(Path path) {
+        String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
+        return name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg")
+            || name.endsWith(".gif") || name.endsWith(".bmp") || name.endsWith(".webp")
+            || name.endsWith(".tiff") || name.endsWith(".tif");
+    }
+
+    private static void processPendingFaceImport(MinecraftServer server, UUID uuid, FaceImportPending pending, Path file) {
+        ServerPlayerEntity player = server.getPlayerManager().getPlayer(uuid);
+        if (player == null) return;
+
+        LOGGER.info("[CustomBlocks] Face import detected for player={} block='{}' face='{}' file='{}'",
+            player.getGameProfile().getName(), pending.blockId(), pending.face(), file.getFileName());
+        playFaceImportDetected(player);
+
+        EXECUTOR.submit(() -> {
+            try {
+                byte[] raw = Files.readAllBytes(file);
+                ImageProcessor.ProcessResult result = processImportedFaceBytes(raw);
+                server.execute(() -> completePendingFaceImport(server, uuid, pending, file, result));
+            } catch (Exception e) {
+                server.execute(() -> failPendingFaceImport(server, uuid, pending, file, e));
+            }
+        });
+    }
+
+    private static ImageProcessor.ProcessResult processImportedFaceBytes(byte[] raw) throws IOException {
+        if (raw == null || raw.length == 0) {
+            throw new IOException("The dropped file was empty.");
+        }
+
+        if (ImageProcessor.isAnimatedImage(raw)) {
+            ImageProcessor.ProcessResult result = ImageProcessor.processAnimation(raw, CustomBlocksConfig.defaultTextureSize);
+            if (result == null || result.bytes() == null || result.bytes().length == 0) {
+                throw new IOException("Couldn't decode animation frames from that file.");
+            }
+            return result;
+        }
+
+        byte[] png = ImageProcessor.toPng(raw);
+        png = ImageProcessor.padToSquare(png);
+        png = ImageProcessor.replaceBackground(png);
+        return new ImageProcessor.ProcessResult(
+            ImageProcessor.resizeTo(png, CustomBlocksConfig.defaultTextureSize),
+            null,
+            1
+        );
+    }
+
+    private static void completePendingFaceImport(MinecraftServer server, UUID uuid, FaceImportPending pending, Path file, ImageProcessor.ProcessResult result) {
+        ServerPlayerEntity player = server.getPlayerManager().getPlayer(uuid);
+        SlotData d = SlotManager.getById(pending.blockId());
+        if (player == null || d == null) return;
+        if (result == null || result.bytes() == null || result.bytes().length == 0) {
+            failPendingFaceImport(server, uuid, pending, file, new IOException("Processed image was empty."));
+            return;
+        }
+
+        UndoManager.pushUndoMutation(pending.blockId(), d, "setface " + pending.face() + " (folder)", uuid);
+        SlotManager.setFaceTexture(pending.blockId(), pending.face(), result.bytes());
+        if (result.isAnimated() && result.mcmeta() != null) {
+            SlotManager.setAnimMeta(pending.blockId(), result.mcmeta());
+        }
+        SlotManager.saveAll();
+        NetworkManager.broadcastUpdate(server, new SlotUpdatePayload(
+            "setface", d.index, pending.blockId(), null, result.bytes(),
+            d.lightLevel, d.hardness, d.soundType, pending.face(), null,
+            result.isAnimated() ? result.mcmeta() : null));
+
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException e) {
+            LOGGER.warn("[CustomBlocks] Couldn't delete processed face import '{}': {}", file, e.getMessage());
+        }
+        cleanupFaceImportDir(Path.of(pending.importDir()));
+
+        playFaceImportSuccess(player);
+        player.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7a" + pending.face().toUpperCase(Locale.ROOT) + " face updated! \u00A7a\u2714"), false);
+        reopenFaceEditor(player, pending.blockId(), pending.returnPage());
+    }
+
+    private static void failPendingFaceImport(MinecraftServer server, UUID uuid, FaceImportPending pending, Path file, Exception error) {
+        LOGGER.warn("[CustomBlocks] Face import failed for block='{}' face='{}' file='{}': {}",
+            pending.blockId(), pending.face(), file.getFileName(), error.getMessage(), error);
+        ServerPlayerEntity player = server.getPlayerManager().getPlayer(uuid);
+        if (player == null) return;
+
+        playError(player);
+        player.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7cFace import failed. \u00A77" + faceImportError(error)), false);
+        reopenFaceEditor(player, pending.blockId(), pending.returnPage());
+    }
+
+    private static void notifyFaceImportExpired(MinecraftServer server, UUID uuid, FaceImportPending pending) {
+        ServerPlayerEntity player = server.getPlayerManager().getPlayer(uuid);
+        if (player == null) return;
+
+        playFaceImportTimeout(player);
+        player.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7eFace import timed out for \u00A7b" + pending.face().toUpperCase(Locale.ROOT) + "\u00A7e. \u00A77Shift-click again when you're ready."), false);
+        reopenFaceEditor(player, pending.blockId(), pending.returnPage());
+    }
+
+    private static String faceImportError(Exception error) {
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) return "Use a supported image file and try again.";
+        return message;
+    }
+
+    private static Path nextFaceImportDir(UUID uuid, String face) {
+        return Path.of(FACE_IMPORT_FOLDER, FACE_IMPORT_REQUESTS_DIR, uuid.toString(),
+            face + "-" + Long.toUnsignedString(System.currentTimeMillis(), 36));
+    }
+
+    private static String displayPath(Path path) {
+        return path.toString().replace('\\', '/') + "/";
+    }
+
+    private static void cleanupFaceImportDir(Path dir) {
+        if (dir == null || !Files.isDirectory(dir)) return;
+        try (var stream = Files.list(dir)) {
+            if (stream.findAny().isPresent()) return;
+        } catch (IOException e) {
+            LOGGER.warn("[CustomBlocks] Couldn't inspect face import folder '{}': {}", dir, e.getMessage());
+            return;
+        }
+        try {
+            Files.deleteIfExists(dir);
+        } catch (IOException e) {
+            LOGGER.warn("[CustomBlocks] Couldn't delete empty face import folder '{}': {}", dir, e.getMessage());
+        }
+    }
+
+    private static void playFaceImportStart(ServerPlayerEntity player) {
+        ServerWorld world = player.getServerWorld();
+        world.spawnParticles(net.minecraft.particle.ParticleTypes.ENCHANT,
+            player.getX(), player.getY() + 1.1, player.getZ(),
+            24, 0.35, 0.5, 0.35, 0.02);
+        player.playSound(net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, 0.8f, 1.15f);
+    }
+
+    private static void playFaceImportDetected(ServerPlayerEntity player) {
+        ServerWorld world = player.getServerWorld();
+        world.spawnParticles(net.minecraft.particle.ParticleTypes.SOUL_FIRE_FLAME,
+            player.getX(), player.getY() + 1.0, player.getZ(),
+            14, 0.25, 0.45, 0.25, 0.01);
+        player.playSound(net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_CHIME.value(), 0.85f, 1.0f);
+    }
+
+    private static void playFaceImportSuccess(ServerPlayerEntity player) {
+        ServerWorld world = player.getServerWorld();
+        world.spawnParticles(net.minecraft.particle.ParticleTypes.COMPOSTER,
+            player.getX(), player.getY() + 1.0, player.getZ(),
+            20, 0.35, 0.4, 0.35, 0.02);
+        player.playSound(net.minecraft.sound.SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, 0.9f, 1.0f);
+    }
+
+    private static void playFaceImportTimeout(ServerPlayerEntity player) {
+        ServerWorld world = player.getServerWorld();
+        world.spawnParticles(net.minecraft.particle.ParticleTypes.SMOKE,
+            player.getX(), player.getY() + 1.0, player.getZ(),
+            12, 0.25, 0.35, 0.25, 0.01);
+        player.playSound(net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), 1.0f, 0.8f);
+    }
+
+    private static ItemStack faceChangeButton(String faceLabel, String poeticLine) {
+        return uiGlint(Items.ECHO_SHARD, "§5§l" + faceLabel,
+            "§5§o" + poeticLine,
+            "§7Click to choose a source block");
+    }
+
+    private static void copyFaceFromSource(ServerPlayerEntity player, String targetId, String face, String sourceId, int page, int returnPage) {
+        SlotData target = SlotManager.getById(targetId);
+        SlotData source = SlotManager.getById(sourceId);
+        if (target == null || source == null) {
+            playError(player);
+            reopenFaceChangePicker(player, targetId, face, page);
+            return;
+        }
+
+        byte[] texture = source.faceTextures.containsKey(face) ? source.faceTextures.get(face) : source.texture;
+        if (texture == null || texture.length == 0) {
+            playError(player);
+            player.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7cThat source block has no usable texture for \u00A7b" + face.toUpperCase(Locale.ROOT) + "\u00A7c."), false);
+            reopenFaceChangePicker(player, targetId, face, page);
+            return;
+        }
+
+        playFaceCopyApply(player);
+        byte[] copy = texture.clone();
+        UndoManager.pushUndoMutation(targetId, target, "copyface " + face + " from " + sourceId, player.getUuid());
+        SlotManager.setFaceTexture(targetId, face, copy);
+        if (source.animMeta != null) {
+            SlotManager.setAnimMeta(targetId, source.animMeta);
+        }
+        SlotManager.saveAll();
+        NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload(
+            "setface", target.index, targetId, null, copy,
+            target.lightLevel, target.hardness, target.soundType, face, null, source.animMeta));
+
+        playFaceCopyComplete(player);
+        player.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7a" + face.toUpperCase(Locale.ROOT) + " \u00A77\u2190 copied from \u00A7b'" + source.displayName + "' \u00A7a\u2714"), false);
+        reopenFaceChangeSelect(player, targetId, returnPage);
+    }
+
+    private static void playFaceCopySelect(ServerPlayerEntity player) {
+        ServerWorld world = player.getServerWorld();
+        world.spawnParticles(net.minecraft.particle.ParticleTypes.ENCHANT,
+            player.getX(), player.getY() + 1.0, player.getZ(),
+            18, 0.3, 0.45, 0.3, 0.02);
+        player.playSound(net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, 0.85f, 1.1f);
+    }
+
+    private static void playFaceCopyApply(ServerPlayerEntity player) {
+        ServerWorld world = player.getServerWorld();
+        world.spawnParticles(net.minecraft.particle.ParticleTypes.COMPOSTER,
+            player.getX(), player.getY() + 1.0, player.getZ(),
+            16, 0.3, 0.35, 0.3, 0.02);
+        player.playSound(net.minecraft.sound.SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, 0.8f, 1.0f);
+    }
+
+    private static void playFaceCopyComplete(ServerPlayerEntity player) {
+        ServerWorld world = player.getServerWorld();
+        world.spawnParticles(net.minecraft.particle.ParticleTypes.GLOW,
+            player.getX(), player.getY() + 1.0, player.getZ(),
+            16, 0.3, 0.35, 0.3, 0.02);
+        player.playSound(net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_CHIME.value(), 0.8f, 1.05f);
+    }
+
+    public static void uploadShareToCloud(String hash, String jsonStr) {
+        if (!CustomBlocksConfig.isCloudShareEnabled()) return;
+        String baseUrl = CustomBlocksConfig.normalizedCloudShareUrl();
+        if (baseUrl.isBlank()) return;
+        String payload = buildCloudSharePayload(hash, jsonStr);
+
+        EXECUTOR.submit(() -> {
+            try {
+                java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(baseUrl + "/share"))
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(payload, java.nio.charset.StandardCharsets.UTF_8))
+                    .timeout(java.time.Duration.ofSeconds(5))
+                    .build();
+                java.net.http.HttpResponse<String> response = HTTP.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                    LOGGER.info("[CB Cloud] Block uploaded to vault ✔");
+                } else {
+                    LOGGER.warn("[CB Cloud] Upload failed with status {} (local share still works)", response.statusCode());
+                }
+            } catch (Exception e) {
+                LOGGER.warn("[CB Cloud] Upload failed (local share still works): {}", e.getMessage());
+            }
+        });
+    }
+
+    private static String buildCloudSharePayload(String hash, String jsonStr) {
+        try {
+            JsonObject payload = JsonParser.parseString(jsonStr).getAsJsonObject();
+            payload.addProperty("hash", hash);
+            payload.addProperty("code", "CB~" + hash);
+            return payload.toString();
+        } catch (Exception ignored) {
+            return jsonStr;
+        }
+    }
+
     private static String cap(String s)          { return s==null||s.isEmpty()?"":(char)(Character.toUpperCase(s.charAt(0)))+s.substring(1); }
     private static float nextHardness(float cur) { for(int i=0;i<HARD_CYCLE.length-1;i++) if(Math.abs(cur-HARD_CYCLE[i])<0.01f) return HARD_CYCLE[i+1]; return HARD_CYCLE[1]; }
     private static float prevHardness(float cur) { for(int i=HARD_CYCLE.length-1;i>0;i--) if(Math.abs(cur-HARD_CYCLE[i])<0.01f) return HARD_CYCLE[i-1]; return HARD_CYCLE[0]; }
     private static String hardnessLabel(float h) { if(h<0)return "∞ Unbreakable"; if(h==0)return "0 (Instant)"; return String.valueOf(h); }
     private static String faceStatus(SlotData d, String f) { return d.faceTextures.containsKey(f)?"§aOverride ACTIVE — click to clear":"§8No override set"; }
     private static boolean isUrl(String s)       { return s.startsWith("http://")||s.startsWith("https://"); }
-    private static void send(ServerPlayerEntity p, String m) { ChatHelper.info(p, m); }
+    private static String normalizeFormattingCodes(String text) {
+        if (text == null) return "";
+        return text.replace("Ã‚Â§", "\u00A7").replace("Â§", "\u00A7");
+    }
+    private static void send(ServerPlayerEntity p, String m) { ChatHelper.info(p, normalizeFormattingCodes(m)); }
     private static void thread(ServerPlayerEntity p, Runnable r) { EXECUTOR.submit(r); }
 
     private static ItemStack soundItem(SlotData d, String sound, Item item, String label) {

@@ -60,6 +60,10 @@ public final class CustomBlocksConfig {
     public static volatile long reloadDebounceMs = 2000;
     /** Debounce time for initial join burst (ms). */
     public static volatile long joinDebounceMs = 4000;
+    /** Optional Cloud Vault base URL for cross-server sharing. */
+    public static volatile String cloudShareUrl = "https://cb-cloud-vault.cbbblocksvault.workers.dev";
+    /** Enables Cloud Vault upload/download when a base URL is configured. */
+    public static volatile boolean cloudShareEnabled = true;
 
     // ── Resource Pack Enforcement ─────────────────────────────────────────
     /** Whether to send the resource pack as mandatory on player join. */
@@ -86,6 +90,16 @@ public final class CustomBlocksConfig {
         save();
     }
 
+    public static boolean isCloudShareEnabled() {
+        return cloudShareEnabled && cloudShareUrl != null && !cloudShareUrl.isBlank();
+    }
+
+    public static String normalizedCloudShareUrl() {
+        String url = cloudShareUrl == null ? "" : cloudShareUrl.trim();
+        while (url.endsWith("/")) url = url.substring(0, url.length() - 1);
+        return url;
+    }
+
     /** Load configuration from disk, creating defaults if missing. */
     public static void load() {
         Path dir = Path.of(CONFIG_DIR);
@@ -99,6 +113,7 @@ public final class CustomBlocksConfig {
             }
             String json = Files.readString(file, StandardCharsets.UTF_8);
             JsonObject root = JsonParser.parseString(json).getAsJsonObject();
+            boolean shouldRewrite = missingManagedKeys(root);
 
             maxSlots              = getInt(root, "maxSlots", maxSlots);
             defaultTextureSize    = getInt(root, "defaultTextureSize", defaultTextureSize);
@@ -113,6 +128,8 @@ public final class CustomBlocksConfig {
             resourcePackPort      = getInt(root, "resourcePackPort", resourcePackPort);
             reloadDebounceMs      = getLong(root, "reloadDebounceMs", reloadDebounceMs);
             joinDebounceMs        = getLong(root, "joinDebounceMs", joinDebounceMs);
+            cloudShareUrl         = getString(root, "cloudShareUrl", cloudShareUrl);
+            cloudShareEnabled     = getBool(root, "cloudShareEnabled", cloudShareEnabled);
             aiEnabled             = getBool(root, "aiEnabled", getBool(root, "helperEnabled", aiEnabled));
             aiName                = getString(root, "aiName", getString(root, "helperName", aiName));
             aiStyle               = getString(root, "aiStyle", getString(root, "helperSkin", aiStyle));
@@ -126,27 +143,64 @@ public final class CustomBlocksConfig {
             if (rpEnforceOnJoin) {
                 LOGGER.warn("[CustomBlocks] rpEnforceOnJoin was true — forcing to false to prevent player disconnects.");
                 rpEnforceOnJoin = false;
-                save();
+                shouldRewrite = true;
             }
 
             // Clamp values
-            maxSlots              = Math.max(1, Math.min(8192, maxSlots));
-            defaultTextureSize    = Math.max(16, Math.min(256, defaultTextureSize));
-            bgRemovalTolerance    = Math.max(0, Math.min(100, bgRemovalTolerance));
-            downloadTimeoutSeconds= Math.max(1, Math.min(120, downloadTimeoutSeconds));
-            sessionTimeoutSeconds = Math.max(0, Math.min(3600, sessionTimeoutSeconds));
-            maxUndoDepth          = Math.max(1, Math.min(100, maxUndoDepth));
-            permissionLevelAdmin  = Math.max(0, Math.min(4, permissionLevelAdmin));
-            permissionLevelUse    = Math.max(0, Math.min(4, permissionLevelUse));
-            texturePayloadsPerTick= Math.max(1, Math.min(50, texturePayloadsPerTick));
+            int clampedMaxSlots = Math.max(1, Math.min(8192, maxSlots));
+            int clampedDefaultTextureSize = Math.max(16, Math.min(256, defaultTextureSize));
+            int clampedBgRemovalTolerance = Math.max(0, Math.min(100, bgRemovalTolerance));
+            int clampedDownloadTimeoutSeconds = Math.max(1, Math.min(120, downloadTimeoutSeconds));
+            int clampedSessionTimeoutSeconds = Math.max(0, Math.min(3600, sessionTimeoutSeconds));
+            int clampedMaxUndoDepth = Math.max(1, Math.min(100, maxUndoDepth));
+            int clampedPermissionLevelAdmin = Math.max(0, Math.min(4, permissionLevelAdmin));
+            int clampedPermissionLevelUse = Math.max(0, Math.min(4, permissionLevelUse));
+            int clampedTexturePayloadsPerTick = Math.max(1, Math.min(50, texturePayloadsPerTick));
+
+            shouldRewrite |= clampedMaxSlots != maxSlots;
+            shouldRewrite |= clampedDefaultTextureSize != defaultTextureSize;
+            shouldRewrite |= clampedBgRemovalTolerance != bgRemovalTolerance;
+            shouldRewrite |= clampedDownloadTimeoutSeconds != downloadTimeoutSeconds;
+            shouldRewrite |= clampedSessionTimeoutSeconds != sessionTimeoutSeconds;
+            shouldRewrite |= clampedMaxUndoDepth != maxUndoDepth;
+            shouldRewrite |= clampedPermissionLevelAdmin != permissionLevelAdmin;
+            shouldRewrite |= clampedPermissionLevelUse != permissionLevelUse;
+            shouldRewrite |= clampedTexturePayloadsPerTick != texturePayloadsPerTick;
+
+            maxSlots              = clampedMaxSlots;
+            defaultTextureSize    = clampedDefaultTextureSize;
+            bgRemovalTolerance    = clampedBgRemovalTolerance;
+            downloadTimeoutSeconds= clampedDownloadTimeoutSeconds;
+            sessionTimeoutSeconds = clampedSessionTimeoutSeconds;
+            maxUndoDepth          = clampedMaxUndoDepth;
+            permissionLevelAdmin  = clampedPermissionLevelAdmin;
+            permissionLevelUse    = clampedPermissionLevelUse;
+            texturePayloadsPerTick= clampedTexturePayloadsPerTick;
+
+            String normalizedCloudUrl = normalizedCloudShareUrl();
+            if (!normalizedCloudUrl.equals(cloudShareUrl)) {
+                cloudShareUrl = normalizedCloudUrl;
+                shouldRewrite = true;
+            }
 
             if (!undoMode.equals("global") && !undoMode.equals("per_player") && !undoMode.equals("both")) {
                 LOGGER.warn("[CustomBlocks] Invalid undoMode '{}', defaulting to 'both'", undoMode);
                 undoMode = "both";
+                shouldRewrite = true;
+            }
+
+            if (shouldRewrite) {
+                save();
+                LOGGER.info("[CustomBlocks] Config migrated/backfilled at {}", file);
             }
 
             LOGGER.info("[CustomBlocks] Config loaded: maxSlots={}, undoMode={}, bgTolerance={}",
                     maxSlots, undoMode, bgRemovalTolerance);
+            if (isCloudShareEnabled()) {
+                LOGGER.info("[CustomBlocks] Cloud Vault: ENABLED -> {}", normalizedCloudShareUrl());
+            } else {
+                LOGGER.info("[CustomBlocks] Cloud Vault: DISABLED -> local-only share codes");
+            }
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] Failed to load config, using defaults", e);
         }
@@ -172,6 +226,8 @@ public final class CustomBlocksConfig {
             root.addProperty("resourcePackPort", resourcePackPort);
             root.addProperty("reloadDebounceMs", reloadDebounceMs);
             root.addProperty("joinDebounceMs", joinDebounceMs);
+            root.addProperty("cloudShareUrl", cloudShareUrl);
+            root.addProperty("cloudShareEnabled", cloudShareEnabled);
             root.addProperty("aiEnabled", aiEnabled);
             root.addProperty("aiName", aiName);
             root.addProperty("aiStyle", aiStyle);
@@ -205,6 +261,31 @@ public final class CustomBlocksConfig {
 
     private static boolean getBool(JsonObject obj, String key, boolean def) {
         return obj.has(key) ? obj.get(key).getAsBoolean() : def;
+    }
+
+    private static boolean missingManagedKeys(JsonObject root) {
+        return !root.has("maxSlots")
+            || !root.has("defaultTextureSize")
+            || !root.has("bgRemovalTolerance")
+            || !root.has("downloadTimeoutSeconds")
+            || !root.has("sessionTimeoutSeconds")
+            || !root.has("undoMode")
+            || !root.has("maxUndoDepth")
+            || !root.has("permissionLevelAdmin")
+            || !root.has("permissionLevelUse")
+            || !root.has("texturePayloadsPerTick")
+            || !root.has("resourcePackPort")
+            || !root.has("reloadDebounceMs")
+            || !root.has("joinDebounceMs")
+            || !root.has("cloudShareUrl")
+            || !root.has("cloudShareEnabled")
+            || !root.has("aiEnabled")
+            || !root.has("aiName")
+            || !root.has("aiStyle")
+            || !root.has("aiHologram")
+            || !root.has("rpEnforceOnJoin")
+            || !root.has("rpPromptMessage")
+            || !root.has("rpKickMessage");
     }
 
     private CustomBlocksConfig() {} // static-only

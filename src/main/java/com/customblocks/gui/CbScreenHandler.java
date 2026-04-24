@@ -49,7 +49,7 @@ public class CbScreenHandler extends GenericContainerScreenHandler {
     @Override
     public void onSlotClick(int slotIndex, int button, SlotActionType actionType, PlayerEntity player) {
         if (slotIndex >= 0 && slotIndex < inventory.size() && player instanceof ServerPlayerEntity sp) {
-            GuiManager.handleClick(sp, slotIndex, button);
+            GuiManager.handleClick(sp, slotIndex, button, actionType);
         }
         this.syncState();
     }

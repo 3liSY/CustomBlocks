@@ -35,6 +35,9 @@ import java.util.concurrent.Executors;
 
 public class CustomBlockCommand {
     private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(2);
+    private static final java.net.http.HttpClient HTTP = java.net.http.HttpClient.newBuilder()
+        .connectTimeout(java.time.Duration.ofSeconds(5))
+        .build();
 
     // Mixed alphabet for share codes — excludes filesystem-unsafe chars (/ \ : ? * " < > |)
     private static final String SHARE_ALPHABET =
@@ -425,6 +428,13 @@ public class CustomBlockCommand {
                         .executes(ctx -> cmdShapeEditor(ctx.getSource(),
                             StringArgumentType.getString(ctx, "id")))))
 
+                .then(CommandManager.literal("facechangegui")
+                    .executes(ctx -> usage(ctx.getSource(), "facechangegui"))
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .executes(ctx -> cmdFaceChangeGui(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "id")))))
+
                 .then(CommandManager.literal("square")
                     .executes(ctx -> usage(ctx.getSource(), "square"))
                     .then(CommandManager.argument("color", StringArgumentType.word())
@@ -643,6 +653,7 @@ public class CustomBlockCommand {
             java.nio.file.Path exportDir = java.nio.file.Path.of("config/customblocks/exports");
             java.nio.file.Files.createDirectories(exportDir);
             java.nio.file.Files.writeString(exportDir.resolve(hash + ".json"), jsonStr, java.nio.charset.StandardCharsets.UTF_8);
+            GuiManager.uploadShareToCloud(hash, jsonStr);
 
             String code = "CB~" + hash;
             // Single branded, clickable message — no duplicate print.
@@ -667,51 +678,90 @@ public class CustomBlockCommand {
             return 0;
         }
         try {
-            String json;
             if (code.startsWith("CB~") || code.startsWith("CB3!")) {
-                // CB~ and CB3! use the same server-side hash→file storage format.
-                // Both prefixes are 3 or 4 chars long; handle either.
-                String hash = (code.startsWith("CB~") ? code.substring(3) : code.substring(4)).trim();
+                String hash = code.startsWith("CB~") ? code.substring(3).trim() : code.substring(4).trim();
                 java.nio.file.Path exportFile = java.nio.file.Path.of("config/customblocks/exports", hash + ".json");
-                if (!java.nio.file.Files.exists(exportFile)) {
-                    ChatHelper.error(src, "Export file not found for code '" + code + "'. Was it exported on this server?");
-                    return 0;
+                if (java.nio.file.Files.exists(exportFile)) {
+                    return importDecodedBlock(src,
+                        java.nio.file.Files.readString(exportFile, java.nio.charset.StandardCharsets.UTF_8),
+                        false);
                 }
-                json = java.nio.file.Files.readString(exportFile, java.nio.charset.StandardCharsets.UTF_8);
-            } else if (code.startsWith("CB2!")) {
-                byte[] compressed = java.util.Base64.getDecoder().decode(code.substring(4));
-                try (java.util.zip.GZIPInputStream gz = new java.util.zip.GZIPInputStream(new java.io.ByteArrayInputStream(compressed));
-                     java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
-                    byte[] buf = new byte[4096];
-                    int n;
-                    while ((n = gz.read(buf)) != -1) out.write(buf, 0, n);
-                    json = out.toString(java.nio.charset.StandardCharsets.UTF_8);
+                if (CustomBlocksConfig.isCloudShareEnabled()) {
+                    MinecraftServer server = src.getServer();
+                    ServerPlayerEntity player = src.getPlayer();
+                    if (player != null) {
+                        player.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A77Checking the \u00A7bCloud Vault\u00A77..."), false);
+                    }
+                    EXECUTOR.submit(() -> {
+                        try {
+                            String json = fetchCloudShareJson(hash);
+                            if (json == null || json.isBlank()) {
+                                server.execute(() -> {
+                                    if (player != null) playCloudImportFailure(player);
+                                    src.sendError(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7cBlock not found locally or in the Cloud Vault \u00A77\u2718"));
+                                });
+                                return;
+                            }
+                            cacheCloudShare(hash, json);
+                            server.execute(() -> importDecodedBlock(src, json, true));
+                        } catch (Exception e) {
+                            server.execute(() -> {
+                                if (player != null) playCloudImportFailure(player);
+                                src.sendError(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7cCloud import failed. \u00A77" + e.getMessage()));
+                            });
+                        }
+                    });
+                    return 1;
                 }
-            } else {
-                json = new String(java.util.Base64.getDecoder().decode(code.substring(3)), java.nio.charset.StandardCharsets.UTF_8);
+                ChatHelper.error(src, "Export file not found for code '" + code + "'. Was it exported on this server?");
+                return 0;
             }
+
+            return importDecodedBlock(src, decodeInlineImportCode(code), false);
+        } catch (Exception e) {
+            ChatHelper.error(src, "Error decoding block: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    private static String decodeInlineImportCode(String code) throws Exception {
+        if (code.startsWith("CB2!")) {
+            byte[] compressed = java.util.Base64.getDecoder().decode(code.substring(4));
+            try (java.util.zip.GZIPInputStream gz = new java.util.zip.GZIPInputStream(new java.io.ByteArrayInputStream(compressed));
+                 java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+                byte[] buf = new byte[4096];
+                int n;
+                while ((n = gz.read(buf)) != -1) out.write(buf, 0, n);
+                return out.toString(java.nio.charset.StandardCharsets.UTF_8);
+            }
+        }
+        return new String(java.util.Base64.getDecoder().decode(code.substring(3)), java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private static int importDecodedBlock(ServerCommandSource src, String json, boolean fromCloud) {
+        try {
             com.google.gson.JsonObject obj = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
-            
+
             String id = obj.get("customId").getAsString();
             String name = obj.has("displayName") ? obj.get("displayName").getAsString() : id;
             if (SlotManager.hasId(id)) id = id + "_imp";
-            
+
             byte[] texture = null;
             if (obj.has("tex")) texture = java.util.Base64.getDecoder().decode(obj.get("tex").getAsString());
-            
+
             SlotData d = SlotManager.assign(id, name, texture);
             if (d == null) {
                 ChatHelper.error(src, "Import failed: No free slots.");
                 return 0;
             }
-            
+
             int light = obj.has("light") ? obj.get("light").getAsInt() : 0;
             float hard = obj.has("hard") ? obj.get("hard").getAsFloat() : 1.5f;
             String sound = obj.has("sound") ? obj.get("sound").getAsString() : "stone";
             SlotManager.setProperties(id, light, hard, sound);
             if (obj.has("anim")) SlotManager.setAnimMeta(id, obj.get("anim").getAsString());
             if (obj.has("ncol") && obj.get("ncol").getAsBoolean()) SlotManager.setCollision(id, false);
-            
+
             if (obj.has("shape")) {
                 java.util.List<SlotData.ShapeBox> shapeBoxes = new java.util.ArrayList<>();
                 for (com.google.gson.JsonElement el : obj.getAsJsonArray("shape")) {
@@ -719,19 +769,39 @@ public class CustomBlockCommand {
                 }
                 if (!shapeBoxes.isEmpty()) SlotManager.setShape(id, shapeBoxes);
             }
-            
+
             if (obj.has("faces")) {
                 com.google.gson.JsonObject faces = obj.getAsJsonObject("faces");
                 for (var entry : faces.entrySet())
                     SlotManager.setFaceTexture(id, entry.getKey(), java.util.Base64.getDecoder().decode(entry.getValue().getAsString()));
             }
-            
+
             SlotData finalData = SlotManager.getById(id);
             SlotManager.saveAll();
             String animMeta = obj.has("anim") ? obj.get("anim").getAsString() : null;
             NetworkManager.broadcastUpdate(src.getServer(), new SlotUpdatePayload(
                     "add", finalData.index, finalData.customId, finalData.displayName,
                     texture, finalData.lightLevel, finalData.hardness, finalData.soundType, null, null, animMeta));
+            for (var faceEntry : finalData.faceTextures.entrySet()) {
+                NetworkManager.broadcastUpdate(src.getServer(), new SlotUpdatePayload(
+                    "setface", finalData.index, finalData.customId, null, faceEntry.getValue(),
+                    finalData.lightLevel, finalData.hardness, finalData.soundType, faceEntry.getKey(), null, animMeta));
+            }
+            if (finalData.isShaped()) {
+                broadcastShape(src.getServer(), finalData);
+            }
+            if (finalData.noCollision) {
+                NetworkManager.broadcastUpdate(src.getServer(), new SlotUpdatePayload(
+                    "setcollision", finalData.index, finalData.customId, null, null,
+                    0, 0, "stone", null, "false"));
+            }
+
+            ServerPlayerEntity player = src.getPlayer();
+            if (fromCloud && player != null) {
+                playCloudImportSuccess(player);
+                player.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7fImported from \u00A7bCloud Vault\u00A7f! \u00A7a\u2714"), false);
+            }
+
             if (texture != null) ChatHelper.success(src, "Imported '" + id + "' with texture!");
             else ChatHelper.success(src, "Imported '" + id + "'. Use '/cb retexture " + id + " <url>' to apply texture.");
             return 1;
@@ -739,6 +809,60 @@ public class CustomBlockCommand {
             ChatHelper.error(src, "Error decoding block: " + e.getMessage());
             return 0;
         }
+    }
+
+    private static String fetchCloudShareJson(String hash) throws Exception {
+        String baseUrl = CustomBlocksConfig.normalizedCloudShareUrl();
+        if (baseUrl.isBlank()) return null;
+
+        java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+            .uri(java.net.URI.create(baseUrl + "/share/" + java.net.URLEncoder.encode(hash, java.nio.charset.StandardCharsets.UTF_8)))
+            .timeout(java.time.Duration.ofSeconds(5))
+            .GET()
+            .build();
+        java.net.http.HttpResponse<String> response = HTTP.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() == 404) return null;
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new java.io.IOException("Cloud Vault returned status " + response.statusCode());
+        }
+        return normalizeCloudResponse(response.body());
+    }
+
+    private static String normalizeCloudResponse(String body) {
+        if (body == null || body.isBlank()) return null;
+        try {
+            com.google.gson.JsonElement element = com.google.gson.JsonParser.parseString(body);
+            if (element.isJsonObject()) {
+                com.google.gson.JsonObject obj = element.getAsJsonObject();
+                if (obj.has("customId")) return obj.toString();
+                if (obj.has("data") && obj.get("data").isJsonObject()) return obj.get("data").getAsJsonObject().toString();
+                if (obj.has("block") && obj.get("block").isJsonObject()) return obj.get("block").getAsJsonObject().toString();
+                if (obj.has("json") && obj.get("json").isJsonPrimitive()) return obj.get("json").getAsString();
+            } else if (element.isJsonPrimitive() && element.getAsJsonPrimitive().isString()) {
+                return element.getAsString();
+            }
+        } catch (Exception ignored) {}
+        return body;
+    }
+
+    private static void cacheCloudShare(String hash, String json) throws java.io.IOException {
+        java.nio.file.Path exportDir = java.nio.file.Path.of("config/customblocks/exports");
+        java.nio.file.Files.createDirectories(exportDir);
+        java.nio.file.Files.writeString(exportDir.resolve(hash + ".json"), json, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private static void playCloudImportSuccess(ServerPlayerEntity player) {
+        player.getServerWorld().spawnParticles(net.minecraft.particle.ParticleTypes.COMPOSTER,
+            player.getX(), player.getY() + 1.0, player.getZ(),
+            18, 0.35, 0.35, 0.35, 0.02);
+        player.playSound(net.minecraft.sound.SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, 0.9f, 1.0f);
+    }
+
+    private static void playCloudImportFailure(ServerPlayerEntity player) {
+        player.getServerWorld().spawnParticles(net.minecraft.particle.ParticleTypes.SMOKE,
+            player.getX(), player.getY() + 1.0, player.getZ(),
+            12, 0.25, 0.35, 0.25, 0.01);
+        player.playSound(net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), 1.0f, 0.8f);
     }
 
     private static int cmdRename(ServerCommandSource src, String id, String newName) {
@@ -882,6 +1006,14 @@ public class CustomBlockCommand {
         net.minecraft.server.network.ServerPlayerEntity player = src.getPlayer();
         if (player == null) { src.sendError(Text.literal("§cPlayer only.")); return 0; }
         com.customblocks.gui.GuiManager.openShapeEditor(player, id, 0);
+        return 1;
+    }
+
+    private static int cmdFaceChangeGui(ServerCommandSource src, String id) {
+        if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
+        ServerPlayerEntity player = src.getPlayer();
+        if (player == null) { src.sendError(Text.literal("§cPlayer only.")); return 0; }
+        GuiManager.openFaceChangeSelect(player, id, 0);
         return 1;
     }
 
@@ -1630,6 +1762,7 @@ public class CustomBlockCommand {
         src.sendMessage(Text.literal(G + "  /cb " + C + "clearshape " + A + "<id>                  " + G + "— reset to full cube"));
         src.sendMessage(Text.literal(G + "  /cb " + C + "setcollision " + A + "<id> <on|off>        " + G + "— toggle walkthrough"));
         src.sendMessage(Text.literal(G + "  /cb " + C + "shapeeditor " + A + "<id>                 " + G + "— open shape editor GUI"));
+        src.sendMessage(Text.literal(G + "  /cb " + C + "facechangegui " + A + "<id>               " + G + "— copy one face from another block"));
         src.sendMessage(Text.literal(D));
 
         src.sendMessage(Text.literal(H + "  Utilities"));
@@ -1776,6 +1909,7 @@ public class CustomBlockCommand {
             case "clearshape"   -> "clearshape <id>";
             case "setcollision" -> "setcollision <id> <on|off>";
             case "shapeeditor"  -> "shapeeditor <id>";
+            case "facechangegui"-> "facechangegui <id>";
             case "square"       -> "square <black|yellow|green>";
             case "triangle"     -> "triangle <black|yellow|green>";
             default -> "help";

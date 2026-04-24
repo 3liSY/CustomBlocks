@@ -473,6 +473,8 @@ public class CustomBlocksMod implements ModInitializer {
 
             RectangleToolItem.tickSessionCleanup();
 
+            GuiManager.checkPendingFaceImports(server);
+
         });
 
 

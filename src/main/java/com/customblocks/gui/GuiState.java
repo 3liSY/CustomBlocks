@@ -43,6 +43,14 @@ public record GuiState(
         return new GuiState(GuiMode.FACE_EDITOR, editingId, returnPage, false, 0, false);
     }
 
+    public static GuiState faceChangeSelect(String editingId, int returnPage) {
+        return new GuiState(GuiMode.FACE_CHANGE_SELECT, editingId, returnPage, false, 0, false);
+    }
+
+    public static GuiState faceChangePicker(String editingId, int page) {
+        return new GuiState(GuiMode.FACE_CHANGE_PICKER, editingId, page, false, 0, false);
+    }
+
     public static GuiState shapeEditor(String editingId, int returnPage) {
         return new GuiState(GuiMode.SHAPE_EDITOR, editingId, returnPage, false, 0, false);
     }
