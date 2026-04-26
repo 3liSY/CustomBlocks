@@ -583,9 +583,9 @@ public class CustomBlocksClient implements ClientModInitializer {
                             currentHash.substring(0, Math.min(12, currentHash.length())),
                             cachedHash  != null ? cachedHash.substring(0, Math.min(12, cachedHash.length())) : "null",
                             packExists);
+                    saveCachedHash(client.runDirectory, currentHash);
                     SlotManager.saveToClientDir(client.runDirectory);
                     ResourcePackGenerator.generate(client);
-                    saveCachedHash(client.runDirectory, currentHash);
                     client.execute(() -> {
                         injectPackIfNeeded(client);
                         joinBurst        = false;

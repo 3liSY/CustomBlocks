@@ -59,8 +59,8 @@ public abstract class ServerKeepAliveGraceMixin {
 
         long now = Util.getMeasuringTimeMs();
         if (now - customblocks$altLastTime >= 1000L) {
-            if (customblocks$pendingKeepAlives.size() > 30) {
-                // 30+ unanswered keepalives = 30+ seconds of total silence.
+            if (customblocks$pendingKeepAlives.size() > 300) {
+                // 300+ unanswered keepalives = 300+ seconds of total silence.
                 // This is a genuine lost connection, not a temporary freeze.
                 ((ServerCommonNetworkHandler) (Object) this)
                         .disconnect(Text.translatable("disconnect.timeout"));
