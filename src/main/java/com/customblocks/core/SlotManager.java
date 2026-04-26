@@ -1132,13 +1132,20 @@ public final class SlotManager {
         if (cached != null) return cached;
         try {
             java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
-            for (SlotData data : allSlots()) {
+            // Sort by index for deterministic order — ConcurrentHashMap iteration
+            // order varies between JVMs, so client and server must both sort.
+            java.util.List<SlotData> sorted = new java.util.ArrayList<>(allSlots());
+            sorted.sort(java.util.Comparator.comparingInt(d -> d.index));
+            for (SlotData data : sorted) {
                 md.update(data.customId.getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 if (data.texture != null) md.update(data.texture);
                 if (data.animMeta != null) md.update(data.animMeta.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                for (var entry : data.faceTextures.entrySet()) {
-                    md.update(entry.getKey().getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                    md.update(entry.getValue());
+                // Sort face keys for deterministic order (also ConcurrentHashMap)
+                java.util.List<String> faceKeys = new java.util.ArrayList<>(data.faceTextures.keySet());
+                java.util.Collections.sort(faceKeys);
+                for (String faceKey : faceKeys) {
+                    md.update(faceKey.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    md.update(data.faceTextures.get(faceKey));
                 }
             }
             cached = java.util.HexFormat.of().formatHex(md.digest());

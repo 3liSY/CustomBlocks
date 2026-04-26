@@ -686,13 +686,19 @@ public class CustomBlocksClient implements ClientModInitializer {
     private static String computeTextureHash() {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
-            for (SlotData data : SlotManager.allSlots()) {
+            // Sort by index for deterministic order — must match server-side algorithm.
+            java.util.List<SlotData> sorted = new java.util.ArrayList<>(SlotManager.allSlots());
+            sorted.sort(java.util.Comparator.comparingInt(d -> d.index));
+            for (SlotData data : sorted) {
                 md.update(data.customId.getBytes(StandardCharsets.UTF_8));
                 if (data.texture != null) md.update(data.texture);
                 if (data.animMeta != null) md.update(data.animMeta.getBytes(StandardCharsets.UTF_8));
-                for (var entry : data.faceTextures.entrySet()) {
-                    md.update(entry.getKey().getBytes(StandardCharsets.UTF_8));
-                    md.update(entry.getValue());
+                // Sort face keys for deterministic order (also ConcurrentHashMap)
+                java.util.List<String> faceKeys = new java.util.ArrayList<>(data.faceTextures.keySet());
+                java.util.Collections.sort(faceKeys);
+                for (String faceKey : faceKeys) {
+                    md.update(faceKey.getBytes(StandardCharsets.UTF_8));
+                    md.update(data.faceTextures.get(faceKey));
                 }
             }
             return HexFormat.of().formatHex(md.digest());

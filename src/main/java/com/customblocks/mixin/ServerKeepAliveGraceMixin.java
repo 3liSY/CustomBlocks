@@ -30,7 +30,7 @@ import java.util.List;
  * <b>Alternative behavior (this Mixin):</b>
  * <ul>
  *   <li>Server sends 1 keepalive every second</li>
- *   <li>Only disconnects if NONE of the last 30 are answered (30s total silence)</li>
+ *   <li>Only disconnects if NONE of the last 30 are answered (~30s total silence)</li>
  *   <li>If ANY single response arrives (in any order) → player stays connected</li>
  * </ul>
  * <p>
@@ -52,6 +52,11 @@ public abstract class ServerKeepAliveGraceMixin {
 
     @Inject(method = "baseTick", at = @At("HEAD"))
     private void customblocks$alternativeKeepalive(CallbackInfo ci) {
+        // Only run during PLAY phase — during configuration→play transition the
+        // Netty pipeline briefly has no outbound encoder. Sending any packet in
+        // that window causes EncoderException and kicks the player.
+        if (!((Object) this instanceof net.minecraft.server.network.ServerPlayNetworkHandler)) return;
+
         // Always clear vanilla's flag so it never triggers disconnect.
         // Vanilla keepalive still sends every 15s (harmless), but our
         // alternative system handles the actual timeout logic.
@@ -59,8 +64,8 @@ public abstract class ServerKeepAliveGraceMixin {
 
         long now = Util.getMeasuringTimeMs();
         if (now - customblocks$altLastTime >= 1000L) {
-            if (customblocks$pendingKeepAlives.size() > 300) {
-                // 300+ unanswered keepalives = 300+ seconds of total silence.
+            if (customblocks$pendingKeepAlives.size() > 30) {
+                // 30+ unanswered keepalives = 30+ seconds of total silence.
                 // This is a genuine lost connection, not a temporary freeze.
                 ((ServerCommonNetworkHandler) (Object) this)
                         .disconnect(Text.translatable("disconnect.timeout"));
