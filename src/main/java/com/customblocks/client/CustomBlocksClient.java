@@ -146,6 +146,14 @@ public class CustomBlocksClient implements ClientModInitializer {
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
             // Phase 3: send cached texture hash so server can skip drip-feed if unchanged
             String cachedHash = loadCachedHash(client.runDirectory);
+            // Layered Defense: If cache hash file was deleted but textures exist in memory, reconstruct it dynamically
+            if (cachedHash == null || cachedHash.isEmpty()) {
+                cachedHash = computeTextureHash();
+                if (cachedHash != null && !cachedHash.isEmpty() && !SlotManager.allSlots().isEmpty()) {
+                    saveCachedHash(client.runDirectory, cachedHash);
+                    CustomBlocksMod.LOGGER.info("[CustomBlocks] Reconstructed missing cache hash dynamically.");
+                }
+            }
             ClientPlayNetworking.send(new com.customblocks.network.SyncRequestPayload(
                     cachedHash != null ? cachedHash : ""));
         });

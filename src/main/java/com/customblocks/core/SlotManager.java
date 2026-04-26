@@ -859,10 +859,11 @@ public final class SlotManager {
 
             Files.createDirectories(dir);
 
+            Path tmpFile = dir.resolve(DATA_FILE + ".tmp");
             // Streaming JSON writer — same as saveAllAsync(), avoids 200MB+ memory spike
             try (com.google.gson.stream.JsonWriter writer = new com.google.gson.stream.JsonWriter(
                     new BufferedWriter(new OutputStreamWriter(
-                            new FileOutputStream(file.toFile()), StandardCharsets.UTF_8)))) {
+                            new FileOutputStream(tmpFile.toFile()), StandardCharsets.UTF_8)))) {
                 writer.setIndent("  ");
                 writer.beginObject();
 
@@ -880,6 +881,8 @@ public final class SlotManager {
 
                 writer.endObject();
             }
+            // Layered Defense: Atomic rename prevents corrupted slots.json if crash occurs mid-write
+            Files.move(tmpFile, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
 
         } catch (Exception e) {
 
