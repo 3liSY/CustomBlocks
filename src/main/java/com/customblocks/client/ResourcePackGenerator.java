@@ -468,7 +468,7 @@ public class ResourcePackGenerator {
      * Deletes stale resource pack files for slot indices that have no SlotData.
      * This prevents ~1500 unnecessary placeholder files from bloating the atlas.
      */
-    private static void cleanupStaleSlotFiles(File assets) {
+    public static void cleanupStaleSlotFiles(File assets) {
         int deleted = 0;
         String[][] dirs = {
             {"textures/block", "slot_"},

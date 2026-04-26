@@ -56,6 +56,10 @@ public class CustomBlocksClient implements ClientModInitializer {
 
     public static volatile boolean pendingCreativeRefresh = false;
 
+    // Tracks slot indices modified during the join drip-feed for incremental pack updates.
+    // Only slots in this set need to be regenerated, not all 439+.
+    private static final java.util.Set<Integer> dirtySlots = ConcurrentHashMap.newKeySet();
+
     /** Server's maxSlots, synced via FullSyncPayload. 0 = not yet received. */
     private static volatile int serverMaxSlots = 0;
 
@@ -144,18 +148,23 @@ public class CustomBlocksClient implements ClientModInitializer {
 
         // ── Fix 7: Client-initiated sync — send "I'm ready" when connection is live
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
-            // Phase 3: send cached texture hash so server can skip drip-feed if unchanged
-            String cachedHash = loadCachedHash(client.runDirectory);
-            // Layered Defense: If cache hash file was deleted but textures exist in memory, reconstruct it dynamically
-            if (cachedHash == null || cachedHash.isEmpty()) {
-                cachedHash = computeTextureHash();
-                if (cachedHash != null && !cachedHash.isEmpty() && !SlotManager.allSlots().isEmpty()) {
-                    saveCachedHash(client.runDirectory, cachedHash);
+            // Phase 3: send cached texture hash so server can skip drip-feed if unchanged.
+            // Priority: server-provided hash (guaranteed match) > client cache > dynamic.
+            String hashToSend = loadServerHash(client.runDirectory);
+            if (hashToSend == null || hashToSend.isEmpty()) {
+                hashToSend = loadCachedHash(client.runDirectory);
+            }
+            if (hashToSend == null || hashToSend.isEmpty()) {
+                hashToSend = computeTextureHash();
+                if (hashToSend != null && !hashToSend.isEmpty() && !SlotManager.allSlots().isEmpty()) {
+                    saveCachedHash(client.runDirectory, hashToSend);
                     CustomBlocksMod.LOGGER.info("[CustomBlocks] Reconstructed missing cache hash dynamically.");
                 }
             }
+            CustomBlocksMod.LOGGER.info("[CustomBlocks] Sending hash to server: {}",
+                    hashToSend != null && hashToSend.length() >= 12 ? hashToSend.substring(0, 12) : hashToSend);
             ClientPlayNetworking.send(new com.customblocks.network.SyncRequestPayload(
-                    cachedHash != null ? cachedHash : ""));
+                    hashToSend != null ? hashToSend : ""));
         });
 
         // ── Disconnect → reset all join-burst state ────────────────────────────
@@ -174,6 +183,7 @@ public class CustomBlocksClient implements ClientModInitializer {
             joinBurst        = false;
             syncDoneReceived = false;
             reloadInFlight.set(false);
+            dirtySlots.clear();
             lastPacketTime.set(Long.MAX_VALUE / 2);
             // NOTE: generateRunning is intentionally NOT reset here.
             // Any running generate thread will see the paused lastPacketTime and
@@ -387,6 +397,13 @@ public class CustomBlocksClient implements ClientModInitializer {
             // ── sync_done sentinel ────────────────────────────────────
             case "sync_done" -> {
                 syncDoneReceived = true;
+                // Server embeds its hash in customId — save so we echo it on next join
+                String sHash = payload.customId();
+                if (sHash != null && !sHash.isEmpty()) {
+                    saveServerHash(client.runDirectory, sHash);
+                    CustomBlocksMod.LOGGER.info("[CustomBlocks] Saved server hash: {}",
+                            sHash.substring(0, Math.min(12, sHash.length())));
+                }
                 return;
             }
 
@@ -474,7 +491,8 @@ public class CustomBlocksClient implements ClientModInitializer {
                 if (needsReload) scheduleGenerateAndReload(client, 2000L);
             }
         } else {
-            // Still in join burst — refresh the fallback debounce timer
+            // Still in join burst — track dirty slots + refresh the fallback debounce timer
+            if (payload.slotIndex() >= 0) dirtySlots.add(payload.slotIndex());
             lastPacketTime.set(System.currentTimeMillis());
         }
     }
@@ -497,6 +515,7 @@ public class CustomBlocksClient implements ClientModInitializer {
                 SlotManager.saveToClientDir(client.runDirectory);
                 String currentHash = computeTextureHash();
                 saveCachedHash(client.runDirectory, currentHash);
+                clearServerHash(client.runDirectory); // stale after local edit
 
                 // Trigger reload
                 client.execute(() -> {
@@ -585,15 +604,33 @@ public class CustomBlocksClient implements ClientModInitializer {
                         pendingCreativeRefresh = true;
                     });
                 } else {
-                    // CACHE MISS — regenerate pack and reload resources
+                    // CACHE MISS — either incremental or full regen
                     CustomBlocksMod.LOGGER.info(
-                            "[CustomBlocks] Texture cache MISS (cur={}, cached={}, packExists={}). Regenerating.",
+                            "[CustomBlocks] Texture cache MISS (cur={}, cached={}, packExists={}, dirty={}).",
                             currentHash.substring(0, Math.min(12, currentHash.length())),
                             cachedHash  != null ? cachedHash.substring(0, Math.min(12, cachedHash.length())) : "null",
-                            packExists);
+                            packExists, dirtySlots.size());
                     saveCachedHash(client.runDirectory, currentHash);
                     SlotManager.saveToClientDir(client.runDirectory);
-                    ResourcePackGenerator.generate(client);
+
+                    if (packExists && !dirtySlots.isEmpty()) {
+                        // INCREMENTAL — only regenerate changed slots (fast path)
+                        File assets = new File(client.runDirectory,
+                                "resourcepacks/CustomBlocks/assets/" + CustomBlocksMod.MOD_ID);
+                        ResourcePackGenerator.cleanupStaleSlotFiles(assets);
+                        java.util.Set<Integer> snapshot = new java.util.HashSet<>(dirtySlots);
+                        dirtySlots.clear();
+                        for (int idx : snapshot) {
+                            ResourcePackGenerator.generateSingleSlot(client, idx);
+                        }
+                        CustomBlocksMod.LOGGER.info(
+                                "[CustomBlocks] Incremental update: {} slots regenerated (skipped full regen).",
+                                snapshot.size());
+                    } else {
+                        // FULL REGEN — first time or pack directory missing
+                        dirtySlots.clear();
+                        ResourcePackGenerator.generate(client);
+                    }
                     client.execute(() -> {
                         injectPackIfNeeded(client);
                         joinBurst        = false;
@@ -659,6 +696,7 @@ public class CustomBlocksClient implements ClientModInitializer {
         // Also update the texture hash on disk so the next join doesn't see a stale cache
         String currentHash = computeTextureHash();
         saveCachedHash(client.runDirectory, currentHash);
+        clearServerHash(client.runDirectory); // stale after local edit
 
         // Trigger resource reload to pick up the new animation timing
         if (reloadInFlight.compareAndSet(false, true)) {
@@ -681,6 +719,7 @@ public class CustomBlocksClient implements ClientModInitializer {
     // ── Texture cache helpers ────────────────────────────────────────────────
 
     private static final String CACHE_HASH_FILE = "customblocks_cache_hash.txt";
+    private static final String SERVER_HASH_FILE = "customblocks_server_hash.txt";
 
     /** Compute a SHA-256 hash of all slot IDs + texture bytes in the client SlotManager. */
     private static String computeTextureHash() {
@@ -728,6 +767,38 @@ public class CustomBlocksClient implements ClientModInitializer {
             Files.writeString(hashFile, hash, StandardCharsets.UTF_8);
         } catch (IOException e) {
             CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not write cache hash: {}", e.getMessage());
+        }
+    }
+
+    /** Load the server-provided hash from disk. Returns null if not found. */
+    private static String loadServerHash(File runDir) {
+        try {
+            Path hashFile = runDir.toPath().resolve(SERVER_HASH_FILE);
+            if (Files.exists(hashFile)) {
+                return Files.readString(hashFile, StandardCharsets.UTF_8).trim();
+            }
+        } catch (IOException e) {
+            CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not read server hash: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    /** Save the server-provided hash to disk so the client echoes it back on next join. */
+    private static void saveServerHash(File runDir, String hash) {
+        try {
+            Path hashFile = runDir.toPath().resolve(SERVER_HASH_FILE);
+            Files.writeString(hashFile, hash, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not write server hash: {}", e.getMessage());
+        }
+    }
+
+    /** Clear the server hash file (data changed locally, stale). */
+    private static void clearServerHash(File runDir) {
+        try {
+            Files.deleteIfExists(runDir.toPath().resolve(SERVER_HASH_FILE));
+        } catch (IOException e) {
+            CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not clear server hash: {}", e.getMessage());
         }
     }
 

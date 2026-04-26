@@ -150,7 +150,10 @@ public final class NetworkManager {
         // The client uses this to fire exactly one resource-pack reload instead
         // of relying on a fixed debounce timer that can fire mid-burst on
         // slower internet connections, causing cascading reloads and a disconnect.
-        queue.enqueue(new SlotUpdatePayload("sync_done", -1, "", null,
+        // The server hash is embedded in customId so the client can echo it back
+        // on the next join — guaranteeing a server-vs-server hash comparison.
+        String serverHash = SlotManager.computeTextureHash();
+        queue.enqueue(new SlotUpdatePayload("sync_done", -1, serverHash, null,
                 new byte[0], 0, 0f, "stone"));
     }
 
@@ -265,7 +268,7 @@ public final class NetworkManager {
                         com.customblocks.CustomBlocksConfig.maxSlots));
                 // Send immediate sync_done — no drip-feed needed
                 TextureQueue queue = getOrCreateQueue(player);
-                queue.enqueue(new SlotUpdatePayload("sync_done", -1, "", null,
+                queue.enqueue(new SlotUpdatePayload("sync_done", -1, serverHash, null,
                         new byte[0], 0, 0f, "stone"));
                 return;
             }
