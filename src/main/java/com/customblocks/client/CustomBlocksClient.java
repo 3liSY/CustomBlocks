@@ -299,23 +299,45 @@ public class CustomBlocksClient implements ClientModInitializer {
 
             // Priority: server-provided hash (guaranteed match) > client cache > dynamic.
 
-            String hashToSend = loadServerHash(client.runDirectory);
+            // SAFETY: If the resource pack folder is missing, force a full drip-feed by
 
-            if (hashToSend == null || hashToSend.isEmpty()) {
+            // sending an empty hash. This prevents hash-match + deleted-pack = broken textures.
 
-                hashToSend = loadCachedHash(client.runDirectory);
+            boolean packExists = new java.io.File(client.runDirectory,
 
-            }
+                    "resourcepacks/CustomBlocks/assets").isDirectory();
 
-            if (hashToSend == null || hashToSend.isEmpty()) {
+            String hashToSend;
 
-                hashToSend = computeTextureHash();
+            if (!packExists) {
 
-                if (hashToSend != null && !hashToSend.isEmpty() && !SlotManager.allSlots().isEmpty()) {
+                hashToSend = "";
 
-                    saveCachedHash(client.runDirectory, hashToSend);
+                CustomBlocksMod.LOGGER.warn(
 
-                    CustomBlocksMod.LOGGER.info("[CustomBlocks] Reconstructed missing cache hash dynamically.");
+                        "[CustomBlocks] Resource pack missing on disk — sending empty hash to force full sync.");
+
+            } else {
+
+                hashToSend = loadServerHash(client.runDirectory);
+
+                if (hashToSend == null || hashToSend.isEmpty()) {
+
+                    hashToSend = loadCachedHash(client.runDirectory);
+
+                }
+
+                if (hashToSend == null || hashToSend.isEmpty()) {
+
+                    hashToSend = computeTextureHash();
+
+                    if (hashToSend != null && !hashToSend.isEmpty() && !SlotManager.allSlots().isEmpty()) {
+
+                        saveCachedHash(client.runDirectory, hashToSend);
+
+                        CustomBlocksMod.LOGGER.info("[CustomBlocks] Reconstructed missing cache hash dynamically.");
+
+                    }
 
                 }
 
