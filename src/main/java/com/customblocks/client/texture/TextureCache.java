@@ -21,7 +21,8 @@ public class TextureCache {
 
     /** Load (or return cached) GPU texture for a block. Must be called on render thread. */
     public static TexInfo getOrLoad(String customId, byte[] textureBytes) {
-        if (CACHE.containsKey(customId)) return CACHE.get(customId);
+        TexInfo existing = CACHE.get(customId);
+        if (existing != null) return existing;
         if (textureBytes == null || textureBytes.length == 0) return getMissing();
         try {
             NativeImage image = NativeImage.read(new ByteArrayInputStream(textureBytes));

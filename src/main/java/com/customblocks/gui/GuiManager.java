@@ -335,8 +335,7 @@ public class GuiManager {
 
         inv.setStack(4, uiGlint(Items.COMPASS, "§b§lResource Pack Hub",
             "§7Textures registered: §f" + texCount,
-            "§7HTTP Server: " + (httpUp ? "§a✔ Running §7(port §f" + port + "§7)" : "§c✖ Stopped"),
-            "§7RP Enforce: " + (CustomBlocksConfig.rpEnforceOnJoin ? "§aON" : "§cOFF")));
+            "§7HTTP Server: " + (httpUp ? "§a✔ Running §7(port §f" + port + "§7)" : "§c✖ Stopped")));
 
         inv.setStack(20, uiGlint(Items.ECHO_SHARD, "§b§lGet Download Link",
             "§7Creates a shareable URL for your texture pack",
@@ -345,9 +344,6 @@ public class GuiManager {
         inv.setStack(22, uiGlint(Items.NETHER_STAR, "§a§lForce Sync",
             "§7Sends latest textures to all players",
             "§e§lClick to broadcast"));
-
-        inv.setStack(24, toggleItem("RP Enforce on Join", CustomBlocksConfig.rpEnforceOnJoin,
-            "Send resource pack as required when players join"));
 
         inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
         return inv;
@@ -888,8 +884,6 @@ public class GuiManager {
                         case "reloadDebounceMs" -> CustomBlocksConfig.reloadDebounceMs = Math.max(500, Math.min(10000, Long.parseLong(text)));
                         case "cloudShareUrl" -> CustomBlocksConfig.cloudShareUrl = text.trim();
                         case "aiName" -> CustomBlocksConfig.aiName = text.replace("&", "§");
-                        case "rpPromptMessage" -> CustomBlocksConfig.rpPromptMessage = text;
-                        case "rpKickMessage" -> CustomBlocksConfig.rpKickMessage = text;
                         case "undoMode" -> {
                             String v = text.toLowerCase().trim();
                             if (List.of("global", "per_player", "both").contains(v)) CustomBlocksConfig.undoMode = v;
@@ -992,17 +986,6 @@ public class GuiManager {
         if (slot == 22) { // Force Sync
             NetworkManager.broadcastFullSync(player.getServer());
             send(player, "§a[System] Force-syncing all clients...");
-            openResourceHub(player);
-        }
-        if (slot == 24) { // Toggle RP enforce
-            if (!CustomBlocksConfig.rpEnforceOnJoin) {
-                send(player, "§e§l[CB] §7Resource Pack Enforcement is §e§lunder maintenance§7. This feature is temporarily disabled to ensure connection stability.");
-                playClick(player);
-            } else {
-                CustomBlocksConfig.rpEnforceOnJoin = false;
-                CustomBlocksConfig.save();
-                send(player, "§a[Config] rpEnforceOnJoin = false");
-            }
             openResourceHub(player);
         }
     }
@@ -1171,7 +1154,6 @@ public class GuiManager {
         SimpleInventory inv = new SimpleInventory(54);
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
         // Row 1: Toggles
-        inv.setStack(10, toggleItem("Auto-Send Texture Pack", CustomBlocksConfig.rpEnforceOnJoin, "Require the texture pack when players join"));
         inv.setStack(11, toggleItem("AI System Ready", CustomBlocksConfig.aiEnabled, "Keep the AI assistant system enabled"));
         inv.setStack(12, toggleItem("AI Status Halo", CustomBlocksConfig.aiHologram, "Show a floating status label above the assistant"));
         inv.setStack(13, toggleItem("Cloud Share", CustomBlocksConfig.cloudShareEnabled, "Upload and fetch share codes from the Cloud Vault"));
@@ -1186,9 +1168,7 @@ public class GuiManager {
         inv.setStack(26, numItem("Pack Rebuild Delay", CustomBlocksConfig.reloadDebounceMs, "How long to wait before rebuilding the pack again"));
         // Row 3: Strings
         inv.setStack(28, strItem("AI Display Name", CustomBlocksConfig.aiName, "The name shown above your assistant"));
-        inv.setStack(29, strItem("Pack Invite Message", truncate(CustomBlocksConfig.rpPromptMessage, 30), "Message players see when the texture pack prompt appears"));
-        inv.setStack(30, strItem("Pack Required Message", truncate(CustomBlocksConfig.rpKickMessage, 30), "Message shown if the server requires the texture pack"));
-        inv.setStack(31, strItem("History Mode", CustomBlocksConfig.undoMode, "Choose whether undo history is shared or per-player"));
+        inv.setStack(29, strItem("History Mode", CustomBlocksConfig.undoMode, "Choose whether undo history is shared or per-player"));
         inv.setStack(32, strItem("AI Style", CustomBlocksConfig.aiStyle, "Visual style for the assistant AI"));
         inv.setStack(33, strItem("Cloud Vault URL", truncate(CustomBlocksConfig.normalizedCloudShareUrl(), 30), "Base URL used for cross-server share codes"));
         // Row 5: Back
@@ -1214,17 +1194,6 @@ public class GuiManager {
     private static void handleConfigGuiClick(ServerPlayerEntity player, GuiState state, int slot) {
         switch (slot) {
             // Toggles
-            case 10 -> {
-                if (!CustomBlocksConfig.rpEnforceOnJoin) {
-                    send(player, "§e§l[CB] §7Resource Pack Enforcement is §e§lunder maintenance§7. This feature is temporarily disabled to ensure connection stability.");
-                    playClick(player);
-                } else {
-                    CustomBlocksConfig.rpEnforceOnJoin = false;
-                    CustomBlocksConfig.save();
-                    send(player, "§a[Config] rpEnforceOnJoin = false");
-                }
-                openConfigGui(player, false);
-            }
             case 11 -> {
                 CustomBlocksConfig.aiEnabled = !CustomBlocksConfig.aiEnabled;
                 if (!CustomBlocksConfig.aiEnabled && com.customblocks.assistant.AssistantManager.isSpawned()) {
@@ -1261,9 +1230,7 @@ public class GuiManager {
             case 26 -> configPrompt(player, "reloadDebounceMs", "Pack Rebuild Delay (500-10000 ms):");
             // Strings
             case 28 -> configPrompt(player, "aiName", "AI Display Name:");
-            case 29 -> configPrompt(player, "rpPromptMessage", "Pack Invite Message:");
-            case 30 -> configPrompt(player, "rpKickMessage", "Pack Required Message:");
-            case 31 -> configPrompt(player, "undoMode", "History Mode (global / per_player / both):");
+            case 29 -> configPrompt(player, "undoMode", "History Mode (global / per_player / both):");
             case 32 -> configPrompt(player, "aiStyle", "AI Style:");
             case 33 -> configPrompt(player, "cloudShareUrl", "Cloud Vault URL:");
             case 45 -> openMain(player, 0);
@@ -3010,10 +2977,7 @@ public class GuiManager {
     }
 
     private static boolean usesAnvilConfigPrompt(String key) {
-        return switch (key) {
-            case "rpPromptMessage", "rpKickMessage" -> false;
-            default -> true;
-        };
+        return true;
     }
 
     private static ItemStack shortPromptItemForConfig(String key) {
@@ -3041,8 +3005,6 @@ public class GuiManager {
             case "reloadDebounceMs" -> String.valueOf(CustomBlocksConfig.reloadDebounceMs);
             case "cloudShareUrl" -> CustomBlocksConfig.normalizedCloudShareUrl();
             case "aiName" -> stripFormattingCodes(CustomBlocksConfig.aiName);
-            case "rpPromptMessage" -> CustomBlocksConfig.rpPromptMessage;
-            case "rpKickMessage" -> CustomBlocksConfig.rpKickMessage;
             case "undoMode" -> CustomBlocksConfig.undoMode;
             case "aiStyle" -> com.customblocks.assistant.AssistantManager.normalizeStyle(CustomBlocksConfig.aiStyle);
             default -> "";

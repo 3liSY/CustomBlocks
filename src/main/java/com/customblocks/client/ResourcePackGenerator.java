@@ -1,776 +1,1577 @@
 package com.customblocks.client;
 
+
+
 import com.customblocks.CustomBlocksMod;
+
 import com.customblocks.core.SlotData;
+
 import com.customblocks.core.SlotManager;
+
 import com.google.gson.Gson;
+
 import com.google.gson.GsonBuilder;
+
 import com.google.gson.JsonObject;
+
 import net.fabricmc.api.EnvType;
+
 import net.fabricmc.api.Environment;
+
 import net.minecraft.client.MinecraftClient;
+
 import net.minecraft.client.texture.NativeImage;
 
+
+
 import java.awt.Color;
+
 import java.io.*;
+
 import java.nio.charset.StandardCharsets;
+
 import java.nio.file.*;
+
 import java.util.Map;
 
+
+
 @Environment(EnvType.CLIENT)
+
 public class ResourcePackGenerator {
 
+
+
     private static final Gson   GSON        = new GsonBuilder().setPrettyPrinting().create();
+
     private static final int    PACK_FORMAT = 34;
+
     private static final String MOD_ID      = CustomBlocksMod.MOD_ID;
 
+
+
     // Mapping from our face key names → Minecraft model face key names
+
     // Note: Minecraft uses "up" / "down"; we expose "top" / "bottom" to users.
+
     private static final Map<String, String> FACE_TO_MC = Map.of(
+
             "top",    "up",
+
             "bottom", "down",
+
             "north",  "north",
+
             "south",  "south",
+
             "east",   "east",
+
             "west",   "west"
+
     );
 
+
+
     public static void generate(MinecraftClient client) {
+
         try {
+
             File mcDir    = client.runDirectory;
+
             File packRoot = new File(mcDir, "resourcepacks/CustomBlocks");
+
             File assets   = new File(packRoot, "assets/" + MOD_ID);
 
+
+
             new File(assets, "blockstates").mkdirs();
+
             new File(assets, "models/block").mkdirs();
+
             new File(assets, "models/item").mkdirs();
+
             new File(assets, "textures/block").mkdirs();
+
             new File(assets, "textures/item").mkdirs();
 
+
+
             // pack.mcmeta
+
             JsonObject pack = new JsonObject();
+
             pack.addProperty("pack_format", PACK_FORMAT);
+
             pack.addProperty("description", "CustomBlocks Generated");
+
             JsonObject meta = new JsonObject();
+
             meta.add("pack", pack);
+
             writeJson(meta, new File(packRoot, "pack.mcmeta"));
+
             // ── Cleanup: delete stale files for slots with no data ──────────
+
             cleanupStaleSlotFiles(assets);
 
+
+
             int effectiveMax = CustomBlocksClient.effectiveMaxSlots();
+
             for (int i = 0; i < effectiveMax; i++) {
+
                 String slotKey  = "slot_" + i;
+
                 String modelRef = MOD_ID + ":block/" + slotKey;
+
                 SlotData data = SlotManager.getBySlot(slotKey);
 
+                // Skip empty slots — no texture, no model, no blockstate needed.
+                // cleanupStaleSlotFiles() above already removed any orphaned files.
+                if (data == null) continue;
+
                 // ── Default (all-faces) texture ────────────────────────────────
+
                 File texDest = new File(assets, "textures/block/" + slotKey + ".png");
+
                 File mcmetaDest = new File(assets, "textures/block/" + slotKey + ".png.mcmeta");
-                if (data != null && data.texture != null && data.texture.length > 0) {
+
+                if (data.texture != null && data.texture.length > 0) {
+
                     // Always write — the old size-guard was unreliable because
+
                     // NativeImage re-encoding changes file size unpredictably.
+
                     writePng(data.texture, texDest);
 
+
+
                     // Use ACTUAL TEXTURE DIMENSIONS as source of truth for "is this
+
                     // an animation strip?" - more reliable than data.isAnimated()
+
                     // which depends on animMeta field that can be null due to a
+
                     // lost packet, stale save file, or legacy broken-build data.
+
                     int frames = com.customblocks.ImageProcessor.getVerticalFrames(data.texture);
+
                     if (frames > 1) {
+
                         // Prefer the REAL per-frame timing from processAnimation
+
                         // when present; otherwise synthesize a uniform default so
+
                         // the block ALWAYS animates instead of showing stacked frames.
+
                         String effectiveMeta;
+
                         boolean synthesized = false;
+
                         if (data.animMeta != null && !data.animMeta.isEmpty()) {
+
                             effectiveMeta = data.animMeta;
+
                         } else {
+
                             effectiveMeta = com.customblocks.ImageProcessor.synthesizeDefaultMcmeta(frames);
+
                             synthesized = true;
+
                         }
+
                         try (java.io.FileWriter fw = new java.io.FileWriter(mcmetaDest, java.nio.charset.StandardCharsets.UTF_8)) {
+
                             fw.write(effectiveMeta);
+
                         }
+
                         if (synthesized) {
+
                             CustomBlocksMod.LOGGER.info(
+
                                 "[CustomBlocks] Pack gen slot_{} ({}): strip detected ({} frames), animMeta was null - SYNTHESIZED default mcmeta",
+
                                 i, data.customId, frames);
+
                         } else {
+
                             CustomBlocksMod.LOGGER.info(
+
                                 "[CustomBlocks] Pack gen slot_{} ({}): strip detected ({} frames), wrote real animMeta ({} chars)",
+
                                 i, data.customId, frames, data.animMeta.length());
+
                         }
+
                     } else {
+
                         // Static texture - remove any stale mcmeta file from a previously-animated state
+
                         if (mcmetaDest.exists()) mcmetaDest.delete();
+
                     }
+
                 } else {
-                    Files.write(texDest.toPath(), PLACEHOLDER_PNG);
+
+                    // No texture data — delete any stale file, don't write placeholder.
+                    // Empty slots show Minecraft's default missing texture (never visible to players).
+                    if (texDest.exists()) texDest.delete();
+
                     if (mcmetaDest.exists()) mcmetaDest.delete();
+
                 }
+
+
 
                 // ── Per-face textures ─────────────────────────────────────────
+
                 if (data != null && data.hasFaces()) {
+
                     for (Map.Entry<String, byte[]> face : data.faceTextures.entrySet()) {
+
                         String faceKey = face.getKey();
+
                         byte[] faceBytes = face.getValue();
+
                         File faceDest = new File(assets,
+
                                 "textures/block/" + slotKey + "_" + faceKey + ".png");
+
                         // Always write — no stale size-guard
+
                         writePng(faceBytes, faceDest);
+
                         // Auto-detect animated face: if height > width, it's a vertical frame strip
+
                         File faceMcmeta = new File(assets,
+
                                 "textures/block/" + slotKey + "_" + faceKey + ".png.mcmeta");
+
                         try {
+
                             int frames = com.customblocks.ImageProcessor.getVerticalFrames(faceBytes);
+
                             if (frames > 1) {
+
                                 // Prefer the REAL per-frame timing from processAnimation
+
                                 // (stored in data.animMeta). Fall back to the shared
+
                                 // synthesizer - single source of truth for default timing.
+
                                 String mcmetaJson;
+
                                 if (data.animMeta != null && !data.animMeta.isEmpty()
+
                                         && data.animMeta.contains("\"frames\"")) {
+
                                     mcmetaJson = data.animMeta;
+
                                 } else {
+
                                     mcmetaJson = com.customblocks.ImageProcessor.synthesizeDefaultMcmeta(frames);
+
                                 }
+
                                 try (java.io.FileWriter fw2 = new java.io.FileWriter(faceMcmeta, java.nio.charset.StandardCharsets.UTF_8)) {
+
                                     fw2.write(mcmetaJson);
+
                                 }
+
                             } else {
+
                                 // Not animated — clean up stale mcmeta
+
                                 if (faceMcmeta.exists()) faceMcmeta.delete();
+
                             }
+
                         } catch (Exception ignored) {
+
                             if (faceMcmeta.exists()) faceMcmeta.delete();
+
                         }
+
                     }
+
                     // Legacy texture stitching: for faces WITHOUT overrides,
+
                     // write a copy of the main texture so each face has its own file.
+
                     if (data.texture != null && data.texture.length > 0) {
+
                         for (String face : SlotData.FACE_KEYS) {
+
                             if (!data.faceTextures.containsKey(face)) {
+
                                 File inheritDest = new File(assets,
+
                                         "textures/block/" + slotKey + "_" + face + ".png");
+
                                 writePng(data.texture, inheritDest);
+
                             }
+
                         }
+
                     }
+
                 }
+
+
 
                 // ── Blockstate ────────────────────────────────────────────────
+
                 JsonObject variant  = new JsonObject(); variant.addProperty("model", modelRef);
+
                 JsonObject variants = new JsonObject(); variants.add("", variant);
+
                 JsonObject bs       = new JsonObject(); bs.add("variants", variants);
+
                 writeJson(bs, new File(assets, "blockstates/" + slotKey + ".json"));
 
+
+
                 // ── Block model ───────────────────────────────────────────────
+
                 JsonObject bm = new JsonObject();
+
                 if (data != null && data.isShaped()) {
+
                     // Shaped block — use explicit elements[], no parent
+
                     JsonObject tex = new JsonObject();
+
                     tex.addProperty("particle", MOD_ID + ":block/" + slotKey);
+
                     // Build texture refs: per-face overrides or default
+
                     for (String face : SlotData.FACE_KEYS) {
+
                         String mcFace = FACE_TO_MC.get(face);
+
                         String texRef = data.faceTextures.containsKey(face)
+
                                 ? MOD_ID + ":block/" + slotKey + "_" + face
+
                                 : MOD_ID + ":block/" + slotKey;
+
                         tex.addProperty(mcFace, texRef);
+
                     }
+
                     bm.add("textures", tex);
+
                     com.google.gson.JsonArray elements = new com.google.gson.JsonArray();
+
                     for (SlotData.ShapeBox box : data.shapeBoxes) {
+
                         JsonObject el = new JsonObject();
+
                         com.google.gson.JsonArray from = new com.google.gson.JsonArray();
+
                         from.add(box.x1()); from.add(box.y1()); from.add(box.z1());
+
                         com.google.gson.JsonArray to = new com.google.gson.JsonArray();
+
                         to.add(box.x2()); to.add(box.y2()); to.add(box.z2());
+
                         el.add("from", from);
+
                         el.add("to", to);
+
                         JsonObject faces = new JsonObject();
+
                         // UV: map each face to the correct portion of the 16x16 texture
+
                         // based on the actual box coordinates, so a slab shows the right
+
                         // slice of the texture rather than black+purple missing texture.
+
                         float x1 = box.x1(), y1 = box.y1(), z1 = box.z1();
+
                         float x2 = box.x2(), y2 = box.y2(), z2 = box.z2();
 
+
+
                         // down  (bottom) face — uses X/Z coords
+
                         addFaceWithUV(faces, "down",   "bottom", x1, z1, x2, z2);
+
                         // up    (top)    face — uses X/Z coords
+
                         addFaceWithUV(faces, "up",     "top",    x1, z1, x2, z2);
+
                         // north face — uses X/Y coords (z1 side), UV flipped X
+
                         addFaceWithUV(faces, "north",  "north",  16 - x2, 16 - y2, 16 - x1, 16 - y1);
+
                         // south face — uses X/Y coords (z2 side)
+
                         addFaceWithUV(faces, "south",  "south",  x1, 16 - y2, x2, 16 - y1);
+
                         // west  face — uses Z/Y coords (x1 side)
+
                         addFaceWithUV(faces, "west",   "west",   z1, 16 - y2, z2, 16 - y1);
+
                         // east  face — uses Z/Y coords (x2 side), UV flipped Z
+
                         addFaceWithUV(faces, "east",   "east",   16 - z2, 16 - y2, 16 - z1, 16 - y1);
 
+
+
                         el.add("faces", faces);
+
                         elements.add(el);
+
                     }
+
                     bm.add("elements", elements);
+
                 } else if (data != null && data.hasFaces()) {
+
                     // cube — explicit texture ref per face; legacy stitching ensures every
+
                     // face references its own file so corruption of one doesn't cascade.
+
                     bm.addProperty("parent", "minecraft:block/cube");
+
                     JsonObject tex = new JsonObject();
+
                     tex.addProperty("particle", MOD_ID + ":block/" + slotKey);
+
                     for (String face : SlotData.FACE_KEYS) {
+
                         String mcFace = FACE_TO_MC.get(face);
+
                         tex.addProperty(mcFace, MOD_ID + ":block/" + slotKey + "_" + face);
+
                     }
+
                     bm.add("textures", tex);
+
                 } else {
+
                     // cube_all — simple single texture
+
                     bm.addProperty("parent", "minecraft:block/cube_all");
+
                     JsonObject tex = new JsonObject();
+
                     tex.addProperty("all", MOD_ID + ":block/" + slotKey);
+
                     bm.add("textures", tex);
+
                 }
+
                 writeJson(bm, new File(assets, "models/block/" + slotKey + ".json"));
 
+
+
                 // ── Item model (always shows the default face — top face if set, else all) ──
+
                 JsonObject im = new JsonObject();
+
                 im.addProperty("parent", modelRef);
+
                 writeJson(im, new File(assets, "models/item/" + slotKey + ".json"));
+
             }
+
+
 
             // Tab icon — written to item texture AND pack icon
+
             byte[] tabIcon = SlotManager.getTabIconTexture();
+
             File tabDest = new File(assets, "textures/item/tab_icon.png");
+
             if (tabIcon != null && tabIcon.length > 0) {
+
                 writePng(tabIcon, tabDest);
+
                 // Also write as pack.png so it shows in the resource pack list
+
                 writePng(tabIcon, new File(packRoot, "pack.png"));
+
             } else {
+
                 Files.write(tabDest.toPath(), PLACEHOLDER_PNG);
+
             }
+
+
 
             // ── Color Square items — flat 16x16 coloured squares ─────────────────────
+
             String[][] squares = {{"black_square",  "10,10,10"},
+
                                    {"yellow_square", "240,200,20"},
+
                                    {"green_square",  "30,140,30"}};
+
             for (String[] sq : squares) {
+
                 String itemId  = sq[0];
+
                 String[] rgb   = sq[1].split(",");
+
                 // 9x9 center square on 16x16 RGBA canvas
+
                 byte[] pngData = makeSquarePng(
+
                         Integer.parseInt(rgb[0].trim()),
+
                         Integer.parseInt(rgb[1].trim()),
+
                         Integer.parseInt(rgb[2].trim()));
+
                 File sqTex = new File(assets, "textures/item/" + itemId + ".png");
+
                 Files.write(sqTex.toPath(), pngData);
+
                 JsonObject sqTex2 = new JsonObject();
+
                 sqTex2.addProperty("layer0", MOD_ID + ":item/" + itemId);
+
                 JsonObject sqModel = new JsonObject();
+
                 sqModel.addProperty("parent", "minecraft:item/generated");
+
                 sqModel.add("textures", sqTex2);
+
                 writeJson(sqModel, new File(assets, "models/item/" + itemId + ".json"));
+
             }
+
+
 
             // Color Triangle items
+
             String[][] triangles = {{"black_triangle",  "10,10,10"},
+
                                      {"yellow_triangle", "240,200,20"},
+
                                      {"green_triangle",  "30,140,30"}};
+
             for (String[] tr : triangles) {
+
                 String itemId  = tr[0];
+
                 String[] rgb   = tr[1].split(",");
+
                 byte[] pngData = makeTrianglePng(
+
                         Integer.parseInt(rgb[0].trim()),
+
                         Integer.parseInt(rgb[1].trim()),
+
                         Integer.parseInt(rgb[2].trim()));
+
                 File trTex = new File(assets, "textures/item/" + itemId + ".png");
+
                 Files.write(trTex.toPath(), pngData);
+
                 JsonObject trTex2 = new JsonObject();
+
                 trTex2.addProperty("layer0", MOD_ID + ":item/" + itemId);
+
                 JsonObject trModel = new JsonObject();
+
                 trModel.addProperty("parent", "minecraft:item/generated");
+
                 trModel.add("textures", trTex2);
+
                 writeJson(trModel, new File(assets, "models/item/" + itemId + ".json"));
+
             }
+
+
 
             // ── Rainbow Rectangle item texture ─────────────────────────────────
+
             File rectTex = new File(assets, "textures/item/rainbow_rectangle.png");
+
             Files.write(rectTex.toPath(), makeRainbowRectanglePng());
+
             JsonObject rectTexObj = new JsonObject();
+
             rectTexObj.addProperty("layer0", MOD_ID + ":item/rainbow_rectangle");
+
             JsonObject rectModel = new JsonObject();
+
             rectModel.addProperty("parent", "minecraft:item/generated");
+
             rectModel.add("textures", rectTexObj);
+
             writeJson(rectModel, new File(assets, "models/item/rainbow_rectangle.json"));
 
+
+
             CustomBlocksMod.LOGGER.info("[CustomBlocks] Resource pack generated.");
+
         } catch (Exception e) {
+
             CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to generate resource pack", e);
+
         }
+
     }
 
+
+
     /**
+
      * Write ONLY the texture PNG + mcmeta for a single slot.
+
      * Blockstate + model files already exist from the initial full generate.
+
      * This is 1-3 file writes instead of 2000+.
+
      */
+
     public static void generateSingleSlot(MinecraftClient client, int slotIndex) {
+
         try {
+
             File packRoot = new File(client.runDirectory, "resourcepacks/CustomBlocks");
+
             File assets = new File(packRoot, "assets/" + MOD_ID);
+
             String slotKey = "slot_" + slotIndex;
+
             SlotData data = SlotManager.getBySlot(slotKey);
 
+
+
             // Ensure directories exist
+
             new File(assets, "textures/block").mkdirs();
 
+
+
             // ── Default (all-faces) texture ──────────────────────────────────
+
             File texDest = new File(assets, "textures/block/" + slotKey + ".png");
+
             File mcmetaDest = new File(assets, "textures/block/" + slotKey + ".png.mcmeta");
+
             if (data != null && data.texture != null && data.texture.length > 0) {
+
                 writePng(data.texture, texDest);
+
                 int frames = com.customblocks.ImageProcessor.getVerticalFrames(data.texture);
+
                 if (frames > 1) {
+
                     String effectiveMeta = (data.animMeta != null && !data.animMeta.isEmpty())
+
                         ? data.animMeta
+
                         : com.customblocks.ImageProcessor.synthesizeDefaultMcmeta(frames);
+
                     try (java.io.FileWriter fw = new java.io.FileWriter(mcmetaDest, java.nio.charset.StandardCharsets.UTF_8)) {
+
                         fw.write(effectiveMeta);
+
                     }
+
                 } else {
+
                     if (mcmetaDest.exists()) mcmetaDest.delete();
+
                 }
+
             } else {
+
                 Files.write(texDest.toPath(), PLACEHOLDER_PNG);
+
                 if (mcmetaDest.exists()) mcmetaDest.delete();
+
             }
+
+
 
             // ── Per-face textures ────────────────────────────────────────────
+
             if (data != null && data.hasFaces()) {
+
                 for (Map.Entry<String, byte[]> face : data.faceTextures.entrySet()) {
+
                     File faceDest = new File(assets,
+
                             "textures/block/" + slotKey + "_" + face.getKey() + ".png");
+
                     writePng(face.getValue(), faceDest);
+
                     // Handle face mcmeta
+
                     File faceMcmeta = new File(assets,
+
                             "textures/block/" + slotKey + "_" + face.getKey() + ".png.mcmeta");
+
                     try {
+
                         int frames = com.customblocks.ImageProcessor.getVerticalFrames(face.getValue());
+
                         if (frames > 1) {
+
                             String mcmetaJson = (data.animMeta != null && !data.animMeta.isEmpty()
+
                                     && data.animMeta.contains("\"frames\""))
+
                                     ? data.animMeta
+
                                     : com.customblocks.ImageProcessor.synthesizeDefaultMcmeta(frames);
+
                             try (java.io.FileWriter fw = new java.io.FileWriter(faceMcmeta, java.nio.charset.StandardCharsets.UTF_8)) {
+
                                 fw.write(mcmetaJson);
+
                             }
+
                         } else {
+
                             if (faceMcmeta.exists()) faceMcmeta.delete();
+
                         }
+
                     } catch (Exception ignored) {
+
                         if (faceMcmeta.exists()) faceMcmeta.delete();
+
                     }
+
                 }
+
                 // Inherit main texture for faces without overrides
+
                 if (data.texture != null && data.texture.length > 0) {
+
                     for (String face : SlotData.FACE_KEYS) {
+
                         if (!data.faceTextures.containsKey(face)) {
+
                             File inheritDest = new File(assets,
+
                                     "textures/block/" + slotKey + "_" + face + ".png");
+
                             writePng(data.texture, inheritDest);
+
                         }
+
                     }
+
                 }
+
             }
+
+
 
             // ── Blockstate + item model — only if missing (static files) ──────
+
             File bsFile = new File(assets, "blockstates/" + slotKey + ".json");
+
             if (!bsFile.exists()) {
+
                 new File(assets, "blockstates").mkdirs();
+
                 new File(assets, "models/item").mkdirs();
+
                 String modelRef = MOD_ID + ":block/" + slotKey;
 
+
+
                 // Blockstate
+
                 JsonObject variant  = new JsonObject(); variant.addProperty("model", modelRef);
+
                 JsonObject variants = new JsonObject(); variants.add("", variant);
+
                 JsonObject bs       = new JsonObject(); bs.add("variants", variants);
+
                 writeJson(bs, bsFile);
 
+
+
                 // Item model
+
                 JsonObject im = new JsonObject();
+
                 im.addProperty("parent", modelRef);
+
                 writeJson(im, new File(assets, "models/item/" + slotKey + ".json"));
+
             }
+
+
 
             // ── Block model — ALWAYS regenerate (depends on face textures) ───
+
             new File(assets, "models/block").mkdirs();
+
             String modelRef = MOD_ID + ":block/" + slotKey;
+
             JsonObject bm = new JsonObject();
+
             if (data != null && data.isShaped()) {
+
                 // Shaped block — explicit elements[], no parent
+
                 JsonObject tex = new JsonObject();
+
                 tex.addProperty("particle", MOD_ID + ":block/" + slotKey);
+
                 for (String face : SlotData.FACE_KEYS) {
+
                     String mcFace = FACE_TO_MC.get(face);
+
                     String texRef = data.faceTextures.containsKey(face)
+
                             ? MOD_ID + ":block/" + slotKey + "_" + face
+
                             : MOD_ID + ":block/" + slotKey;
+
                     tex.addProperty(mcFace, texRef);
+
                 }
+
                 bm.add("textures", tex);
+
                 com.google.gson.JsonArray elements = new com.google.gson.JsonArray();
+
                 for (SlotData.ShapeBox box : data.shapeBoxes) {
+
                     JsonObject el = new JsonObject();
+
                     com.google.gson.JsonArray from = new com.google.gson.JsonArray();
+
                     from.add(box.x1()); from.add(box.y1()); from.add(box.z1());
+
                     com.google.gson.JsonArray to = new com.google.gson.JsonArray();
+
                     to.add(box.x2()); to.add(box.y2()); to.add(box.z2());
+
                     el.add("from", from);
+
                     el.add("to", to);
+
                     JsonObject faces = new JsonObject();
+
                     float x1 = box.x1(), y1 = box.y1(), z1 = box.z1();
+
                     float x2 = box.x2(), y2 = box.y2(), z2 = box.z2();
+
                     addFaceWithUV(faces, "down",   "bottom", x1, z1, x2, z2);
+
                     addFaceWithUV(faces, "up",     "top",    x1, z1, x2, z2);
+
                     addFaceWithUV(faces, "north",  "north",  16 - x2, 16 - y2, 16 - x1, 16 - y1);
+
                     addFaceWithUV(faces, "south",  "south",  x1, 16 - y2, x2, 16 - y1);
+
                     addFaceWithUV(faces, "west",   "west",   z1, 16 - y2, z2, 16 - y1);
+
                     addFaceWithUV(faces, "east",   "east",   16 - z2, 16 - y2, 16 - z1, 16 - y1);
+
                     el.add("faces", faces);
+
                     elements.add(el);
+
                 }
+
                 bm.add("elements", elements);
+
             } else if (data != null && data.hasFaces()) {
+
                 // Per-face textures — use cube parent with individual face refs
+
                 bm.addProperty("parent", "minecraft:block/cube");
+
                 JsonObject tex = new JsonObject();
+
                 tex.addProperty("particle", MOD_ID + ":block/" + slotKey);
+
                 for (String face : SlotData.FACE_KEYS) {
+
                     String mcFace = FACE_TO_MC.get(face);
+
                     tex.addProperty(mcFace, MOD_ID + ":block/" + slotKey + "_" + face);
+
                 }
+
                 bm.add("textures", tex);
+
             } else {
+
                 // Simple cube_all — single texture on all faces
+
                 bm.addProperty("parent", "minecraft:block/cube_all");
+
                 JsonObject tex = new JsonObject();
+
                 tex.addProperty("all", MOD_ID + ":block/" + slotKey);
+
                 bm.add("textures", tex);
+
             }
+
             writeJson(bm, new File(assets, "models/block/" + slotKey + ".json"));
 
+
+
             CustomBlocksMod.LOGGER.info("[CustomBlocks] Single-slot generate for slot_{} complete.", slotIndex);
+
         } catch (Exception e) {
+
             CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to generate single slot_{}", slotIndex, e);
+
         }
+
     }
+
+
 
     /**
+
      * Deletes stale resource pack files for slot indices that have no SlotData.
+
      * This prevents ~1500 unnecessary placeholder files from bloating the atlas.
+
      */
-    public static void cleanupStaleSlotFiles(File assets) {
+
+    private static void cleanupStaleSlotFiles(File assets) {
+
         int deleted = 0;
+
         String[][] dirs = {
+
             {"textures/block", "slot_"},
+
             {"blockstates", "slot_"},
+
             {"models/block", "slot_"},
+
             {"models/item", "slot_"}
+
         };
+
         for (String[] entry : dirs) {
+
             File dir = new File(assets, entry[0]);
+
             if (!dir.exists()) continue;
+
             File[] files = dir.listFiles();
+
             if (files == null) continue;
+
             for (File f : files) {
+
                 String name = f.getName();
+
                 if (!name.startsWith(entry[1])) continue;
+
                 try {
+
                     // Extract slot index from "slot_123.png", "slot_123_north.png", "slot_123.json", etc.
+
                     String afterPrefix = name.substring(entry[1].length());
+
                     String numPart = afterPrefix.split("[_.]")[0];
+
                     int idx = Integer.parseInt(numPart);
+
                     if (SlotManager.getBySlot("slot_" + idx) == null) {
+
                         f.delete();
+
                         deleted++;
+
                     }
+
                 } catch (NumberFormatException ignored) {}
+
             }
+
         }
+
         if (deleted > 0) {
+
             CustomBlocksMod.LOGGER.info("[CustomBlocks] Cleanup: deleted {} stale slot files.", deleted);
+
         }
+
     }
 
-    /** Decodes image bytes (PNG, JPEG, etc) and writes as valid PNG. */
+
+
+    /** Writes image bytes as PNG. If already valid PNG, writes raw bytes directly
+     *  (skips decode+re-encode cycle). Falls back to NativeImage for non-PNG (JPEG etc). */
+
     private static void writePng(byte[] imageBytes, File dest) {
-        try (NativeImage img = NativeImage.read(new ByteArrayInputStream(imageBytes))) {
+
+        try {
+
             dest.getParentFile().mkdirs();
-            img.writeTo(dest.toPath());
+
+            // Reject obviously corrupt data — don't even try NativeImage
+            if (imageBytes == null || imageBytes.length < 67) {
+                CustomBlocksMod.LOGGER.warn("[CustomBlocks] Texture too small ({} bytes) for {}, skipping",
+                        imageBytes != null ? imageBytes.length : 0, dest.getName());
+                return;
+            }
+
+            // PNG signature: 0x89 0x50 0x4E 0x47 (first 4 bytes)
+            if (imageBytes.length >= 4
+                    && imageBytes[0] == (byte) 0x89
+                    && imageBytes[1] == (byte) 0x50
+                    && imageBytes[2] == (byte) 0x4E
+                    && imageBytes[3] == (byte) 0x47) {
+                // Already valid PNG — write raw bytes, skip decode+re-encode
+                Files.write(dest.toPath(), imageBytes);
+            } else {
+                // Non-PNG (JPEG, etc) — decode and re-encode as PNG
+                try (NativeImage img = NativeImage.read(new ByteArrayInputStream(imageBytes))) {
+                    img.writeTo(dest.toPath());
+                }
+            }
+
         } catch (Exception e) {
+
             try { Files.write(dest.toPath(), PLACEHOLDER_PNG); }
+
             catch (Exception ignored) {}
+
             CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not decode image for {}, wrote placeholder PNG", dest.getName());
+
         }
+
     }
+
+
 
     private static void writeJson(JsonObject json, File dest) throws IOException {
+
         dest.getParentFile().mkdirs();
+
         try (FileWriter fw = new FileWriter(dest, StandardCharsets.UTF_8)) {
+
             GSON.toJson(json, fw);
+
         }
+
     }
+
+
 
     // ── Item texture generators ───────────────────────────────────────────────
 
+
+
     /**
+
      * Glossy colour-swatch square (16×16 RGBA):
+
      *  - 1-px transparent margin on all sides
+
      *  - 1-px very-dark border ring
+
      *  - main colour fill
+
      *  - top highlight strip (colour blended ~55% toward white)
+
      *  - bottom-right shadow strip (colour × 0.65)
+
      *  - 2-px bright shine dot at top-left inner corner
+
      */
+
     /**
+
      * Rainbow Rectangle item texture — 16x8 glowing rainbow bar with rounded ends,
+
      * animated-style gradient from left (red) to right (violet) with a white shine strip.
+
      */
+
     private static byte[] makeRainbowRectanglePng() {
+
         int[][] px = new int[16][16];
+
         // Draw a rounded rectangle from row 4 to row 11 (8px tall, 16px wide)
+
         float[] hues = {0f, 0.083f, 0.167f, 0.25f, 0.333f, 0.417f, 0.5f, 0.583f, 0.667f,
+
                         0.75f, 0.833f, 0.917f, 1f, 1f, 1f, 1f};
+
         for (int row = 4; row <= 11; row++) {
+
             for (int col = 0; col < 16; col++) {
+
                 // Rounded corners — skip outermost 2 cells on top/bottom rows at edges
+
                 if ((row == 4 || row == 11) && (col == 0 || col == 15)) continue;
+
                 float hue = hues[col];
+
                 float sat = 1f, bri = row == 5 ? 1f : 0.85f; // shine on second row
+
                 int rgb = hsbToArgb(hue, sat, bri);
+
                 // Add white shine on top inner row
+
                 if (row == 5) {
+
                     int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
+
                     r = lerp(r, 255, 0.5f); g = lerp(g, 255, 0.5f); b = lerp(b, 255, 0.5f);
+
                     rgb = argb(255, r, g, b);
+
                 }
+
                 px[row][col] = rgb;
+
             }
+
         }
+
         // Dark outline
+
         for (int col = 1; col < 15; col++) {
+
             if (px[4][col] != 0) px[4][col] = darken(px[4][col]);
+
             if (px[11][col] != 0) px[11][col] = darken(px[11][col]);
+
         }
+
         for (int row = 5; row <= 10; row++) {
+
             if (px[row][0] != 0) px[row][0] = darken(px[row][0]);
+
             if (px[row][15] != 0) px[row][15] = darken(px[row][15]);
+
         }
+
         return pixelsToPng(px);
+
     }
+
+
 
     private static int hsbToArgb(float h, float s, float b) {
+
         int rgb = Color.HSBtoRGB(h, s, b);
+
         return argb(255, (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+
     }
+
+
 
     private static int darken(int argbColor) {
+
         int r = ((argbColor >> 16) & 0xFF) / 4;
+
         int g = ((argbColor >> 8)  & 0xFF) / 4;
+
         int b = ( argbColor        & 0xFF) / 4;
+
         return argb(255, r, g, b);
+
     }
+
+
 
     private static byte[] makeSquarePng(int r, int g, int b) {
+
         int[][] px = new int[16][16]; // ARGB (0 = fully transparent)
 
+
+
         int dark  = argb(255, r/4,                 g/4,                 b/4);
+
         int main  = argb(255, r,                   g,                   b);
+
         int light = argb(255, lerp(r, 255, 0.55f), lerp(g, 255, 0.55f), lerp(b, 255, 0.55f));
+
         int shade = argb(255, (int)(r * 0.65f),    (int)(g * 0.65f),    (int)(b * 0.65f));
+
         int shine = argb(255, 255,                  255,                 255);
+
+
 
         // Main fill (rows 2-13, cols 2-13)
+
         for (int row = 2; row <= 13; row++)
+
             for (int col = 2; col <= 13; col++)
+
                 px[row][col] = main;
 
+
+
         // Dark border ring (row/col 1 and 14)
+
         for (int i = 1; i <= 14; i++) {
+
             px[1][i] = dark;  px[14][i] = dark;
+
             px[i][1] = dark;  px[i][14] = dark;
+
         }
+
+
 
         // Highlight strip — top 3 rows of fill
+
         for (int row = 2; row <= 4; row++)
+
             for (int col = 2; col <= 12; col++)
+
                 px[row][col] = light;
 
+
+
         // Shadow — bottom 2 rows + right 2 cols of fill
+
         for (int row = 12; row <= 13; row++)
+
             for (int col = 4;  col <= 13; col++) px[row][col] = shade;
+
         for (int row = 4;  row <= 13; row++)
+
             for (int col = 12; col <= 13; col++) px[row][col] = shade;
 
+
+
         // Shine dots at top-left inner corner
+
         px[2][2] = shine; px[2][3] = shine; px[3][2] = shine;
 
+
+
         return pixelsToPng(px);
+
     }
+
+
 
     /**
+
      * Bold outlined upward-pointing triangle (16×16 RGBA):
+
      *  - Apex:  row 1, centred on cols 7-8
+
      *  - Base:  row 14, cols 1-14
+
      *  - 1-px very-dark outline on all edges
+
      *  - main colour fill
+
      *  - lighter highlight on top quarter
+
      *  - shine dot just below the apex
+
      */
+
     private static byte[] makeTrianglePng(int r, int g, int b) {
+
         int[][] px = new int[16][16];
 
+
+
         int dark  = argb(255, r/4,                 g/4,                 b/4);
+
         int main  = argb(255, r,                   g,                   b);
+
         int light = argb(255, lerp(r, 255, 0.55f), lerp(g, 255, 0.55f), lerp(b, 255, 0.55f));
+
         int shine = argb(255, 255,                  255,                 255);
 
+
+
         float apexCx  = 7.5f;
+
         int   apexRow = 1, baseRow = 14;
+
         float baseHW  = 6.5f;
 
+
+
         // 1 — filled triangle
+
         for (int row = apexRow; row <= baseRow; row++) {
+
             float t    = (float)(row - apexRow) / (baseRow - apexRow);
+
             float hw   = t * baseHW;
+
             int   left = Math.round(apexCx - hw);
+
             int   right= Math.round(apexCx + hw);
+
             for (int col = left; col <= right; col++)
+
                 if (col >= 0 && col < 16) px[row][col] = main;
+
         }
+
+
 
         // 2 — dark outline (left edge, right edge, base row)
+
         for (int row = apexRow; row <= baseRow; row++) {
+
             float t    = (float)(row - apexRow) / (baseRow - apexRow);
+
             float hw   = t * baseHW;
+
             int   left = Math.round(apexCx - hw);
+
             int   right= Math.round(apexCx + hw);
+
             if (left  >= 0 && left  < 16) px[row][left]  = dark;
+
             if (right >= 0 && right < 16) px[row][right] = dark;
+
         }
+
         // Top apex pixels
+
         px[apexRow][7] = dark; px[apexRow][8] = dark;
+
         // Base row
+
         for (int col = 1; col <= 14; col++) if (px[baseRow][col] != 0) px[baseRow][col] = dark;
 
+
+
         // 3 — highlight on top quarter (inside outline only)
+
         for (int row = apexRow + 1; row <= apexRow + 4; row++) {
+
             float t    = (float)(row - apexRow) / (baseRow - apexRow);
+
             float hw   = t * baseHW;
+
             int   left = Math.round(apexCx - hw) + 1;  // stay inside outline
+
             int   right= Math.round(apexCx + hw) - 1;
+
             for (int col = left; col <= right; col++)
+
                 if (col >= 0 && col < 16 && px[row][col] == main)
+
                     px[row][col] = light;
+
         }
 
+
+
         // 4 — shine dot just below apex
+
         if (px[3][7] == light) px[3][7] = shine;
+
         if (px[3][8] == light) px[3][8] = shine;
 
+
+
         return pixelsToPng(px);
+
     }
+
+
 
     // ── PNG encoding helpers ──────────────────────────────────────────────────
 
+
+
     private static int argb(int a, int r, int g, int b) {
+
         return (a << 24) | (r << 16) | (g << 8) | b;
+
     }
+
+
 
     private static int lerp(int v, int target, float f) {
+
         return Math.max(0, Math.min(255, v + (int)((target - v) * f)));
+
     }
+
+
 
     /** Encode a 16×16 ARGB int[][] to a valid RGBA PNG byte array. */
+
     private static byte[] pixelsToPng(int[][] argbPixels) {
+
         try {
+
             int w = 16, h = 16;
+
             byte[] raw = new byte[h * (1 + w * 4)];
+
             for (int row = 0; row < h; row++) {
+
                 int base = row * (1 + w * 4);
+
                 raw[base] = 0; // filter = None
+
                 for (int col = 0; col < w; col++) {
+
                     int v = argbPixels[row][col];
+
                     raw[base + 1 + col*4    ] = (byte)((v >> 16) & 0xFF); // R
+
                     raw[base + 1 + col*4 + 1] = (byte)((v >>  8) & 0xFF); // G
+
                     raw[base + 1 + col*4 + 2] = (byte)( v        & 0xFF); // B
+
                     raw[base + 1 + col*4 + 3] = (byte)((v >> 24) & 0xFF); // A
+
                 }
+
             }
+
             java.util.zip.Deflater def = new java.util.zip.Deflater(java.util.zip.Deflater.BEST_COMPRESSION);
+
             def.setInput(raw); def.finish();
+
             byte[] comp = new byte[raw.length + 128];
+
             int compLen = def.deflate(comp);
+
             def.end();
+
             byte[] idat = java.util.Arrays.copyOf(comp, compLen);
 
+
+
             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+
             out.write(new byte[]{(byte)0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A});
+
             writeChunk(out, "IHDR", new byte[]{0,0,0,16, 0,0,0,16, 8, 6, 0, 0, 0});
+
             writeChunk(out, "IDAT", idat);
+
             writeChunk(out, "IEND", new byte[0]);
+
             return out.toByteArray();
+
         } catch (Exception e) {
+
             return PLACEHOLDER_PNG;
+
         }
+
     }
+
+
 
     /**
+
      * Add a Minecraft block model face with correct UV coordinates based on the
+
      * box's extent, so shaped blocks (slabs, etc.) sample the right region of the
+
      * texture instead of rendering as black+purple missing texture.
+
      */
+
     private static void addFaceWithUV(JsonObject faces, String mcFaceName, String cbFaceName,
+
                                        float u1, float v1, float u2, float v2) {
+
         JsonObject faceObj = new JsonObject();
+
         com.google.gson.JsonArray uv = new com.google.gson.JsonArray();
+
         uv.add(0f);
+
         uv.add(0f);
+
         uv.add(16f);
+
         uv.add(16f);
+
         faceObj.add("uv", uv);
+
         faceObj.addProperty("texture", "#" + FACE_TO_MC.get(cbFaceName));
+
         faceObj.addProperty("cullface", mcFaceName);
+
         faces.add(mcFaceName, faceObj);
+
     }
+
+
 
     private static void writeChunk(java.io.ByteArrayOutputStream out, String type, byte[] data) throws Exception {
+
         byte[] typeBytes = type.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+
         // Length
+
         out.write((data.length >>> 24) & 0xFF);
+
         out.write((data.length >>> 16) & 0xFF);
+
         out.write((data.length >>> 8)  & 0xFF);
+
         out.write( data.length         & 0xFF);
+
         // Type
+
         out.write(typeBytes);
+
         // Data
+
         out.write(data);
+
         // CRC over type + data
+
         java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+
         crc.update(typeBytes);
+
         crc.update(data);
+
         long c = crc.getValue();
+
         out.write((int)(c >>> 24) & 0xFF);
+
         out.write((int)(c >>> 16) & 0xFF);
+
         out.write((int)(c >>> 8)  & 0xFF);
+
         out.write((int) c         & 0xFF);
+
     }
 
+
+
     // 1×1 opaque pink placeholder PNG
+
     private static final byte[] PLACEHOLDER_PNG = {
+
         (byte)0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A,0x00,0x00,0x00,0x0D,0x49,0x48,0x44,0x52,
+
         0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x01,0x08,0x02,0x00,0x00,0x00,(byte)0x90,0x77,0x53,(byte)0xDE,
+
         0x00,0x00,0x00,0x0C,0x49,0x44,0x41,0x54,0x08,(byte)0xD7,0x63,(byte)0xF8,(byte)0x0F,(byte)0xF0,
+
         0x00,0x00,0x00,0x02,0x00,0x01,(byte)0xE2,0x21,(byte)0xBC,0x33,0x00,0x00,0x00,0x00,
+
         0x49,0x45,0x4E,0x44,(byte)0xAE,0x42,0x60,(byte)0x82
+
     };
+
 }
+

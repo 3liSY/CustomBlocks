@@ -78,6 +78,12 @@ public final class SlotManager {
 
     private static final ConcurrentHashMap<String, SlotData> bySlot = new ConcurrentHashMap<>();
 
+    /** Free slot indices for O(log n) findFreeSlot(). Maintained by put()/remove()/loadAll(). */
+    private static final TreeSet<Integer> freeSlotIndices = new TreeSet<>();
+
+    /** Cached sorted slot list — invalidated on put()/remove(). */
+    private static volatile List<SlotData> cachedSortedSlots = null;
+
     private static volatile byte[] tabIconTexture = null;
 
 
@@ -180,13 +186,21 @@ public final class SlotManager {
 
     public static List<SlotData> sortedSlots() {
 
-        return byId.values().stream()
+        List<SlotData> cached = cachedSortedSlots;
+
+        if (cached != null) return cached;
+
+        cached = byId.values().stream()
 
                 .filter(d -> !"tab_icon".equals(d.customId))
 
-                .sorted(Comparator.comparingInt(d -> d.index))
+                .sorted(Comparator.comparing(d -> d.displayNameLower))
 
                 .collect(Collectors.toList());
+
+        cachedSortedSlots = cached;
+
+        return cached;
 
     }
 
@@ -244,7 +258,7 @@ public final class SlotManager {
 
         if (idx < 0) return null;
 
-        SlotData data = new SlotData(idx, customId, displayName, texture);
+        SlotData data = SlotData.createTrusted(idx, customId, displayName, texture);
 
         put(data);
 
@@ -273,9 +287,16 @@ public final class SlotManager {
 
         if (existing != null) remove(existing.customId);
 
-        SlotData data = new SlotData(index, customId, displayName, texture);
+        SlotData data = SlotData.createTrusted(index, customId, displayName, texture);
 
         put(data);
+
+        // Write texture to .dat file (same as assign()) — prevents loss on crash
+        if (data.texture != null && data.texture.length > 0) {
+            final int slotIdx = data.index;
+            final byte[] texCopy = data.texture.clone();
+            IO_EXECUTOR.submit(() -> writeTextureFile(slotIdx, texCopy));
+        }
 
         return data;
 
@@ -345,6 +366,8 @@ public final class SlotManager {
 
         if (data != null) {
             bySlot.remove("slot_" + data.index);
+            if (data.index < maxSlots()) freeSlotIndices.add(data.index);
+            cachedSortedSlots = null;
             // Phase 1: clean up texture files
             final int slotIdx = data.index;
             IO_EXECUTOR.submit(() -> deleteTextureFiles(slotIdx));
@@ -429,7 +452,11 @@ public final class SlotManager {
 
     public static void clearAllFaces(String id)                    { update(id, SlotData::withClearedFaces); }
 
-    public static void setShape(String id, List<SlotData.ShapeBox> boxes) { update(id, d -> d.withShapeBoxes(boxes)); }
+    public static void setShape(String id, List<SlotData.ShapeBox> boxes) {
+        SlotData old = byId.get(id);
+        update(id, d -> d.withShapeBoxes(boxes));
+        if (old != null) com.customblocks.block.SlotBlock.invalidateShape(old.index);
+    }
 
 
 
@@ -443,6 +470,8 @@ public final class SlotManager {
 
     public static void addBox(String id, SlotData.ShapeBox box) {
 
+        SlotData old = byId.get(id);
+
         update(id, d -> {
 
             List<SlotData.ShapeBox> newBoxes = new ArrayList<>(d.shapeBoxes != null ? d.shapeBoxes : List.of());
@@ -453,11 +482,15 @@ public final class SlotManager {
 
         });
 
+        if (old != null) com.customblocks.block.SlotBlock.invalidateShape(old.index);
+
     }
 
 
 
     public static void removeBox(String id, int boxIndex) {
+
+        SlotData old = byId.get(id);
 
         update(id, d -> {
 
@@ -470,6 +503,8 @@ public final class SlotManager {
             return d.withShapeBoxes(newBoxes.isEmpty() ? null : newBoxes);
 
         });
+
+        if (old != null) com.customblocks.block.SlotBlock.invalidateShape(old.index);
 
     }
 
@@ -692,13 +727,15 @@ public final class SlotManager {
                         }
                     }
 
+                    rebuildFreeSlotSet();
+
                 }
 
             }
 
 
 
-            LOGGER.info("[CustomBlocks] Loaded {} slots.", byId.size());
+            LOGGER.info("[CustomBlocks] Loaded {} slots ({} free).", byId.size(), freeSlotIndices.size());
 
         } catch (Exception e) {
 
@@ -1110,7 +1147,7 @@ public final class SlotManager {
 
 
 
-        return new SlotData(index, customId, displayName, texture,
+        return SlotData.createTrustedFull(index, customId, displayName, texture,
 
                 lightLevel, hardness, soundType, faceTextures, animMeta, shapeBoxes, noCol);
 
@@ -1237,6 +1274,10 @@ public final class SlotManager {
 
         bySlot.put("slot_" + data.index, data);
 
+        freeSlotIndices.remove(data.index);
+
+        cachedSortedSlots = null;
+
         invalidateHash();
 
     }
@@ -1245,16 +1286,19 @@ public final class SlotManager {
 
     private static int findFreeSlot() {
 
+        Integer first = freeSlotIndices.isEmpty() ? null : freeSlotIndices.first();
+
+        return first != null ? first : -1;
+
+    }
+
+    /** Rebuild the freeSlotIndices set from scratch (called after loadAll clears maps). */
+    private static void rebuildFreeSlotSet() {
+        freeSlotIndices.clear();
         int max = maxSlots();
-
         for (int i = 0; i < max; i++) {
-
-            if (!bySlot.containsKey("slot_" + i)) return i;
-
+            if (!bySlot.containsKey("slot_" + i)) freeSlotIndices.add(i);
         }
-
-        return -1;
-
     }
 
 }

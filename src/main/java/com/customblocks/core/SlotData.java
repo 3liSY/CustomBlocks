@@ -105,6 +105,22 @@ public final class SlotData {
                 null, null, null, false);
     }
 
+    /** Trusted factory — skips isBrokenTexture() decode. Use for batch loads and drip-feed
+     *  where texture bytes come from trusted storage, not user upload. */
+    static SlotData createTrusted(int index, String customId, String displayName, byte[] texture) {
+        return new SlotData(index, customId, displayName, texture, 0, 1.5f, "stone",
+                null, null, null, false, false);
+    }
+
+    /** Trusted factory — full fields, skips isBrokenTexture(). For deserialization from JSON. */
+    static SlotData createTrustedFull(int index, String customId, String displayName, byte[] texture,
+                                      int lightLevel, float hardness, String soundType,
+                                      Map<String, byte[]> faceTextures, String animMeta,
+                                      List<ShapeBox> shapeBoxes, boolean noCollision) {
+        return new SlotData(index, customId, displayName, texture, lightLevel, hardness, soundType,
+                faceTextures, animMeta, shapeBoxes, noCollision, false);
+    }
+
     // ── Query helpers ────────────────────────────────────────────────────────
 
     public boolean isAnimated() { return animMeta != null && !animMeta.isEmpty(); }

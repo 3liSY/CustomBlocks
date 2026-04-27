@@ -366,14 +366,18 @@ public class CustomBlockCommand {
                         return 1;
                     }))
 
-                // ── rp (Alias) ────────────────────────────────────────────────
+                // ── rp (Alias + pause/resume) ─────────────────────────────────
                 .then(CommandManager.literal("rp")
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
                         if (p != null) GuiManager.openResourceHub(p);
                         else ctx.getSource().sendError(Text.literal("Player only."));
                         return 1;
-                    }))
+                    })
+                    .then(CommandManager.literal("pause")
+                        .executes(ctx -> cmdRpPause(ctx.getSource(), true)))
+                    .then(CommandManager.literal("resume")
+                        .executes(ctx -> cmdRpPause(ctx.getSource(), false))))
 
                 // ── setshape ─────────────────────────────────────────────────
                 .then(CommandManager.literal("setshape")
@@ -1824,6 +1828,20 @@ public class CustomBlockCommand {
             src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(rectItem, 1));
             src.sendMessage(Text.literal("§6[CustomBlocks] §eGiven §6Rainbow Rectangle§e! §7Right-click any block face and paste an image URL."));
         } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); return 0; }
+        return 1;
+    }
+
+    private static int cmdRpPause(ServerCommandSource src, boolean pause) {
+        var server = src.getServer();
+        var packet = new com.customblocks.network.RpPausePayload(pause);
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(p, packet);
+        }
+        if (pause) {
+            ChatHelper.success(src, "Resource pack reloads §ePAUSED§a for all clients. Use §f/cb rp resume§a when done.");
+        } else {
+            ChatHelper.success(src, "Resource pack reloads §aRESUMED§a — clients will reload now.");
+        }
         return 1;
     }
 

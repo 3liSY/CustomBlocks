@@ -285,44 +285,6 @@ public final class NetworkManager {
         // NOTE: sendFullSync is NO LONGER called here.
         // The client will send SyncRequestPayload when ready → onSyncRequest().
 
-        // ── Mandatory Resource Pack Enforcement ──────────────────────────────
-        // Delayed by 40 ticks (2 seconds) to ensure the HTTP server has the pack
-        // ZIP ready. Uses Minecraft's native sendResourcePackUrl API.
-        if (com.customblocks.CustomBlocksConfig.rpEnforceOnJoin
-                && ResourcePackServer.isRunning()
-                && ResourcePackServer.activePort() > 0) {
-            player.getServer().execute(() -> {
-                // Schedule on a slight delay so the pack ZIP is built
-                final java.util.UUID playerId = player.getUuid();
-                new Thread(() -> {
-                    try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
-                    player.getServer().execute(() -> {
-                        // Verify player is still online
-                        ServerPlayerEntity p = player.getServer().getPlayerManager().getPlayer(playerId);
-                        if (p == null) return;
-                        String url = ResourcePackServer.getPackUrl(p.getServer());
-                        String hash = ResourcePackServer.getHash();
-                        if (hash == null) hash = "";
-                        // Stable UUID from hash — Minecraft caches accepted packs by UUID,
-                        // so using a hash-derived ID skips the prompt if the pack hasn't changed.
-                        java.util.UUID packUuid = hash != null && !hash.isEmpty()
-                                ? java.util.UUID.nameUUIDFromBytes(hash.getBytes(java.nio.charset.StandardCharsets.UTF_8))
-                                : java.util.UUID.randomUUID();
-                        net.minecraft.network.packet.s2c.common.ResourcePackSendS2CPacket packet =
-                                new net.minecraft.network.packet.s2c.common.ResourcePackSendS2CPacket(
-                                        packUuid,
-                                        url,
-                                        hash,
-                                        true, // required
-                                        java.util.Optional.of(net.minecraft.text.Text.literal(
-                                                com.customblocks.CustomBlocksConfig.rpPromptMessage))
-                                );
-                        p.networkHandler.sendPacket(packet);
-                        LOGGER.info("[CustomBlocks] Sent mandatory resource pack to {}", p.getName().getString());
-                    });
-                }, "CustomBlocks-RPSend").start();
-            });
-        }
     }
 
     // ── Network Traffic Shaping (Fix 12) ──────────────────────────────────────

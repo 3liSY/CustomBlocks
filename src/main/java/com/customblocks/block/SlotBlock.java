@@ -22,21 +22,30 @@ import net.minecraft.util.shape.VoxelShapes;
 import net.minecraft.world.BlockView;
 import net.minecraft.world.World;
 
+import java.util.concurrent.ConcurrentHashMap;
+
 public class SlotBlock extends Block {
 
+    private static final ConcurrentHashMap<Integer, VoxelShape> SHAPE_CACHE = new ConcurrentHashMap<>();
+
     private final int slotIndex;
+    private final String slotKey;
 
     public SlotBlock(int slotIndex, Settings settings) {
         super(settings.nonOpaque());
         this.slotIndex = slotIndex;
+        this.slotKey = "slot_" + slotIndex;
     }
 
     public int    getSlotIndex() { return slotIndex; }
-    public String getSlotKey()   { return "slot_" + slotIndex; }
+    public String getSlotKey()   { return slotKey; }
+
+    /** Invalidate the cached VoxelShape for a slot (call when shape changes). */
+    public static void invalidateShape(int slotIndex) { SHAPE_CACHE.remove(slotIndex); }
 
     @Override
     public MutableText getName() {
-        SlotData d = SlotManager.getBySlot(getSlotKey());
+        SlotData d = SlotManager.getBySlot(slotKey);
         String name = d != null ? d.displayName : null;
         return Text.literal(name != null ? name : "Custom Block " + slotIndex);
     }
@@ -48,7 +57,7 @@ public class SlotBlock extends Block {
     @Override
     protected ActionResult onUse(BlockState state, World world, BlockPos pos,
                                   PlayerEntity player, BlockHitResult hit) {
-        SlotData data = SlotManager.getBySlot(getSlotKey());
+        SlotData data = SlotManager.getBySlot(slotKey);
         boolean animated = data != null && data.isAnimated();
 
         // Non-animated: behave like a normal block (no special click handling, no arm-swing).
@@ -64,27 +73,31 @@ public class SlotBlock extends Block {
 
     @Override
     public VoxelShape getOutlineShape(BlockState state, BlockView world, BlockPos pos, ShapeContext ctx) {
-        VoxelShape s = buildVoxelShape(getSlotKey());
-        return s != null ? s : VoxelShapes.fullCube();
+        return getCachedShape();
     }
 
     @Override
     public VoxelShape getCollisionShape(BlockState state, BlockView world, BlockPos pos, ShapeContext ctx) {
-        SlotData d = SlotManager.getBySlot(getSlotKey());
+        SlotData d = SlotManager.getBySlot(slotKey);
         if (d != null && d.noCollision) return VoxelShapes.empty();
-        VoxelShape s = buildVoxelShape(getSlotKey());
-        return s != null ? s : VoxelShapes.fullCube();
+        return getCachedShape();
     }
 
     @Override
     public VoxelShape getCullingShape(BlockState state, BlockView world, BlockPos pos) {
-        VoxelShape s = buildVoxelShape(getSlotKey());
-        return s != null ? s : VoxelShapes.fullCube();
+        return getCachedShape();
+    }
+
+    private VoxelShape getCachedShape() {
+        return SHAPE_CACHE.computeIfAbsent(slotIndex, idx -> {
+            VoxelShape s = buildVoxelShape(slotKey);
+            return s != null ? s : VoxelShapes.fullCube();
+        });
     }
 
     @Override
     public BlockSoundGroup getSoundGroup(BlockState state) {
-        SlotData d = SlotManager.getBySlot(getSlotKey());
+        SlotData d = SlotManager.getBySlot(slotKey);
         if (d == null) return BlockSoundGroup.STONE;
         return switch (d.soundType) {
             case "wood"         -> BlockSoundGroup.WOOD;
@@ -109,7 +122,7 @@ public class SlotBlock extends Block {
 
     @Override
     public float calcBlockBreakingDelta(BlockState state, PlayerEntity player, BlockView world, BlockPos pos) {
-        SlotData d = SlotManager.getBySlot(getSlotKey());
+        SlotData d = SlotManager.getBySlot(slotKey);
         float hardness = d != null ? d.hardness : 1.5f;
         if (hardness < 0) return 0f;
         if (hardness == 0) return 1f;
@@ -133,17 +146,17 @@ public class SlotBlock extends Block {
 
     public static class SlotItem extends BlockItem {
         private final int slotIndex;
+        private final String slotKey;
 
         public SlotItem(SlotBlock block, Item.Settings settings) {
             super(block, settings);
             this.slotIndex = block.getSlotIndex();
+            this.slotKey = "slot_" + slotIndex;
         }
-
-        private String getSlotKey() { return "slot_" + slotIndex; }
 
         @Override
         public Text getName() {
-            SlotData d = SlotManager.getBySlot(getSlotKey());
+            SlotData d = SlotManager.getBySlot(slotKey);
             String name = d != null ? d.displayName : null;
             return Text.literal(name != null ? name : "Custom Block");
         }

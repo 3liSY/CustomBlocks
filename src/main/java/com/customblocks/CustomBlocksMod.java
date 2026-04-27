@@ -271,21 +271,20 @@ public class CustomBlocksMod implements ModInitializer {
                 com.customblocks.network.OpenAnimGuiPayload.CODEC);
 
         PayloadTypeRegistry.playC2S().register(
-
                 com.customblocks.network.AnimSettingsPayload.ID,
-
                 com.customblocks.network.AnimSettingsPayload.CODEC);
 
         PayloadTypeRegistry.playC2S().register(
                 com.customblocks.network.SyncRequestPayload.ID,
                 com.customblocks.network.SyncRequestPayload.CODEC);
 
-
+        PayloadTypeRegistry.playS2C().register(
+                com.customblocks.network.RpPausePayload.ID,
+                com.customblocks.network.RpPausePayload.CODEC);
 
         // ── AnimSettings C2S handler ─────────────────────────────────────────
 
         ServerPlayNetworking.registerGlobalReceiver(
-
                 com.customblocks.network.AnimSettingsPayload.ID,
 
                 (payload, context) -> {

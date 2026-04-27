@@ -25,7 +25,7 @@ public final class CustomBlocksConfig {
 
     // ── Slot System ──────────────────────────────────────────────────────────
     /** Maximum number of block slots. Requires restart to take effect. */
-    public static volatile int maxSlots = 2048;
+    public static volatile int maxSlots = 600;
 
     // ── Image Processing ─────────────────────────────────────────────────────
     /** Default texture size in pixels (16–256). */
@@ -53,7 +53,7 @@ public final class CustomBlocksConfig {
 
     // ── Network ──────────────────────────────────────────────────────────────
     /** Number of texture payloads to drip-feed per server tick. */
-    public static volatile int texturePayloadsPerTick = 2;
+    public static volatile int texturePayloadsPerTick = 8;
     /** Internal HTTP server port for resource pack hosting (0 = disabled/auto). */
     public static volatile int resourcePackPort = 8080;
     /** Debounce time for live-edit resource pack reloads (ms). */
@@ -65,13 +65,6 @@ public final class CustomBlocksConfig {
     /** Enables Cloud Vault upload/download when a base URL is configured. */
     public static volatile boolean cloudShareEnabled = true;
 
-    // ── Resource Pack Enforcement ─────────────────────────────────────────
-    /** Whether to send the resource pack as mandatory on player join. */
-    public static volatile boolean rpEnforceOnJoin = false;
-    /** Branded prompt message shown when the RP download dialog appears. */
-    public static volatile String rpPromptMessage = "§b§lCustomBlocks §7requires a resource pack to display custom blocks.";
-    /** Kick message shown to players who decline the resource pack. */
-    public static volatile String rpKickMessage = "§cYou must accept the CustomBlocks resource pack to play on this server.";
 
     // ── Assistant NPC (The Helper) ───────────────────────────────────────────
     /** Whether the assistant AI is currently active in the world. */
@@ -134,17 +127,6 @@ public final class CustomBlocksConfig {
             aiName                = getString(root, "aiName", getString(root, "helperName", aiName));
             aiStyle               = getString(root, "aiStyle", getString(root, "helperSkin", aiStyle));
             aiHologram            = getBool(root, "aiHologram", getBool(root, "helperHologram", aiHologram));
-            rpEnforceOnJoin       = getBool(root, "rpEnforceOnJoin", rpEnforceOnJoin);
-            rpPromptMessage       = getString(root, "rpPromptMessage", rpPromptMessage);
-            rpKickMessage         = getString(root, "rpKickMessage", rpKickMessage);
-
-            // Force rpEnforceOnJoin OFF — mandatory RP from HTTP server causes
-            // disconnects on shared hosting where the RP port is firewalled.
-            if (rpEnforceOnJoin) {
-                LOGGER.warn("[CustomBlocks] rpEnforceOnJoin was true — forcing to false to prevent player disconnects.");
-                rpEnforceOnJoin = false;
-                shouldRewrite = true;
-            }
 
             // Clamp values
             int clampedMaxSlots = Math.max(1, Math.min(8192, maxSlots));
@@ -232,9 +214,6 @@ public final class CustomBlocksConfig {
             root.addProperty("aiName", aiName);
             root.addProperty("aiStyle", aiStyle);
             root.addProperty("aiHologram", aiHologram);
-            root.addProperty("rpEnforceOnJoin", rpEnforceOnJoin);
-            root.addProperty("rpPromptMessage", rpPromptMessage);
-            root.addProperty("rpKickMessage", rpKickMessage);
             Path tempFile = dir.resolve(CONFIG_FILE + ".tmp");
             Files.writeString(tempFile, GSON.toJson(root), StandardCharsets.UTF_8);
             java.nio.file.Files.move(tempFile, file,
@@ -283,9 +262,7 @@ public final class CustomBlocksConfig {
             || !root.has("aiName")
             || !root.has("aiStyle")
             || !root.has("aiHologram")
-            || !root.has("rpEnforceOnJoin")
-            || !root.has("rpPromptMessage")
-            || !root.has("rpKickMessage");
+;
     }
 
     private CustomBlocksConfig() {} // static-only
