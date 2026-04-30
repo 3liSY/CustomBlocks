@@ -9,10 +9,14 @@ import com.customblocks.block.SlotBlock;
 import com.customblocks.network.NetworkManager;
 import com.customblocks.network.SlotUpdatePayload;
 import net.minecraft.block.BlockState;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.LoreComponent;
+import net.minecraft.component.type.NbtComponent;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.ItemUsageContext;
+import net.minecraft.nbt.NbtCompound;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
@@ -25,6 +29,8 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayDeque;
+import java.util.List;
+import java.util.Locale;
 import java.util.Queue;
 
 /**
@@ -38,6 +44,13 @@ import java.util.Queue;
  * background pixels are recoloured — design details are never touched.
  */
 public class ColorTriangleItem extends Item {
+
+    public static final String CUSTOM_TRIANGLE_REGISTRY_ID = "custom_triangle";
+
+    private static final String NBT_KIND = "cb_triangle";
+    private static final String NBT_RGB = "cb_triangle_rgb";
+    private static final String NBT_LABEL = "cb_triangle_label";
+    private static final String NBT_KEY = "cb_triangle_key";
 
     private final int    targetR, targetG, targetB;
     private final String colorName;
@@ -57,7 +70,37 @@ public class ColorTriangleItem extends Item {
     }
 
     @Override public Text getName()                { return Text.literal(colorName + " Triangle"); }
-    @Override public Text getName(ItemStack stack) { return getName(); }
+    @Override public Text getName(ItemStack stack) {
+        TriangleColor color = resolveColor(stack);
+        return Text.literal(color.label() + " Triangle");
+    }
+
+    @Override
+    public boolean hasGlint(ItemStack stack) {
+        return isCustomTriangle(stack);
+    }
+
+    public static ItemStack createCustomStack(Item item, int rgb) {
+        rgb &= 0xFFFFFF;
+        String label = labelForRgb(rgb);
+        String key = keyForRgb(rgb);
+        ItemStack stack = new ItemStack(item, 1);
+
+        NbtCompound nbt = new NbtCompound();
+        nbt.putString(NBT_KIND, "custom");
+        nbt.putInt(NBT_RGB, rgb);
+        nbt.putString(NBT_LABEL, label);
+        nbt.putString(NBT_KEY, key);
+        stack.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(nbt));
+        stack.set(DataComponentTypes.CUSTOM_NAME,
+            Text.literal("§b§l" + label + " §r§fTriangle").styled(s -> s.withItalic(false)));
+        stack.set(DataComponentTypes.LORE, new LoreComponent(List.of(
+            Text.literal("§7Recolours connected background pixels").styled(s -> s.withItalic(false)),
+            Text.literal("§7Target colour: §f#" + hexForRgb(rgb)).styled(s -> s.withItalic(false)),
+            Text.literal("§8Right-click a CustomBlock to create a variant").styled(s -> s.withItalic(false)))));
+        stack.set(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE, true);
+        return stack;
+    }
 
     @Override
     public void inventoryTick(ItemStack stack, World world, net.minecraft.entity.Entity entity, int slot, boolean selected) {
@@ -87,6 +130,7 @@ public class ColorTriangleItem extends Item {
 
         SlotData source = SlotManager.getBySlot(sb.getSlotKey());
         if (source == null) return ActionResult.PASS;
+        TriangleColor color = resolveColor(ctx.getStack());
 
         byte[] workTexture = source.texture;
         if (workTexture == null || workTexture.length == 0) {
@@ -110,14 +154,14 @@ public class ColorTriangleItem extends Item {
 
         // ── Build the new block ID ────────────────────────────────────────────
         String baseId  = stripColorSuffix(source.customId);
-        String newId   = baseId + "_" + colorName.toLowerCase();
-        String newName = deriveDisplayName(source.displayName, colorName);
+        String newId   = baseId + "_" + color.key();
+        String newName = deriveDisplayName(source.displayName, color.label());
 
         // Already this colour?
         if (newId.equals(source.customId)) {
             if (player != null)
                 player.sendMessage(
-                    Text.literal("§7[CustomBlocks] This block is already §f" + colorName + "§7."), true);
+                    Text.literal("§7[CustomBlocks] This block is already §f" + color.label() + "§7."), true);
             return ActionResult.SUCCESS;
         }
 
@@ -150,7 +194,7 @@ public class ColorTriangleItem extends Item {
         MinecraftServer     server = world.getServer();
         SlotData finalSrc = source;
         PlayerEntity         fp      = player;
-        int fR = targetR, fG = targetG, fB = targetB;
+        int fR = color.r(), fG = color.g(), fB = color.b();
 
         Thread t = new Thread(() -> {
             try {
@@ -296,6 +340,7 @@ public class ColorTriangleItem extends Item {
      * (the new colour will be appended as a suffix by the caller).
      */
     private static String stripColorSuffix(String id) {
+        id = id.replaceFirst("(?i)_hex_[0-9a-f]{6}$", "");
         String[] segments = id.split("_", -1);
         for (int i = 0; i < segments.length; i++) {
             for (String c : COLOR_NAMES) {
@@ -320,4 +365,42 @@ public class ColorTriangleItem extends Item {
         }
         return original + " " + newColorName;
     }
+
+    private TriangleColor resolveColor(ItemStack stack) {
+        if (stack != null) {
+            NbtComponent custom = stack.get(DataComponentTypes.CUSTOM_DATA);
+            if (custom != null) {
+                NbtCompound nbt = custom.copyNbt();
+                if ("custom".equals(nbt.getString(NBT_KIND)) && nbt.contains(NBT_RGB)) {
+                    int rgb = nbt.getInt(NBT_RGB) & 0xFFFFFF;
+                    String label = nbt.contains(NBT_LABEL) ? nbt.getString(NBT_LABEL) : labelForRgb(rgb);
+                    String key = nbt.contains(NBT_KEY) ? nbt.getString(NBT_KEY) : keyForRgb(rgb);
+                    if (label == null || label.isBlank()) label = labelForRgb(rgb);
+                    if (key == null || key.isBlank()) key = keyForRgb(rgb);
+                    return new TriangleColor((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF, label, key);
+                }
+            }
+        }
+        return new TriangleColor(targetR, targetG, targetB, colorName, colorName.toLowerCase(Locale.ROOT));
+    }
+
+    private static boolean isCustomTriangle(ItemStack stack) {
+        if (stack == null) return false;
+        NbtComponent custom = stack.get(DataComponentTypes.CUSTOM_DATA);
+        return custom != null && "custom".equals(custom.copyNbt().getString(NBT_KIND));
+    }
+
+    private static String labelForRgb(int rgb) {
+        return "Hex #" + hexForRgb(rgb);
+    }
+
+    private static String keyForRgb(int rgb) {
+        return "hex_" + hexForRgb(rgb).toLowerCase(Locale.ROOT);
+    }
+
+    private static String hexForRgb(int rgb) {
+        return String.format(Locale.ROOT, "%06X", rgb & 0xFFFFFF);
+    }
+
+    private record TriangleColor(int r, int g, int b, String label, String key) {}
 }

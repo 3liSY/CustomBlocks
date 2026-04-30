@@ -67,6 +67,35 @@ public class CustomBlockCommand {
     private static final SuggestionProvider<ServerCommandSource> FACE_SUGGESTIONS =
             (ctx, builder) -> { for (String f : SlotData.FACE_KEYS) builder.suggest(f); return builder.buildFuture(); };
 
+    private static final SuggestionProvider<ServerCommandSource> SHAPE_SUGGESTIONS =
+            (ctx, builder) -> { for (String k : SlotManager.SHAPE_PRESETS.keySet()) builder.suggest(k); return builder.buildFuture(); };
+
+    /**
+     * Multi-block suggestion provider for bulkdelete.
+     * Parses already-typed IDs from the input and suggests remaining valid block IDs.
+     */
+    private static final SuggestionProvider<ServerCommandSource> MULTI_BLOCK_SUGGESTIONS =
+            (ctx, builder) -> {
+                String input = ctx.getInput();
+                // Extract the part after "bulkdelete "
+                int cmdEnd = input.indexOf("bulkdelete");
+                java.util.Set<String> alreadyTyped = new java.util.HashSet<>();
+                if (cmdEnd >= 0) {
+                    String afterCmd = input.substring(cmdEnd + "bulkdelete".length()).trim();
+                    // Get the last partial token being typed
+                    String[] tokens = afterCmd.split("\\s+");
+                    for (int i = 0; i < tokens.length - 1; i++) {
+                        alreadyTyped.add(tokens[i].toLowerCase());
+                    }
+                }
+                for (SlotData d : SlotManager.allSlots()) {
+                    if (!alreadyTyped.contains(d.customId.toLowerCase())) {
+                        builder.suggest(d.customId);
+                    }
+                }
+                return builder.buildFuture();
+            };
+
     public static void register() {
         CommandRegistrationCallback.EVENT.register((dispatcher, reg, env) -> {
             LiteralArgumentBuilder<ServerCommandSource> tree = CommandManager.literal("customblock")
@@ -104,6 +133,7 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("bulkdelete")
                     .executes(ctx -> usage(ctx.getSource(), "bulkdelete"))
                     .then(CommandManager.argument("ids", StringArgumentType.greedyString())
+                        .suggests(MULTI_BLOCK_SUGGESTIONS)
                         .executes(ctx -> cmdBulkDelete(ctx.getSource(),
                             StringArgumentType.getString(ctx, "ids")))))
 
@@ -321,28 +351,7 @@ public class CustomBlockCommand {
                             return 1;
                         })))
 
-                // ── ai assistant controls ───────────────────────────────────
-                .then(CommandManager.literal("ai")
-                    .executes(ctx -> {
-                        ServerPlayerEntity p = ctx.getSource().getPlayer();
-                        if (p != null) GuiManager.openAssistantControl(p);
-                        else ctx.getSource().sendError(Text.literal("Player only."));
-                        return 1;
-                    })
-                    .then(CommandManager.literal("spawn")
-                        .executes(ctx -> cmdHelperSpawn(ctx.getSource())))
-                    .then(CommandManager.literal("hide")
-                        .executes(ctx -> cmdHelperHide(ctx.getSource())))
-                    .then(CommandManager.literal("come")
-                        .executes(ctx -> cmdHelperCome(ctx.getSource())))
-                    .then(CommandManager.literal("stay")
-                        .executes(ctx -> cmdHelperStay(ctx.getSource())))
-                    .then(CommandManager.literal("tp")
-                        .executes(ctx -> cmdHelperTp(ctx.getSource())))
-                    .then(CommandManager.literal("scan")
-                        .executes(ctx -> cmdHelperScan(ctx.getSource())))
-                    .then(CommandManager.literal("status")
-                        .executes(ctx -> cmdHelperStatus(ctx.getSource()))))
+
 
                 // ── config ───────────────────────────────────────────────────
                 .then(CommandManager.literal("config")
@@ -385,6 +394,7 @@ public class CustomBlockCommand {
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
                         .then(CommandManager.argument("shape", StringArgumentType.greedyString())
+                            .suggests(SHAPE_SUGGESTIONS)
                             .executes(ctx -> cmdSetShape(ctx.getSource(),
                                 StringArgumentType.getString(ctx, "id"),
                                 StringArgumentType.getString(ctx, "shape"))))))
@@ -455,6 +465,24 @@ public class CustomBlockCommand {
 
                 .then(CommandManager.literal("rectangle")
                     .executes(ctx -> cmdGiveRectangle(ctx.getSource())))
+
+                .then(CommandManager.literal("hexagon")
+                    .executes(ctx -> cmdGiveHexagonInternal(ctx.getSource())))
+
+                .then(CommandManager.literal("brush")
+                    .executes(ctx -> cmdGiveBrushInternal(ctx.getSource())))
+
+                .then(CommandManager.literal("chisel")
+                    .executes(ctx -> cmdGiveChiselInternal(ctx.getSource())))
+
+                .then(CommandManager.literal("diamondtriangle")
+                    .executes(ctx -> cmdGiveDiamondInternal(ctx.getSource())))
+
+                .then(CommandManager.literal("customtriangle")
+                    .executes(ctx -> usage(ctx.getSource(), "customtriangle"))
+                    .then(CommandManager.argument("hex", StringArgumentType.word())
+                        .executes(ctx -> cmdGiveCustomColorToolsInternal(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "hex")))))
 
                 // ── setface ──────────────────────────────────────────────────
                 .then(CommandManager.literal("setface")
@@ -587,7 +615,8 @@ public class CustomBlockCommand {
         return 1;
     }
 
-    private static int cmdDelete(ServerCommandSource src, String id) {
+    private static int cmdDelete(ServerCommandSource src, String rawId) {
+        String id = sanitize(rawId);
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
         SlotData d = SlotManager.getById(id);
         UndoManager.pushUndoDeletion(id, d.deepCopy(), getPlayerUuid(src));
@@ -600,10 +629,11 @@ public class CustomBlockCommand {
     }
 
     private static int cmdBulkDelete(ServerCommandSource src, String idsRaw) {
-        String[] ids = idsRaw.trim().split("\\s+");
+        String[] rawIds = idsRaw.trim().split("\\s+");
         List<String> deleted = new ArrayList<>();
         List<String> notFound = new ArrayList<>();
-        for (String id : ids) {
+        for (String rawId : rawIds) {
+            String id = sanitize(rawId);
             if (!SlotManager.hasId(id)) { notFound.add(id); continue; }
             SlotData d = SlotManager.getById(id);
             UndoManager.pushUndoDeletion(id, d.deepCopy(), getPlayerUuid(src));
@@ -869,7 +899,8 @@ public class CustomBlockCommand {
         player.playSound(net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), 1.0f, 0.8f);
     }
 
-    private static int cmdRename(ServerCommandSource src, String id, String newName) {
+    private static int cmdRename(ServerCommandSource src, String rawId, String newName) {
+        String id = sanitize(rawId);
         if (!SlotManager.hasId(id)) { src.sendMessage(notFound(id)); return 0; }
         SlotData d = SlotManager.getById(id);
         UndoManager.pushUndoMutation(id, d, "rename", getPlayerUuid(src));
@@ -881,14 +912,13 @@ public class CustomBlockCommand {
         return 1;
     }
 
-    private static int cmdReId(ServerCommandSource src, String oldId, String newId) {
+    private static int cmdReId(ServerCommandSource src, String rawOldId, String rawNewId) {
+        String oldId = sanitize(rawOldId);
+        String newId = sanitize(rawNewId);
         if (!SlotManager.hasId(oldId)) { src.sendMessage(notFound(oldId)); return 0; }
+        if (newId.isEmpty()) { ChatHelper.error(src, "New ID is invalid (empty after sanitization)."); return 0; }
         if (SlotManager.hasId(newId)) {
             ChatHelper.error(src, "ID '" + newId + "' is already taken.");
-            return 0;
-        }
-        if (!newId.matches("[a-z0-9_\\-]+")) {
-            ChatHelper.error(src, "ID must be lowercase letters, numbers, _ or - only.");
             return 0;
         }
         SlotData d = SlotManager.getById(oldId);
@@ -1432,72 +1462,7 @@ public class CustomBlockCommand {
         return done > 0 ? 1 : 0;
     }
 
-    // ── Helper commands ─────────────────────────────────────────────────────
 
-    private static int cmdHelperSpawn(ServerCommandSource src) {
-        ServerPlayerEntity p = src.getPlayer();
-        if (p == null) { src.sendError(Text.literal("Player only.")); return 0; }
-        com.customblocks.assistant.AssistantManager.spawn(src.getServer(),
-            (net.minecraft.server.world.ServerWorld) p.getWorld(), p.getX(), p.getY(), p.getZ());
-        src.sendMessage(Text.literal("§a[CustomBlocks] AI assistant spawned at your location."));
-        return 1;
-    }
-
-    private static int cmdHelperHide(ServerCommandSource src) {
-        if (!com.customblocks.assistant.AssistantManager.isSpawned()) {
-            src.sendMessage(Text.literal("§7[CustomBlocks] AI assistant is not active.")); return 0;
-        }
-        com.customblocks.assistant.AssistantManager.hide();
-        src.sendMessage(Text.literal("§a[CustomBlocks] AI assistant hidden."));
-        return 1;
-    }
-
-    private static int cmdHelperCome(ServerCommandSource src) {
-        ServerPlayerEntity p = src.getPlayer();
-        if (p == null) { src.sendError(Text.literal("Player only.")); return 0; }
-        if (!com.customblocks.assistant.AssistantManager.isSpawned()) {
-            src.sendMessage(Text.literal("§7[CustomBlocks] AI assistant is not active. Use §b/cb ai spawn§7 first.")); return 0;
-        }
-        com.customblocks.assistant.AssistantManager.setFollowing(true, p.getUuid());
-        src.sendMessage(Text.literal("§a[CustomBlocks] AI assistant is now following you."));
-        return 1;
-    }
-
-    private static int cmdHelperStay(ServerCommandSource src) {
-        if (!com.customblocks.assistant.AssistantManager.isSpawned()) {
-            src.sendMessage(Text.literal("§7[CustomBlocks] AI assistant is not active.")); return 0;
-        }
-        com.customblocks.assistant.AssistantManager.setFollowing(false, null);
-        src.sendMessage(Text.literal("§a[CustomBlocks] AI assistant is staying put."));
-        return 1;
-    }
-
-    private static int cmdHelperTp(ServerCommandSource src) {
-        ServerPlayerEntity p = src.getPlayer();
-        if (p == null) { src.sendError(Text.literal("Player only.")); return 0; }
-        if (!com.customblocks.assistant.AssistantManager.isSpawned()) {
-            src.sendMessage(Text.literal("§7[CustomBlocks] AI assistant is not active.")); return 0;
-        }
-        com.customblocks.assistant.AssistantManager.teleportToPlayer(p);
-        src.sendMessage(Text.literal("§a[CustomBlocks] AI assistant teleported to you."));
-        return 1;
-    }
-
-    private static int cmdHelperScan(ServerCommandSource src) {
-        ServerPlayerEntity p = src.getPlayer();
-        if (p == null) { src.sendError(Text.literal("Player only.")); return 0; }
-        if (!com.customblocks.assistant.AssistantManager.isSpawned()) {
-            src.sendMessage(Text.literal("§7[CustomBlocks] AI assistant is not active. Use §b/cb ai spawn§7 first.")); return 0;
-        }
-        com.customblocks.assistant.AssistantManager.runSanityScan(p);
-        return 1;
-    }
-
-    private static int cmdHelperStatus(ServerCommandSource src) {
-        String summary = com.customblocks.assistant.AssistantManager.getStatusSummary();
-        src.sendMessage(Text.literal("§0§l[§b§lAI§0§l] " + summary));
-        return 1;
-    }
 
     private static SlotData snapshotForCmd(SlotData d) {
         java.util.Map<String, byte[]> facesCopy = new java.util.concurrent.ConcurrentHashMap<>();
@@ -1831,6 +1796,121 @@ public class CustomBlockCommand {
         return 1;
     }
 
+    public static int cmdGiveHexagonInternal(ServerCommandSource src) {
+        net.minecraft.util.Identifier id = net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, "golden_hexagon");
+        net.minecraft.item.Item item = net.minecraft.registry.Registries.ITEM.get(id);
+        if (item == null || item == net.minecraft.item.Items.AIR) { src.sendError(Text.literal("§cGolden Hexagon not found.")); return 0; }
+        try {
+            src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(item, 1));
+            src.sendMessage(Text.literal("§6[CustomBlocks] §eGiven §6Golden Hexagon§e! §7Right-click a face to rotate, sneak+click to flip."));
+        } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); return 0; }
+        return 1;
+    }
+
+    public static int cmdGiveBrushInternal(ServerCommandSource src) {
+        net.minecraft.util.Identifier id = net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, "lumina_brush");
+        net.minecraft.item.Item item = net.minecraft.registry.Registries.ITEM.get(id);
+        if (item == null || item == net.minecraft.item.Items.AIR) { src.sendError(Text.literal("§cLumina Brush not found.")); return 0; }
+        try {
+            src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(item, 1));
+            src.sendMessage(Text.literal("§b[CustomBlocks] §fGiven §bLumina Brush§f! §7Right-click any block to adjust glow & hardness."));
+        } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); return 0; }
+        return 1;
+    }
+
+    public static int cmdGiveChiselInternal(ServerCommandSource src) {
+        net.minecraft.util.Identifier id = net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, "amethyst_chisel");
+        net.minecraft.item.Item item = net.minecraft.registry.Registries.ITEM.get(id);
+        if (item == null || item == net.minecraft.item.Items.AIR) { src.sendError(Text.literal("§cAmethyst Chisel not found.")); return 0; }
+        try {
+            src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(item, 1));
+            src.sendMessage(Text.literal("§5[CustomBlocks] §dGiven §5Amethyst Chisel§d! §7Right-click any block to sculpt its shape."));
+        } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); return 0; }
+        return 1;
+    }
+
+    public static int cmdGiveDiamondInternal(ServerCommandSource src) {
+        net.minecraft.util.Identifier id = net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, "diamond_triangle");
+        net.minecraft.item.Item item = net.minecraft.registry.Registries.ITEM.get(id);
+        if (item == null || item == net.minecraft.item.Items.AIR) { src.sendError(Text.literal("§cDiamond Triangle not found.")); return 0; }
+        try {
+            src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(item, 1));
+            src.sendMessage(Text.literal("§b[CustomBlocks] §fGiven §bDiamond Triangle§f! §7Right-click anywhere to open the Background Studio."));
+        } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); return 0; }
+        return 1;
+    }
+
+    public static int cmdGiveCustomTriangleInternal(ServerCommandSource src, String hexInput) {
+        Integer rgb = parseHexColor(hexInput);
+        if (rgb == null) {
+            src.sendError(Text.literal("§cUse a hex colour like #55CCFF or 55ccff."));
+            return 0;
+        }
+        net.minecraft.util.Identifier id = net.minecraft.util.Identifier.of(
+            CustomBlocksMod.MOD_ID, com.customblocks.item.ColorTriangleItem.CUSTOM_TRIANGLE_REGISTRY_ID);
+        net.minecraft.item.Item item = net.minecraft.registry.Registries.ITEM.get(id);
+        if (item == null || item == net.minecraft.item.Items.AIR) {
+            src.sendError(Text.literal("§cCustom Triangle not found."));
+            return 0;
+        }
+        try {
+            src.getPlayerOrThrow().getInventory().insertStack(
+                com.customblocks.item.ColorTriangleItem.createCustomStack(item, rgb));
+            src.sendMessage(Text.literal("§b[CustomBlocks] §fGiven custom Triangle §b#" +
+                String.format(java.util.Locale.ROOT, "%06X", rgb & 0xFFFFFF) + "§f!"));
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            src.sendError(Text.literal("§cError: " + ex.getMessage()));
+            return 0;
+        }
+        return 1;
+    }
+
+    public static int cmdGiveCustomColorToolsInternal(ServerCommandSource src, String hexInput) {
+        Integer rgb = parseHexColor(hexInput);
+        if (rgb == null) {
+            src.sendError(Text.literal("§cUse a hex colour like #55CCFF or 55ccff."));
+            return 0;
+        }
+        net.minecraft.util.Identifier squareId = net.minecraft.util.Identifier.of(
+            CustomBlocksMod.MOD_ID, com.customblocks.item.ColorSquareItem.CUSTOM_SQUARE_REGISTRY_ID);
+        net.minecraft.util.Identifier triangleId = net.minecraft.util.Identifier.of(
+            CustomBlocksMod.MOD_ID, com.customblocks.item.ColorTriangleItem.CUSTOM_TRIANGLE_REGISTRY_ID);
+        net.minecraft.item.Item squareItem = net.minecraft.registry.Registries.ITEM.get(squareId);
+        net.minecraft.item.Item triangleItem = net.minecraft.registry.Registries.ITEM.get(triangleId);
+        if (squareItem == null || squareItem == net.minecraft.item.Items.AIR
+                || triangleItem == null || triangleItem == net.minecraft.item.Items.AIR) {
+            src.sendError(Text.literal("§cCustom Square/Triangle items not found."));
+            return 0;
+        }
+        try {
+            ServerPlayerEntity player = src.getPlayerOrThrow();
+            player.getInventory().insertStack(com.customblocks.item.ColorSquareItem.createCustomStack(squareItem, rgb));
+            player.getInventory().insertStack(com.customblocks.item.ColorTriangleItem.createCustomStack(triangleItem, rgb));
+            src.sendMessage(Text.literal("§b[CustomBlocks] §fGiven custom Square + Triangle §b#" +
+                String.format(java.util.Locale.ROOT, "%06X", rgb & 0xFFFFFF) + "§f!"));
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            src.sendError(Text.literal("§cError: " + ex.getMessage()));
+            return 0;
+        }
+        return 1;
+    }
+
+    private static Integer parseHexColor(String text) {
+        if (text == null) return null;
+        String hex = text.trim();
+        if (hex.startsWith("#")) hex = hex.substring(1);
+        if (hex.regionMatches(true, 0, "0x", 0, 2)) hex = hex.substring(2);
+        if (hex.length() == 3 && hex.matches("[0-9a-fA-F]{3}")) {
+            hex = "" + hex.charAt(0) + hex.charAt(0)
+                     + hex.charAt(1) + hex.charAt(1)
+                     + hex.charAt(2) + hex.charAt(2);
+        }
+        if (!hex.matches("[0-9a-fA-F]{6}")) return null;
+        return Integer.parseInt(hex, 16);
+    }
+
     private static int cmdRpPause(ServerCommandSource src, boolean pause) {
         var server = src.getServer();
         var packet = new com.customblocks.network.RpPausePayload(pause);
@@ -1930,6 +2010,7 @@ public class CustomBlockCommand {
             case "facechangegui"-> "facechangegui <id>";
             case "square"       -> "square <black|yellow|green>";
             case "triangle"     -> "triangle <black|yellow|green>";
+            case "customtriangle" -> "customtriangle <#RRGGBB>  — gives matching custom square + triangle";
             default -> "help";
         };
         ChatHelper.warn(src, "Usage: /cb " + msg);
@@ -1941,7 +2022,7 @@ public class CustomBlockCommand {
     }
 
     private static String sanitize(String id) {
-        return id.toLowerCase().replaceAll("[^a-z0-9_]", "_");
+        return id.toLowerCase().replaceAll("[^a-z0-9_\\-]", "_");
     }
 
     private static void thread(Runnable r) {

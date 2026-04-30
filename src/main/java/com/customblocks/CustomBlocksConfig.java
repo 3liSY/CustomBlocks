@@ -32,6 +32,8 @@ public final class CustomBlocksConfig {
     public static volatile int defaultTextureSize = 128;
     /** Background-removal colour-distance tolerance (0 = disabled, 1–100). */
     public static volatile int bgRemovalTolerance = 30;
+    /** Use YCbCr luminance/chroma math for white-background cleanup; false falls back to CIE-Lab Delta-E. */
+    public static volatile boolean bgRemovalUseYcbcr = true;
     /** HTTP download timeout in seconds. */
     public static volatile int downloadTimeoutSeconds = 15;
 
@@ -111,6 +113,7 @@ public final class CustomBlocksConfig {
             maxSlots              = getInt(root, "maxSlots", maxSlots);
             defaultTextureSize    = getInt(root, "defaultTextureSize", defaultTextureSize);
             bgRemovalTolerance    = getInt(root, "bgRemovalTolerance", bgRemovalTolerance);
+            bgRemovalUseYcbcr     = getBool(root, "bgRemovalUseYcbcr", bgRemovalUseYcbcr);
             downloadTimeoutSeconds= getInt(root, "downloadTimeoutSeconds", downloadTimeoutSeconds);
             sessionTimeoutSeconds = getInt(root, "sessionTimeoutSeconds", sessionTimeoutSeconds);
             undoMode              = getString(root, "undoMode", undoMode);
@@ -176,8 +179,8 @@ public final class CustomBlocksConfig {
                 LOGGER.info("[CustomBlocks] Config migrated/backfilled at {}", file);
             }
 
-            LOGGER.info("[CustomBlocks] Config loaded: maxSlots={}, undoMode={}, bgTolerance={}",
-                    maxSlots, undoMode, bgRemovalTolerance);
+            LOGGER.info("[CustomBlocks] Config loaded: maxSlots={}, undoMode={}, bgTolerance={}, bgMath={}",
+                    maxSlots, undoMode, bgRemovalTolerance, bgRemovalUseYcbcr ? "YCbCr" : "Lab");
             if (isCloudShareEnabled()) {
                 LOGGER.info("[CustomBlocks] Cloud Vault: ENABLED -> {}", normalizedCloudShareUrl());
             } else {
@@ -198,6 +201,7 @@ public final class CustomBlocksConfig {
             root.addProperty("maxSlots", maxSlots);
             root.addProperty("defaultTextureSize", defaultTextureSize);
             root.addProperty("bgRemovalTolerance", bgRemovalTolerance);
+            root.addProperty("bgRemovalUseYcbcr", bgRemovalUseYcbcr);
             root.addProperty("downloadTimeoutSeconds", downloadTimeoutSeconds);
             root.addProperty("sessionTimeoutSeconds", sessionTimeoutSeconds);
             root.addProperty("undoMode", undoMode);
@@ -246,6 +250,7 @@ public final class CustomBlocksConfig {
         return !root.has("maxSlots")
             || !root.has("defaultTextureSize")
             || !root.has("bgRemovalTolerance")
+            || !root.has("bgRemovalUseYcbcr")
             || !root.has("downloadTimeoutSeconds")
             || !root.has("sessionTimeoutSeconds")
             || !root.has("undoMode")

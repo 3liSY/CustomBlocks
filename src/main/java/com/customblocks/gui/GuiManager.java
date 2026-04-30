@@ -92,6 +92,7 @@ public class GuiManager {
         SETTABICON_URL,
         ADMIN_CUSTOM_TITLE,
         CONFIG_VALUE,
+        BG_FACTORY_HEX,
         ANIM_CUSTOM_FPS
     }
 
@@ -110,6 +111,8 @@ public class GuiManager {
     private static final Map<UUID, Integer> FACE_CHANGE_RETURN_PAGES = new ConcurrentHashMap<>();
     private static final Map<UUID, Deque<String>> RECENT_BLOCKS = new ConcurrentHashMap<>();
     private static final int MAX_RECENT = 3;
+    private static final Map<UUID, Long> ESC_DEBOUNCE = new ConcurrentHashMap<>();
+    private static final long ESC_DEBOUNCE_MS = 150;
 
     private static final float[] HARD_CYCLE      = { -1f, 0f, 0.5f, 1.5f, 3f, 5f, 10f, 50f };
     private static final int     BLOCKS_PER_PAGE = 18;
@@ -177,6 +180,15 @@ public class GuiManager {
      */
     public static void handleEscBack(ServerPlayerEntity player) {
         UUID uuid = player.getUuid();
+
+        // Debounce: ignore rapid ESC presses within 150ms
+        long now = System.currentTimeMillis();
+        Long lastEsc = ESC_DEBOUNCE.get(uuid);
+        if (lastEsc != null && (now - lastEsc) < ESC_DEBOUNCE_MS) {
+            return;
+        }
+        ESC_DEBOUNCE.put(uuid, now);
+
         PENDING.remove(uuid); 
         GuiState state = STATES.get(uuid);
         if (state == null) return;
@@ -215,6 +227,7 @@ public class GuiManager {
         BULK_DELETE_SELECTIONS.remove(uuid);
         FACE_CHANGE_SELECTIONS.remove(uuid);
         FACE_CHANGE_RETURN_PAGES.remove(uuid);
+        ESC_DEBOUNCE.remove(uuid);
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -345,75 +358,17 @@ public class GuiManager {
             "§7Sends latest textures to all players",
             "§e§lClick to broadcast"));
 
+        inv.setStack(24, uiGlint(Items.ECHO_SHARD, "§6§l⏸ Pause Reloads",
+            "§7Pauses resource pack reloading on all clients.",
+            "§7Useful when making many edits in a row.",
+            "§8Click to pause"));
+
+        inv.setStack(26, uiGlint(Items.AMETHYST_SHARD, "§a§l▶ Resume Reloads",
+            "§7Resumes resource pack reloading on all clients.",
+            "§7Triggers a reload if changes were made while paused.",
+            "§8Click to resume"));
+
         inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
-        return inv;
-    }
-
-    public static void openAssistantControl(ServerPlayerEntity player) {
-        pushBackStack(player.getUuid());
-        openScreenFromGuiState(player, GuiState.assistantControl(), buildAssistantControl(player), "§b§l✦ §r§fAI Assistant");
-    }
-
-    private static SimpleInventory buildAssistantControl(ServerPlayerEntity player) {
-        // Layout follows Main plan.md:168-174
-        //   Slot 4           : Status display (center top)
-        //   Row 2 (11,13,15) : Core controls (spawn toggle, mode, goto)
-        //   Row 4 (29,31,33) : Secondary actions (scan, hologram, rename)
-        //   Row 5 (45-51)    : Style presets (7 styles)
-        //   Slot 53          : Back
-        SimpleInventory inv = new SimpleInventory(54);
-        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
-
-        boolean active = com.customblocks.assistant.AssistantManager.isSpawned();
-        boolean following = com.customblocks.assistant.AssistantManager.isFollowing();
-        boolean holo = CustomBlocksConfig.aiHologram;
-        String currentStyle = com.customblocks.assistant.AssistantManager.normalizeStyle(CustomBlocksConfig.aiStyle);
-
-        // Slot 4: status display
-        inv.setStack(4, uiGlint(Items.PLAYER_HEAD, "§b§lAssistant Hub",
-            "§7Status: " + (active ? "§aSpawned" : "§cHidden"),
-            "§7Mode: " + (following ? "§bFollowing you" : "§7Staying in place"),
-            "§7Name: §f" + CustomBlocksConfig.aiName,
-            "§7Style: §d" + currentStyle));
-
-        // Row 2: core controls (spawn toggle, mode, go to)
-        inv.setStack(11, uiGlint(active ? Items.ENDER_EYE : Items.ENDER_PEARL,
-            active ? "§a§l✔ Spawned" : "§c§l✖ Hidden",
-            "§7Turn the AI assistant ON or OFF.",
-            "§7When active, it appears near you in-world."));
-        inv.setStack(13, uiGlint(following ? Items.RECOVERY_COMPASS : Items.COMPASS,
-            "§e§lMode: " + (following ? "Following" : "Staying"),
-            "§7When following, the assistant floats after you.",
-            "§7When staying, it waits in place."));
-        inv.setStack(15, uiGlint(Items.ENDER_CHEST, "§b§lGo To AI",
-            "§7Teleport yourself to where the assistant is.",
-            active ? "§aAI assistant is active" : "§cAI assistant is not spawned"));
-
-        // Row 4: secondary actions (scan, hologram, rename)
-        inv.setStack(29, uiGlint(Items.NETHER_STAR, "§6§lScan for Broken Blocks",
-            "§7Searches nearby area for blocks with missing textures.",
-            "§7The assistant highlights broken blocks."));
-        inv.setStack(31, uiGlint(holo ? Items.END_CRYSTAL : Items.GLASS,
-            holo ? "§d§lHologram: §aON" : "§7§lHologram: §cOFF",
-            "§7Floating status label above the assistant.",
-            "§8Click to toggle"));
-        inv.setStack(33, uiGlint(Items.PAINTING, "§f§lRename AI",
-            "§7Current: §b" + CustomBlocksConfig.aiName,
-            "§8Click to edit the assistant name"));
-
-        // Row 5: style presets (slots 45-51, 7 styles)
-        List<String> styles = com.customblocks.assistant.AssistantManager.availableStyles();
-        for (int i = 0; i < styles.size() && i < 7; i++) {
-            String style = styles.get(i);
-            boolean current = currentStyle.equalsIgnoreCase(style);
-            inv.setStack(45 + i, uiGlint(
-                com.customblocks.assistant.AssistantManager.getStyleDisplayItem(style),
-                (current ? "§a§l✔ " : "§b§l") + style,
-                current ? "§aCurrent AI style" : "§7Click to use this style"));
-        }
-
-        // Slot 53: back
-        inv.setStack(53, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
         return inv;
     }
 
@@ -481,7 +436,6 @@ public class GuiManager {
                 case SOUND_MENU -> openSoundMenu(player, state.editingId(), state.page());
                 case TAB_ICON_MENU -> openTabIconPicker(player, state.page());
                 case RESOURCE_CENTER -> openResourceHub(player);
-                case ASSISTANT_CONTROL -> openAssistantControl(player);
                 case ANIM_GUI -> openAnimGui(player, state.editingId(), state.page());
                 case BULK_DELETE -> openBulkDelete(player, state.page());
                 case SEARCH_PICKER -> {
@@ -494,6 +448,7 @@ public class GuiManager {
                 case UNDO_PICKER -> openUndoPicker(player, state.page());
                 case HELP_CATEGORY -> openHelpCategory(player, state.page());
                 case ANIM_CONFIRM_ABANDON -> reopenAnimGui(player, state.editingId(), state.page());
+                case BG_STUDIO -> openBgStudio(player, false);
                 default -> openMain(player, 0);
             }
         } finally {
@@ -518,7 +473,6 @@ public class GuiManager {
                 case PICKER_BROKEN-> handlePickerClick(player, state, slot, true);
                 case TAB_ICON_MENU-> handleTabIconMenuClick(player, state, slot);
                 case RESOURCE_CENTER -> handleResourceHubClick(player, state, slot);
-                case ASSISTANT_CONTROL -> handleAssistantControlClick(player, state, slot);
                 case EDITOR       -> handleEditorClick(player, state, slot, button);
                 case FACE_EDITOR  -> handleFaceEditorClick(player, state, slot, button, actionType == SlotActionType.QUICK_MOVE);
                 case FACE_CHANGE_SELECT -> handleFaceChangeSelectClick(player, state, slot);
@@ -527,7 +481,7 @@ public class GuiManager {
                 case MAINTENANCE_MENU -> handleMaintenanceClick(player, state, slot);
                 case HELP_MENU      -> handleHelpClick(player, state, slot);
                 case TOOLS_GUI      -> handleToolsClick(player, state, slot);
-                case PROPERTIES_MENU -> handlePropertiesClick(player, state, slot);
+                case PROPERTIES_MENU -> handlePropertiesClick(player, state, slot, button);
                 case SOUND_MENU     -> handleSoundClick(player, state, slot);
                 case ANIM_GUI       -> handleAnimGuiClick(player, state, slot);
                 case BULK_DELETE     -> handleBulkDeleteClick(player, state, slot);
@@ -538,6 +492,7 @@ public class GuiManager {
                 case UNDO_PICKER    -> handleUndoPickerClick(player, state, slot);
                 case HELP_CATEGORY  -> handleHelpCategoryClick(player, state, slot);
                 case ANIM_CONFIRM_ABANDON -> handleAnimConfirmAbandonClick(player, state, slot);
+                case BG_STUDIO -> handleBgStudioClick(player, state, slot, button);
             }
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] GUI Command Error: {}", e.getMessage(), e);
@@ -560,8 +515,7 @@ public class GuiManager {
             switch (pending.action()) {
                 case CONFIG_VALUE -> openConfigGui(player, false);
                 case ADMIN_CUSTOM_TITLE -> {
-                    if ("ai_name".equals(blockId)) openAssistantControl(player);
-                    else openMain(player, rp);
+                    openMain(player, rp);
                 }
                 case SET_LIGHT, SET_HARDNESS -> {
                     if (blockId != null && SlotManager.hasId(blockId)) openPropertiesGui(player, blockId, rp);
@@ -806,14 +760,6 @@ public class GuiManager {
                 openEditor(player, newId, rp); return true;
             }
             case ADMIN_CUSTOM_TITLE -> {
-                if ("ai_name".equals(blockId)) {
-                    CustomBlocksConfig.aiName = text.replace("&", "§");
-                    CustomBlocksConfig.save();
-                    com.customblocks.assistant.AssistantManager.refreshFromConfig();
-                    send(player, "§0§l[§b§lAI§0§l] §fCall me '§b" + text + "§f' from now on. §a✔");
-                    openAssistantControl(player);
-                    return true;
-                }
                 send(player, "§7[CustomBlocks] Action cancelled.");
                 openMain(player, 0);
                 return true;
@@ -889,18 +835,32 @@ public class GuiManager {
                             if (List.of("global", "per_player", "both").contains(v)) CustomBlocksConfig.undoMode = v;
                             else { send(player, "§cMust be: global / per_player / both"); openConfigGui(player, false); return true; }
                         }
-                        case "aiStyle" -> CustomBlocksConfig.aiStyle = com.customblocks.assistant.AssistantManager.normalizeStyle(text);
+                        case "aiStyle" -> CustomBlocksConfig.aiStyle = text;
                         default -> { send(player, "§cUnknown config key."); openConfigGui(player, false); return true; }
                     }
                     CustomBlocksConfig.save();
-                    if ("aiName".equals(key) || "aiStyle".equals(key)) {
-                        com.customblocks.assistant.AssistantManager.refreshFromConfig();
-                    }
                     send(player, "§a[Config] §f" + key + " §a= §e" + text);
                 } catch (NumberFormatException e) {
                     send(player, "§cInvalid number.");
                 }
-                openConfigGui(player, false);
+                if ("bgRemovalTolerance".equals(key)) openBgStudio(player, false);
+                else openConfigGui(player, false);
+                return true;
+            }
+            case BG_FACTORY_HEX -> {
+                if ("cancel".equalsIgnoreCase(text)) {
+                    send(player, "§7[BG Studio] Triangle Factory cancelled.");
+                    openBgStudio(player, false);
+                    return true;
+                }
+                Integer rgb = parseHexColor(text);
+                if (rgb == null) {
+                    send(player, "§c[BG Studio] Type a hex colour like §f#55CCFF §cor §f55ccff§c.");
+                    openBgStudio(player, false);
+                    return true;
+                }
+                giveCustomColorTools(player, rgb);
+                openBgStudio(player, false);
                 return true;
             }
             case WEB_LINK_CAST -> {
@@ -988,79 +948,25 @@ public class GuiManager {
             send(player, "§a[System] Force-syncing all clients...");
             openResourceHub(player);
         }
+        if (slot == 24) { // Pause Reloads
+            var packet = new com.customblocks.network.RpPausePayload(true);
+            for (ServerPlayerEntity p : player.getServer().getPlayerManager().getPlayerList()) {
+                net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(p, packet);
+            }
+            send(player, "§6[System] Resource pack reloads §ePAUSED§6 for all clients.");
+            openResourceHub(player);
+        }
+        if (slot == 26) { // Resume Reloads
+            var packet = new com.customblocks.network.RpPausePayload(false);
+            for (ServerPlayerEntity p : player.getServer().getPlayerManager().getPlayerList()) {
+                net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(p, packet);
+            }
+            send(player, "§a[System] Resource pack reloads §aRESUMED§a — clients will reload now.");
+            openResourceHub(player);
+        }
     }
 
-    private static void handleAssistantControlClick(ServerPlayerEntity player, GuiState state, int slot) {
-        playClick(player);
-        if (slot == 53) { openMain(player, 0); return; }
 
-        // Row 2: core controls (11=spawn, 13=mode, 15=goto)
-        if (slot == 11) { // Toggle Spawn
-            if (com.customblocks.assistant.AssistantManager.isSpawned()) {
-                com.customblocks.assistant.AssistantManager.hide();
-                send(player, "§0§l[§b§lAI§0§l] §7Hidden. §c✖");
-            } else {
-                com.customblocks.assistant.AssistantManager.spawn(player.getServer(), (net.minecraft.server.world.ServerWorld)player.getWorld(), player.getX(), player.getY(), player.getZ());
-                send(player, "§0§l[§b§lAI§0§l] §fReady to help. §a✔");
-            }
-            openAssistantControl(player);
-            return;
-        }
-        if (slot == 13) { // Toggle Follow
-            boolean f = !com.customblocks.assistant.AssistantManager.isFollowing();
-            com.customblocks.assistant.AssistantManager.setFollowing(f, player.getUuid());
-            send(player, "§0§l[§b§lAI§0§l] §fMode: " + (f ? "§bFollowing" : "§7Staying"));
-            openAssistantControl(player);
-            return;
-        }
-        if (slot == 15) { // Go To AI
-            if (!com.customblocks.assistant.AssistantManager.isSpawned()) {
-                send(player, "§c[AI] Not spawned. Spawn the AI assistant first.");
-                return;
-            }
-            player.closeHandledScreen();
-            com.customblocks.assistant.AssistantManager.teleportPlayerToHelper(player);
-            return;
-        }
-
-        // Row 4: secondary actions (29=scan, 31=hologram, 33=rename)
-        if (slot == 29) { // Sanity Scan
-            player.closeHandledScreen();
-            com.customblocks.assistant.AssistantManager.runSanityScan(player);
-            return;
-        }
-        if (slot == 31) { // Hologram toggle
-            CustomBlocksConfig.aiHologram = !CustomBlocksConfig.aiHologram;
-            CustomBlocksConfig.save();
-            com.customblocks.assistant.AssistantManager.refreshFromConfig();
-            send(player, "§0§l[§b§lAI§0§l] §fStatus halo: " + (CustomBlocksConfig.aiHologram ? "§aON" : "§cOFF"));
-            openAssistantControl(player);
-            return;
-        }
-        if (slot == 33) { // Rename
-            openShortInputPrompt(
-                player,
-                new PendingInput(InputAction.ADMIN_CUSTOM_TITLE, "ai_name", null, null, null, 0),
-                "§bAI Name",
-                new ItemStack(Items.NAME_TAG),
-                stripFormattingCodes(CustomBlocksConfig.aiName)
-            );
-            return;
-        }
-
-        // Row 5: style presets (slots 45-51)
-        if (slot >= 45 && slot <= 51) {
-            List<String> skins = com.customblocks.assistant.AssistantManager.availableStyles();
-            int si = slot - 45;
-            if (si < skins.size()) {
-                CustomBlocksConfig.aiStyle = skins.get(si);
-                CustomBlocksConfig.save();
-                com.customblocks.assistant.AssistantManager.refreshFromConfig();
-                send(player, "§0§l[§b§lAI§0§l] §fStyle: §b" + skins.get(si) + " §a✔");
-                openAssistantControl(player);
-            }
-        }
-    }
 
     // ── Magic Items GUI ───────────────────────────────────────────────────────
 
@@ -1070,27 +976,53 @@ public class GuiManager {
     }
 
     private static SimpleInventory buildMagicItemsGui() {
-        SimpleInventory inv = new SimpleInventory(27);
-        for (int i = 0; i < 27; i++) inv.setStack(i, glass());
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        // Row 1: Header
+        inv.setStack(4, uiGlint(Items.NETHER_STAR, "§6§l✦ §r§fMagic Items Arsenal", "§7Your legendary toolkit", "§8Click any item to receive it"));
+        // Row 2: Color Squares
+        inv.setStack(9, ui(Items.ORANGE_STAINED_GLASS_PANE, "§6── Colour Squares ──", "§7Swap block colours instantly"));
         inv.setStack(10, uiGlint(Items.GREEN_CONCRETE, "§a§lGreen Square", "§7Click to receive"));
         inv.setStack(11, uiGlint(Items.YELLOW_CONCRETE, "§e§lYellow Square", "§7Click to receive"));
         inv.setStack(12, uiGlint(Items.BLACK_CONCRETE, "§8§lBlack Square", "§7Click to receive"));
-        inv.setStack(13, uiGlint(Items.EMERALD, "§a§l▶ Give All", "§7Click to get every magic item at once"));
-        inv.setStack(14, uiGlint(Items.GREEN_TERRACOTTA, "§a§lGreen Triangle", "§7Click to receive"));
-        inv.setStack(15, uiGlint(Items.YELLOW_TERRACOTTA, "§e§lYellow Triangle", "§7Click to receive"));
-        inv.setStack(16, uiGlint(Items.BLACK_TERRACOTTA, "§8§lBlack Triangle", "§7Click to receive"));
-        inv.setStack(22, uiGlint(Items.PAINTING, "§6§lRainbow Rectangle", "§7Click to receive the face-painting wand"));
-        inv.setStack(18, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
+        // Row 2: Color Triangles
+        inv.setStack(14, ui(Items.PURPLE_STAINED_GLASS_PANE, "§5── Colour Triangles ──", "§7Paint backgrounds onto blocks"));
+        inv.setStack(15, uiGlint(Items.GREEN_TERRACOTTA, "§a§lGreen Triangle", "§7Click to receive"));
+        inv.setStack(16, uiGlint(Items.YELLOW_TERRACOTTA, "§e§lYellow Triangle", "§7Click to receive"));
+        inv.setStack(17, uiGlint(Items.BLACK_TERRACOTTA, "§8§lBlack Triangle", "§7Click to receive"));
+        // Row 3: Premium Tools
+        inv.setStack(18, ui(Items.LIGHT_BLUE_STAINED_GLASS_PANE, "§b── Premium Tools ──", "§7Legendary instruments of creation"));
+        inv.setStack(19, uiGlint(Items.PAINTING, "§6§lRainbow Rectangle", "§7Face-painting wand", "§8Right-click a block face → paste URL"));
+        inv.setStack(20, uiGlint(Items.GOLDEN_APPLE, "§6§lGolden Hexagon", "§7UV face rotator & flipper", "§8Right-click = rotate 90°", "§8Sneak+click = flip horizontally"));
+        inv.setStack(21, uiGlint(Items.BLAZE_ROD, "§b§lLumina Brush", "§7Property painter", "§8Right-click any block → light & hardness sliders"));
+        inv.setStack(22, uiGlint(Items.AMETHYST_SHARD, "§5§lAmethyst Chisel", "§7Shape sculptor", "§8Right-click any block → shape presets & editor"));
+        inv.setStack(23, uiGlint(Items.DIAMOND, "§b§lDiamond Triangle", "§7Background Studio master", "§8Right-click anywhere → tolerance slider, presets, bulk re-apply", "§8YCbCr / CIE-Lab powered"));
+        // Row 4: Quick actions
+        inv.setStack(31, uiGlint(Items.EMERALD, "§a§l▶ Give All Items", "§7Click to get every magic item at once", "§aIncludes all squares, triangles, and tools"));
+        // Bottom row
+        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
         return inv;
     }
 
     private static void handleMagicItemsClick(ServerPlayerEntity player, GuiState state, int slot) {
         net.minecraft.server.command.ServerCommandSource src = player.getCommandSource();
         switch (slot) {
+            // Colour Squares
             case 10 -> { com.customblocks.command.CustomBlockCommand.cmdGiveSquareInternal(src, "green"); openMagicItemsGui(player); }
             case 11 -> { com.customblocks.command.CustomBlockCommand.cmdGiveSquareInternal(src, "yellow"); openMagicItemsGui(player); }
             case 12 -> { com.customblocks.command.CustomBlockCommand.cmdGiveSquareInternal(src, "black"); openMagicItemsGui(player); }
-            case 13 -> {
+            // Colour Triangles
+            case 15 -> { com.customblocks.command.CustomBlockCommand.cmdGiveTriangleInternal(src, "green"); openMagicItemsGui(player); }
+            case 16 -> { com.customblocks.command.CustomBlockCommand.cmdGiveTriangleInternal(src, "yellow"); openMagicItemsGui(player); }
+            case 17 -> { com.customblocks.command.CustomBlockCommand.cmdGiveTriangleInternal(src, "black"); openMagicItemsGui(player); }
+            // Premium Tools
+            case 19 -> { com.customblocks.command.CustomBlockCommand.cmdGiveRectangleInternal(src); openMagicItemsGui(player); }
+            case 20 -> { com.customblocks.command.CustomBlockCommand.cmdGiveHexagonInternal(src); openMagicItemsGui(player); }
+            case 21 -> { com.customblocks.command.CustomBlockCommand.cmdGiveBrushInternal(src); openMagicItemsGui(player); }
+            case 22 -> { com.customblocks.command.CustomBlockCommand.cmdGiveChiselInternal(src); openMagicItemsGui(player); }
+            case 23 -> { com.customblocks.command.CustomBlockCommand.cmdGiveDiamondInternal(src); openMagicItemsGui(player); }
+            // Give All
+            case 31 -> {
                 com.customblocks.command.CustomBlockCommand.cmdGiveSquareInternal(src, "green");
                 com.customblocks.command.CustomBlockCommand.cmdGiveSquareInternal(src, "yellow");
                 com.customblocks.command.CustomBlockCommand.cmdGiveSquareInternal(src, "black");
@@ -1098,15 +1030,337 @@ public class GuiManager {
                 com.customblocks.command.CustomBlockCommand.cmdGiveTriangleInternal(src, "yellow");
                 com.customblocks.command.CustomBlockCommand.cmdGiveTriangleInternal(src, "black");
                 com.customblocks.command.CustomBlockCommand.cmdGiveRectangleInternal(src);
+                com.customblocks.command.CustomBlockCommand.cmdGiveHexagonInternal(src);
+                com.customblocks.command.CustomBlockCommand.cmdGiveBrushInternal(src);
+                com.customblocks.command.CustomBlockCommand.cmdGiveChiselInternal(src);
+                com.customblocks.command.CustomBlockCommand.cmdGiveDiamondInternal(src);
                 send(player, "§a[GUI] All magic items granted!");
                 openMagicItemsGui(player);
             }
-            case 14 -> { com.customblocks.command.CustomBlockCommand.cmdGiveTriangleInternal(src, "green"); openMagicItemsGui(player); }
-            case 15 -> { com.customblocks.command.CustomBlockCommand.cmdGiveTriangleInternal(src, "yellow"); openMagicItemsGui(player); }
-            case 16 -> { com.customblocks.command.CustomBlockCommand.cmdGiveTriangleInternal(src, "black"); openMagicItemsGui(player); }
-            case 22 -> { com.customblocks.command.CustomBlockCommand.cmdGiveRectangleInternal(src); openMagicItemsGui(player); }
-            case 18 -> openMain(player, 0);
+            // Back
+            case 0, 45 -> openMain(player, 0);
         }
+    }
+
+    // ── Diamond Triangle: Background Studio ───────────────────────────────────
+
+    public static void openBgStudio(ServerPlayerEntity player) {
+        openBgStudio(player, true);
+    }
+
+    public static void openBgStudio(ServerPlayerEntity player, boolean pushBack) {
+        if (pushBack) pushBackStack(player.getUuid());
+        openScreenFromGuiState(player, GuiState.bgStudio(), buildBgStudioGui(), "§b§l✦ §r§fBackground Studio");
+    }
+
+    private static SimpleInventory buildBgStudioGui() {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+
+        int tol = CustomBlocksConfig.bgRemovalTolerance;
+        boolean enabled = tol > 0;
+
+        // Header
+        inv.setStack(4, uiGlint(Items.DIAMOND, "§b§l✦ Background Studio",
+            "§7Tune how new images shed their backgrounds",
+            "§7Math mode: §f" + (CustomBlocksConfig.bgRemovalUseYcbcr ? "YCbCr luminance/chroma" : "CIE-Lab Delta-E"),
+            "§8Affects all imports server-wide"));
+
+        // Master ON/OFF toggle (slot 0 area — but 0 is typically Back, so put toggle at 13)
+        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back", "§8Return to main menu"));
+        inv.setStack(10, toggleItem("YCbCr Math", CustomBlocksConfig.bgRemovalUseYcbcr,
+            "Separates brightness from colour to reduce light edge halos"));
+        inv.setStack(13, enabled
+            ? uiGlint(Items.LIME_DYE, "§a§l✔ Background Removal: §lON",
+                "§7Currently §atrimming §7white/transparent edges",
+                "§8Click to disable")
+            : uiGlint(Items.GRAY_DYE, "§7§l✘ Background Removal: §lOFF",
+                "§7Imports keep their full original image",
+                "§8Click to enable"));
+
+        // ── Royal Tolerance Slider (Row 3: slots 19-25, 7 segments × ~14 each) ─
+        // Use 10 segments of 10 each for cleaner display: slots 18-27 (10 slots)
+        inv.setStack(18, uiGlint(Items.AMETHYST_CLUSTER, "§e✦ Tolerance: §f" + tol,
+            "§7Range: §f0–100",
+            "§80=OFF • 30=balanced • 60=aggressive • 100=max"));
+        // 8 slider segments mapping 0-100 -> slots 19-26 (8 segments × ~12.5)
+        for (int seg = 0; seg < 8; seg++) {
+            int slotIdx = 19 + seg;
+            int segMin = seg * 13;          // 0, 13, 26, 39, 52, 65, 78, 91
+            int segMax = Math.min(99, segMin + 12);  // segment range
+            int segMid = segMin + (segMax - segMin) / 2;
+            boolean isActive = tol >= segMin && tol <= segMax;
+            boolean isBefore = tol > segMax;
+            ItemStack pane;
+            if (isActive) {
+                pane = new ItemStack(Items.YELLOW_STAINED_GLASS_PANE);
+                pane.set(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE, true);
+                pane.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§e§l▶ " + segMin + "-" + segMax + " §r§7(Current: §e" + tol + "§7)").styled(s -> s.withItalic(false)));
+                pane.set(DataComponentTypes.LORE, new LoreComponent(List.of(
+                    lore("§aClick to set §f" + segMin),
+                    lore("§7Right-click for §f" + segMid))));
+            } else if (isBefore) {
+                pane = new ItemStack(Items.ORANGE_STAINED_GLASS_PANE);
+                pane.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§6" + segMin + "-" + segMax).styled(s -> s.withItalic(false)));
+                pane.set(DataComponentTypes.LORE, new LoreComponent(List.of(
+                    lore("§7Click to set §f" + segMin),
+                    lore("§7Right-click for §f" + segMid))));
+            } else {
+                pane = new ItemStack(Items.GRAY_STAINED_GLASS_PANE);
+                pane.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§8" + segMin + "-" + segMax).styled(s -> s.withItalic(false)));
+                pane.set(DataComponentTypes.LORE, new LoreComponent(List.of(
+                    lore("§7Click to set §f" + segMin),
+                    lore("§7Right-click for §f" + segMid))));
+            }
+            inv.setStack(slotIdx, pane);
+        }
+        // Slot 27 = max (100)
+        inv.setStack(27, tol >= 100
+            ? uiGlint(Items.YELLOW_STAINED_GLASS_PANE, "§e§l▶ 100 §r§7(MAX)", "§aCurrently active")
+            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8100", "§7Click to set §f100", "§8Most aggressive removal"));
+
+        // Fine controls (slots 28-30)
+        inv.setStack(28, ui(Items.QUARTZ, "§c◀ Less §8(-5)", "§7Current: §e" + tol));
+        inv.setStack(29, uiGlint(Items.AMETHYST_CLUSTER, "§e✦ Type Value", "§7Current: §e" + tol, "§eClick to type a precise value"));
+        inv.setStack(30, ui(Items.GLOWSTONE_DUST, "§a▶ More §8(+5)", "§7Current: §e" + tol));
+
+        // Quick presets (row 4: slots 36-40)
+        inv.setStack(36, ui(Items.LIGHT_GRAY_DYE, "§7Preset: §lOff", "§70 — keep originals"));
+        inv.setStack(37, ui(Items.GREEN_DYE,      "§aPreset: §lLight",  "§720 — only pure white"));
+        inv.setStack(38, ui(Items.YELLOW_DYE,     "§ePreset: §lBalanced","§730 — default, recommended"));
+        inv.setStack(39, ui(Items.ORANGE_DYE,     "§6Preset: §lStrong", "§750 — catches off-white"));
+        inv.setStack(40, ui(Items.RED_DYE,        "§cPreset: §lAggressive","§775 — removes most light tones"));
+
+        // Triangle Factory
+        inv.setStack(42, uiGlint(Items.PRISMARINE_SHARD, "§b§lTriangle Factory",
+            "§7Mint a physical recolour triangle",
+            "§7from any hex colour.",
+            "§8Click to type #RRGGBB"));
+        inv.setStack(43, uiGlint(Items.LIGHT_BLUE_DYE, "§bCreate #55CCFF Triangle",
+            "§7Quick sample custom triangle",
+            "§8Right-click CustomBlocks to make variants"));
+        inv.setStack(44, uiGlint(Items.MAGENTA_DYE, "§dCreate #FF55CC Triangle",
+            "§7Quick sample custom triangle",
+            "§8Right-click CustomBlocks to make variants"));
+
+        // Bulk re-apply (slot 49)
+        inv.setStack(49, uiGlint(Items.NETHER_STAR, "§5§l⚡ Bulk Re-apply",
+            "§7Run current tolerance against",
+            "§7§l" + SlotManager.allSlots().size() + " §r§7existing blocks",
+            "§8(processes in background, won't lag)",
+            "§c§l⚠ §cThis modifies every block's texture"));
+
+        // Bottom row Back
+        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
+        return inv;
+    }
+
+    private static void handleBgStudioClick(ServerPlayerEntity player, GuiState state, int slot, int button) {
+        // Back
+        if (slot == 0 || slot == 45) { handleEscBack(player); return; }
+
+        // Math mode toggle
+        if (slot == 10) {
+            CustomBlocksConfig.bgRemovalUseYcbcr = !CustomBlocksConfig.bgRemovalUseYcbcr;
+            CustomBlocksConfig.save();
+            send(player, "§a[BG Studio] Background math: §f" + (CustomBlocksConfig.bgRemovalUseYcbcr ? "YCbCr" : "CIE-Lab"));
+            refreshScreen(player, buildBgStudioGui());
+            return;
+        }
+
+        // Master toggle
+        if (slot == 13) {
+            if (CustomBlocksConfig.bgRemovalTolerance > 0) {
+                CustomBlocksConfig.bgRemovalTolerance = 0;
+                send(player, "§a[BG Studio] Background removal §cDISABLED§a.");
+            } else {
+                CustomBlocksConfig.bgRemovalTolerance = 30;
+                send(player, "§a[BG Studio] Background removal §aENABLED§a (set to default 30).");
+            }
+            CustomBlocksConfig.save();
+            refreshScreen(player, buildBgStudioGui());
+            return;
+        }
+
+        // Slider segments (slots 19-26)
+        if (slot >= 19 && slot <= 26) {
+            int seg = slot - 19;
+            int segMin = seg * 13;
+            int segMax = Math.min(99, segMin + 12);
+            int segMid = segMin + (segMax - segMin) / 2;
+            int newTol = (button == 1) ? segMid : segMin;
+            CustomBlocksConfig.bgRemovalTolerance = Math.max(0, Math.min(100, newTol));
+            CustomBlocksConfig.save();
+            send(player, "§a[BG Studio] Tolerance set to §f" + CustomBlocksConfig.bgRemovalTolerance);
+            refreshScreen(player, buildBgStudioGui());
+            return;
+        }
+
+        // Max preset (slot 27)
+        if (slot == 27) {
+            CustomBlocksConfig.bgRemovalTolerance = 100;
+            CustomBlocksConfig.save();
+            send(player, "§a[BG Studio] Tolerance set to §f100 §7(MAX)");
+            refreshScreen(player, buildBgStudioGui());
+            return;
+        }
+
+        // Fine controls
+        if (slot == 28) { // -5
+            CustomBlocksConfig.bgRemovalTolerance = Math.max(0, CustomBlocksConfig.bgRemovalTolerance - 5);
+            CustomBlocksConfig.save();
+            send(player, "§a[BG Studio] Tolerance: §f" + CustomBlocksConfig.bgRemovalTolerance);
+            refreshScreen(player, buildBgStudioGui());
+            return;
+        }
+        if (slot == 30) { // +5
+            CustomBlocksConfig.bgRemovalTolerance = Math.min(100, CustomBlocksConfig.bgRemovalTolerance + 5);
+            CustomBlocksConfig.save();
+            send(player, "§a[BG Studio] Tolerance: §f" + CustomBlocksConfig.bgRemovalTolerance);
+            refreshScreen(player, buildBgStudioGui());
+            return;
+        }
+        if (slot == 29) { // type value
+            configPrompt(player, "bgRemovalTolerance", "§eType new tolerance (0–100):");
+            return;
+        }
+
+        // Presets (slots 36-40)
+        if (slot >= 36 && slot <= 40) {
+            int[] presets = {0, 20, 30, 50, 75};
+            int newTol = presets[slot - 36];
+            CustomBlocksConfig.bgRemovalTolerance = newTol;
+            CustomBlocksConfig.save();
+            send(player, "§a[BG Studio] Preset applied — tolerance §f" + newTol);
+            refreshScreen(player, buildBgStudioGui());
+            return;
+        }
+
+        // Triangle Factory
+        if (slot == 42) {
+            PendingInput pending = new PendingInput(InputAction.BG_FACTORY_HEX, null, null, null, null, 0);
+            openShortInputPrompt(player, pending, "§bTriangle Factory", new ItemStack(Items.PRISMARINE_SHARD), "#55CCFF");
+            return;
+        }
+        if (slot == 43) {
+            giveCustomColorTools(player, 0x55CCFF);
+            refreshScreen(player, buildBgStudioGui());
+            return;
+        }
+        if (slot == 44) {
+            giveCustomColorTools(player, 0xFF55CC);
+            refreshScreen(player, buildBgStudioGui());
+            return;
+        }
+
+        // Bulk re-apply
+        if (slot == 49) {
+            int count = SlotManager.allSlots().size();
+            send(player, "§5[BG Studio] §dBulk re-apply started for §f" + count + " §dblocks. Watch chat for progress…");
+            bulkReapplyBackground(player);
+            refreshScreen(player, buildBgStudioGui());
+        }
+    }
+
+    private static Integer parseHexColor(String text) {
+        if (text == null) return null;
+        String hex = text.trim();
+        if (hex.startsWith("#")) hex = hex.substring(1);
+        if (hex.regionMatches(true, 0, "0x", 0, 2)) hex = hex.substring(2);
+        if (hex.length() == 3 && hex.matches("[0-9a-fA-F]{3}")) {
+            hex = "" + hex.charAt(0) + hex.charAt(0)
+                     + hex.charAt(1) + hex.charAt(1)
+                     + hex.charAt(2) + hex.charAt(2);
+        }
+        if (!hex.matches("[0-9a-fA-F]{6}")) return null;
+        return Integer.parseInt(hex, 16);
+    }
+
+    private static void giveCustomTriangle(ServerPlayerEntity player, int rgb) {
+        net.minecraft.item.Item item = net.minecraft.registry.Registries.ITEM.get(
+            net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, com.customblocks.item.ColorTriangleItem.CUSTOM_TRIANGLE_REGISTRY_ID));
+        if (item == null || item == Items.AIR) {
+            send(player, "§c[BG Studio] Custom Triangle item is not registered.");
+            return;
+        }
+        ItemStack stack = com.customblocks.item.ColorTriangleItem.createCustomStack(item, rgb);
+        player.getInventory().insertStack(stack);
+        send(player, "§b[BG Studio] Minted §f#" + String.format(Locale.ROOT, "%06X", rgb & 0xFFFFFF) + " §bTriangle.");
+        if (player.getWorld() instanceof ServerWorld sw) {
+            sw.spawnParticles(net.minecraft.particle.ParticleTypes.GLOW,
+                player.getX(), player.getY() + 1.0, player.getZ(),
+                8, 0.3, 0.4, 0.3, 0.02);
+            sw.playSound(null, player.getBlockPos(),
+                net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME,
+                net.minecraft.sound.SoundCategory.PLAYERS, 0.7f, 1.5f);
+        }
+    }
+
+    private static void giveCustomColorTools(ServerPlayerEntity player, int rgb) {
+        net.minecraft.item.Item squareItem = net.minecraft.registry.Registries.ITEM.get(
+            net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, com.customblocks.item.ColorSquareItem.CUSTOM_SQUARE_REGISTRY_ID));
+        net.minecraft.item.Item triangleItem = net.minecraft.registry.Registries.ITEM.get(
+            net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, com.customblocks.item.ColorTriangleItem.CUSTOM_TRIANGLE_REGISTRY_ID));
+        if (squareItem == null || squareItem == Items.AIR || triangleItem == null || triangleItem == Items.AIR) {
+            send(player, "§c[BG Studio] Custom Square/Triangle items are not registered.");
+            return;
+        }
+        player.getInventory().insertStack(com.customblocks.item.ColorSquareItem.createCustomStack(squareItem, rgb));
+        player.getInventory().insertStack(com.customblocks.item.ColorTriangleItem.createCustomStack(triangleItem, rgb));
+        send(player, "§b[BG Studio] Minted §f#" + String.format(Locale.ROOT, "%06X", rgb & 0xFFFFFF) + " §bSquare + Triangle.");
+        if (player.getWorld() instanceof ServerWorld sw) {
+            sw.spawnParticles(net.minecraft.particle.ParticleTypes.GLOW,
+                player.getX(), player.getY() + 1.0, player.getZ(),
+                8, 0.3, 0.4, 0.3, 0.02);
+            sw.playSound(null, player.getBlockPos(),
+                net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME,
+                net.minecraft.sound.SoundCategory.PLAYERS, 0.7f, 1.5f);
+        }
+    }
+
+    /**
+     * Iterates over every existing block, runs the current bg-removal tolerance
+     * against the main texture, and broadcasts updates. Skips animated blocks
+     * (mcmeta-driven frames are too fragile to recolour blindly).
+     */
+    private static void bulkReapplyBackground(ServerPlayerEntity player) {
+        MinecraftServer server = player.getServer();
+        if (server == null) return;
+        EXECUTOR.submit(() -> {
+            int processed = 0, skipped = 0, failed = 0;
+            List<SlotData> snapshot = new ArrayList<>(SlotManager.allSlots());
+            for (SlotData d : snapshot) {
+                if (d == null || d.texture == null || d.texture.length == 0) { skipped++; continue; }
+                if (d.isAnimated()) { skipped++; continue; }
+                try {
+                    byte[] reprocessed = ImageProcessor.replaceBackground(d.texture);
+                    if (reprocessed != null && reprocessed.length > 0) {
+                        final byte[] fb = reprocessed;
+                        final String fid = d.customId;
+                        server.execute(() -> {
+                            SlotData latest = SlotManager.getById(fid);
+                            if (latest == null) return;
+                            UndoManager.pushUndoMutation(fid, latest, "bulkbg", player.getUuid());
+                            SlotManager.updateTexture(fid, fb);
+                            NetworkManager.broadcastUpdate(server, new SlotUpdatePayload(
+                                "retexture", latest.index, fid, null, fb,
+                                latest.lightLevel, latest.hardness, latest.soundType, null, null, null));
+                        });
+                        processed++;
+                    } else {
+                        failed++;
+                    }
+                } catch (Exception e) {
+                    failed++;
+                    LOGGER.warn("[CustomBlocks] Bulk bg-reapply failed for {}: {}", d.customId, e.getMessage());
+                }
+            }
+            final int fp = processed, fs = skipped, ff = failed;
+            server.execute(() -> {
+                SlotManager.saveAll();
+                send(player, "§5[BG Studio] §dBulk re-apply done — §a" + fp + " updated§d, §7" + fs + " skipped§d, §c" + ff + " failed§d.");
+            });
+        });
     }
 
     // ── Config GUI ────────────────────────────────────────────────────────────
@@ -1160,7 +1414,10 @@ public class GuiManager {
         // Row 2: Numbers
         inv.setStack(19, numItem("Block Capacity", CustomBlocksConfig.maxSlots, "How many custom blocks this server can hold (restart required)"));
         inv.setStack(20, numItem("Texture Quality", CustomBlocksConfig.defaultTextureSize, "Default resolution used when new textures are processed"));
-        inv.setStack(21, numItem("Background Cleanup", CustomBlocksConfig.bgRemovalTolerance, "How strongly imported images remove their background"));
+        inv.setStack(21, uiGlint(Items.DIAMOND, "§b§lBackground Studio",
+            "§7Moved out of server config.",
+            "§7Current tolerance: §e" + CustomBlocksConfig.bgRemovalTolerance,
+            "§8Click to open the Diamond Triangle panel"));
         inv.setStack(22, numItem("History Depth", CustomBlocksConfig.maxUndoDepth, "How many undo and redo steps each player can keep"));
         inv.setStack(23, numItem("Download Timeout", CustomBlocksConfig.downloadTimeoutSeconds, "How long texture downloads may wait before failing"));
         inv.setStack(24, numItem("Texture Burst Rate", CustomBlocksConfig.texturePayloadsPerTick, "How many texture packets are sent each server tick"));
@@ -1196,20 +1453,13 @@ public class GuiManager {
             // Toggles
             case 11 -> {
                 CustomBlocksConfig.aiEnabled = !CustomBlocksConfig.aiEnabled;
-                if (!CustomBlocksConfig.aiEnabled && com.customblocks.assistant.AssistantManager.isSpawned()) {
-                    com.customblocks.assistant.AssistantManager.hide();
-                }
                 CustomBlocksConfig.save();
-                if (CustomBlocksConfig.aiEnabled) {
-                    com.customblocks.assistant.AssistantManager.refreshFromConfig();
-                }
                 send(player, "§a[Config] aiEnabled = " + CustomBlocksConfig.aiEnabled);
                 openConfigGui(player, false);
             }
             case 12 -> {
                 CustomBlocksConfig.aiHologram = !CustomBlocksConfig.aiHologram;
                 CustomBlocksConfig.save();
-                com.customblocks.assistant.AssistantManager.refreshFromConfig();
                 send(player, "§a[Config] aiHologram = " + CustomBlocksConfig.aiHologram);
                 openConfigGui(player, false);
             }
@@ -1222,7 +1472,7 @@ public class GuiManager {
             // Numbers
             case 19 -> configPrompt(player, "maxSlots", "Block Capacity (1-8192):");
             case 20 -> configPrompt(player, "defaultTextureSize", "Texture Quality (16-256):");
-            case 21 -> configPrompt(player, "bgRemovalTolerance", "Background Cleanup (0-100):");
+            case 21 -> openBgStudio(player, false);
             case 22 -> configPrompt(player, "maxUndoDepth", "History Depth (1-100):");
             case 23 -> configPrompt(player, "downloadTimeoutSeconds", "Download Timeout (1-120):");
             case 24 -> configPrompt(player, "texturePayloadsPerTick", "Texture Burst Rate (1-50):");
@@ -1428,7 +1678,6 @@ public class GuiManager {
             }
 
             // Row 4: secondary actions
-            case 37 -> openAssistantControl(player);
             case 39 -> openMaintenanceMenu(player);
             case 41 -> openBulkDelete(player, 0);
             case 43 -> openHelpGui(player);
@@ -1713,7 +1962,6 @@ public class GuiManager {
         if(slot == 19) openTabIconPicker(player, 0);
         else if(slot == 21) openBrokenBlocks(player, 0);
         else if(slot == 23) openResourceHub(player);
-        else if(slot == 25) openAssistantControl(player);
         else if(slot == 16) { player.closeHandledScreen(); player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb export"); }
         else if(slot == 22) {
             // Friend Test — fetch external IP and display shareable URL
@@ -1768,12 +2016,36 @@ public class GuiManager {
         if (slot == 0 || slot == 45) openHelpGui(player);
     }
 
-    private static void handlePropertiesClick(ServerPlayerEntity player, GuiState state, int slot) {
+    private static void handlePropertiesClick(ServerPlayerEntity player, GuiState state, int slot, int button) {
         if(slot == 0) { openEditor(player, state.editingId(), state.page()); return; }
         String id = state.editingId(); int rp = state.page();
         SlotData d = SlotManager.getById(id);
         if(d == null) { openMain(player, rp); return; }
         UUID uuid = player.getUuid();
+
+        // ── Royal Light Slider ───────────────────────────────────────────
+        if (slot >= 10 && slot <= 17) {
+            int segMin = (slot - 10) * 2;
+            int segMax = segMin + 1;
+            int newLight = (button == 1) ? segMax : segMin; // button 1 is right click
+            UndoManager.pushUndoMutation(id, d, "setglow", uuid);
+            SlotManager.setLightLevel(id, Math.max(0, Math.min(15, newLight)));
+            syncProp(player, d);
+            refreshScreen(player, buildPropertiesGui(SlotManager.getById(id)));
+            return;
+        }
+
+        // ── Royal Hardness Slider ────────────────────────────────────────
+        if (slot >= 28 && slot <= 35) {
+            float[] hardPresets = { -1f, 0f, 0.5f, 1.5f, 3f, 5f, 10f, 50f };
+            float newHardness = hardPresets[slot - 28];
+            UndoManager.pushUndoMutation(id, d, "sethardness", uuid);
+            SlotManager.setHardness(id, newHardness);
+            syncProp(player, d);
+            refreshScreen(player, buildPropertiesGui(SlotManager.getById(id)));
+            return;
+        }
+
         switch(slot) {
             case 19 -> { UndoManager.pushUndoMutation(id, d, "setglow", uuid); SlotManager.setLightLevel(id,Math.max(0,d.lightLevel-1)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
             case 20 -> openShortInputPrompt(
@@ -2530,12 +2802,63 @@ public class GuiManager {
         )));
         inv.setStack(4, disp);
         
+        // ── Royal Light Slider (Row 2: slots 10-17) ────────────────────────
+        // 8 segments covering 0-15, each segment = 2 light levels
+        inv.setStack(9, uiGlint(Items.AMETHYST_CLUSTER, "§e✦ Light Level: §f"+d.lightLevel, "§70=off • 7=torch • 15=max"));
+        for (int seg = 0; seg < 8; seg++) {
+            int slotIdx = 10 + seg;
+            int segMin = seg * 2;
+            int segMax = segMin + 1;
+            boolean isActive = d.lightLevel >= segMin && d.lightLevel <= segMax;
+            boolean isBefore = d.lightLevel > segMax;
+            Items lightItem;
+            String segLabel;
+            if (isActive) {
+                ItemStack slider = new ItemStack(Items.YELLOW_STAINED_GLASS_PANE);
+                slider.set(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE, true);
+                slider.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§e§l▶ " + segMin + "-" + segMax + " §r§7(Current: §e" + d.lightLevel + "§7)").styled(s->s.withItalic(false)));
+                slider.set(DataComponentTypes.LORE, new LoreComponent(List.of(lore("§aClick to set to §f" + segMin), lore("§7Right-click for §f" + segMax))));
+                inv.setStack(slotIdx, slider);
+            } else if (isBefore) {
+                ItemStack slider = new ItemStack(Items.ORANGE_STAINED_GLASS_PANE);
+                slider.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§6" + segMin + "-" + segMax).styled(s->s.withItalic(false)));
+                slider.set(DataComponentTypes.LORE, new LoreComponent(List.of(lore("§7Click to set to §f" + segMin), lore("§7Right-click for §f" + segMax))));
+                inv.setStack(slotIdx, slider);
+            } else {
+                ItemStack slider = new ItemStack(Items.GRAY_STAINED_GLASS_PANE);
+                slider.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§8" + segMin + "-" + segMax).styled(s->s.withItalic(false)));
+                slider.set(DataComponentTypes.LORE, new LoreComponent(List.of(lore("§7Click to set to §f" + segMin), lore("§7Right-click for §f" + segMax))));
+                inv.setStack(slotIdx, slider);
+            }
+        }
+        
+        // Fine controls (+/- and manual input)
         inv.setStack(19, ui(Items.QUARTZ,"§c◀ Less Glow §8(-1)","§7Current: §e"+d.lightLevel, "§aLight level 15 is max brightness."));
-        inv.setStack(20, uiGlint(Items.AMETHYST_CLUSTER,"§e✦ Light Level: §f"+d.lightLevel,"§70=off • 7=torch • 15=max", "§aMatches Minecraft light levels.", "§e§lClick to type value manually"));
+        inv.setStack(20, uiGlint(Items.AMETHYST_CLUSTER,"§e✦ Type Value","§7Current: §e"+d.lightLevel, "§e§lClick to type value manually"));
         inv.setStack(21, ui(Items.GLOWSTONE_DUST,"§a▶ More Glow §8(+1)","§7Current: §e"+d.lightLevel));
         
+        // ── Royal Hardness Slider (Row 4: slots 28-35) ─────────────────────
+        inv.setStack(27, uiGlint(Items.NETHERITE_INGOT, "§b⚙ Hardness: §f"+hardnessLabel(d.hardness), "§7-1=Bedrock • 0=Instant • 1.5=Stone"));
+        float[] hardPresets = { -1f, 0f, 0.5f, 1.5f, 3f, 5f, 10f, 50f };
+        String[] hardLabels = { "Bedrock", "Instant", "Soft", "Stone", "Iron", "Hard", "Heavy", "Max" };
+        net.minecraft.item.Item[] hardItems = { Items.BEDROCK, Items.SPONGE, Items.OAK_PLANKS, Items.STONE, Items.IRON_BLOCK, Items.OBSIDIAN, Items.CRYING_OBSIDIAN, Items.NETHERITE_BLOCK };
+        for (int h = 0; h < 8; h++) {
+            int slotIdx = 28 + h;
+            boolean isActive = Math.abs(d.hardness - hardPresets[h]) < 0.001f;
+            ItemStack hStack = new ItemStack(hardItems[h]);
+            if (isActive) {
+                hStack.set(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE, true);
+                hStack.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§b§l▶ " + hardLabels[h] + " §r§7(" + hardnessLabel(hardPresets[h]) + ")").styled(s->s.withItalic(false)));
+            } else {
+                hStack.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§7" + hardLabels[h] + " §8(" + hardnessLabel(hardPresets[h]) + ")").styled(s->s.withItalic(false)));
+            }
+            hStack.set(DataComponentTypes.LORE, new LoreComponent(List.of(lore(isActive ? "§a✔ Currently selected" : "§8Click to select"))));
+            inv.setStack(slotIdx, hStack);
+        }
+        
+        // Fine controls for hardness
         inv.setStack(23, ui(Items.FLINT,"§c◀ Softer §8(-)","§7Current: §f"+hardnessLabel(d.hardness), "§aHardness 0 breaks instantly."));
-        inv.setStack(24, uiGlint(Items.NETHERITE_INGOT,"§b⚙ Hardness: §f"+hardnessLabel(d.hardness),"§7-1=Bedrock • 0=Instant • 1.5=Stone", "§aDetermines how fast players mine this block.", "§e§lClick to type value manually"));
+        inv.setStack(24, uiGlint(Items.NETHERITE_INGOT,"§b⚙ Type Value","§7Current: §f"+hardnessLabel(d.hardness), "§e§lClick to type value manually"));
         inv.setStack(25, ui(Items.NETHERITE_SCRAP,"§a▶ Harder §8(+)","§7Current: §f"+hardnessLabel(d.hardness)));
 
         inv.setStack(40, d.noCollision
@@ -2986,7 +3309,7 @@ public class GuiManager {
                  "downloadTimeoutSeconds", "texturePayloadsPerTick", "resourcePackPort",
                  "reloadDebounceMs" -> Items.REPEATER;
             case "undoMode" -> Items.COMPARATOR;
-            case "aiStyle" -> com.customblocks.assistant.AssistantManager.getStyleDisplayItem(CustomBlocksConfig.aiStyle);
+            case "aiStyle" -> Items.PAINTING;
             case "cloudShareUrl" -> Items.ENDER_PEARL;
             default -> Items.NAME_TAG;
         };
@@ -3006,7 +3329,7 @@ public class GuiManager {
             case "cloudShareUrl" -> CustomBlocksConfig.normalizedCloudShareUrl();
             case "aiName" -> stripFormattingCodes(CustomBlocksConfig.aiName);
             case "undoMode" -> CustomBlocksConfig.undoMode;
-            case "aiStyle" -> com.customblocks.assistant.AssistantManager.normalizeStyle(CustomBlocksConfig.aiStyle);
+            case "aiStyle" -> CustomBlocksConfig.aiStyle;
             default -> "";
         };
     }

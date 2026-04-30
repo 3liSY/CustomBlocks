@@ -608,6 +608,18 @@ public class ResourcePackGenerator {
 
             writeJson(rectModel, new File(assets, "models/item/rainbow_rectangle.json"));
 
+            File customSquareTex = new File(assets, "textures/item/custom_square.png");
+            Files.write(customSquareTex.toPath(), makeSquarePng(85, 204, 255));
+            writeGeneratedItemModel(assets, "custom_square", MOD_ID + ":item/custom_square");
+
+            File customTriangleTex = new File(assets, "textures/item/custom_triangle.png");
+            Files.write(customTriangleTex.toPath(), makeTrianglePng(85, 204, 255));
+            writeGeneratedItemModel(assets, "custom_triangle", MOD_ID + ":item/custom_triangle");
+            writeGeneratedItemModel(assets, "golden_hexagon", "minecraft:item/golden_apple");
+            writeGeneratedItemModel(assets, "lumina_brush", "minecraft:item/blaze_rod");
+            writeGeneratedItemModel(assets, "amethyst_chisel", "minecraft:item/amethyst_shard");
+            writeGeneratedItemModel(assets, "diamond_triangle", "minecraft:item/diamond");
+
 
 
             CustomBlocksMod.LOGGER.info("[CustomBlocks] Resource pack generated.");
@@ -1473,6 +1485,15 @@ public class ResourcePackGenerator {
 
     }
 
+    private static void writeGeneratedItemModel(File assets, String itemId, String texture) throws IOException {
+        JsonObject tex = new JsonObject();
+        tex.addProperty("layer0", texture);
+        JsonObject model = new JsonObject();
+        model.addProperty("parent", "minecraft:item/generated");
+        model.add("textures", tex);
+        writeJson(model, new File(assets, "models/item/" + itemId + ".json"));
+    }
+
 
 
     /**
@@ -1493,13 +1514,13 @@ public class ResourcePackGenerator {
 
         com.google.gson.JsonArray uv = new com.google.gson.JsonArray();
 
-        uv.add(0f);
+        uv.add(u1);
 
-        uv.add(0f);
+        uv.add(v1);
 
-        uv.add(16f);
+        uv.add(u2);
 
-        uv.add(16f);
+        uv.add(v2);
 
         faceObj.add("uv", uv);
 

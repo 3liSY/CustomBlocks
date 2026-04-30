@@ -204,6 +204,20 @@ public class ServerPackGenerator {
                 } else {
                     addZipEntry(zos, "assets/" + MOD_ID + "/textures/item/tab_icon.png", PLACEHOLDER_PNG, writtenPaths);
                 }
+
+                addGeneratedItemModel(zos, "black_square", "minecraft:item/black_dye", writtenPaths);
+                addGeneratedItemModel(zos, "yellow_square", "minecraft:item/yellow_dye", writtenPaths);
+                addGeneratedItemModel(zos, "green_square", "minecraft:item/green_dye", writtenPaths);
+                addGeneratedItemModel(zos, "black_triangle", "minecraft:item/black_dye", writtenPaths);
+                addGeneratedItemModel(zos, "yellow_triangle", "minecraft:item/yellow_dye", writtenPaths);
+                addGeneratedItemModel(zos, "green_triangle", "minecraft:item/green_dye", writtenPaths);
+                addGeneratedItemModel(zos, "custom_square", "minecraft:item/light_blue_dye", writtenPaths);
+                addGeneratedItemModel(zos, "custom_triangle", "minecraft:item/light_blue_dye", writtenPaths);
+                addGeneratedItemModel(zos, "rainbow_rectangle", "minecraft:item/painting", writtenPaths);
+                addGeneratedItemModel(zos, "golden_hexagon", "minecraft:item/golden_apple", writtenPaths);
+                addGeneratedItemModel(zos, "lumina_brush", "minecraft:item/blaze_rod", writtenPaths);
+                addGeneratedItemModel(zos, "amethyst_chisel", "minecraft:item/amethyst_shard", writtenPaths);
+                addGeneratedItemModel(zos, "diamond_triangle", "minecraft:item/diamond", writtenPaths);
             }
         } catch (Exception e) {
             CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to generate server pack ZIP", e);
@@ -213,7 +227,7 @@ public class ServerPackGenerator {
     private static void addModelFace(JsonObject faces, String mcFaceName, String cbFaceName, float u1, float v1, float u2, float v2) {
         JsonObject faceObj = new JsonObject();
         com.google.gson.JsonArray uv = new com.google.gson.JsonArray();
-        uv.add(0f); uv.add(0f); uv.add(16f); uv.add(16f);
+        uv.add(u1); uv.add(v1); uv.add(u2); uv.add(v2);
         faceObj.add("uv", uv);
         faceObj.addProperty("texture", "#" + FACE_TO_MC.get(cbFaceName));
         // Removed cullface to fix rendering of custom shaped volumes
@@ -225,6 +239,17 @@ public class ServerPackGenerator {
      * Prevents a single corrupt/duplicated slot from aborting the whole pack build
      * with {@code java.util.zip.ZipException: duplicate entry}.
      */
+    private static void addGeneratedItemModel(ZipOutputStream zos, String itemId, String texture,
+                                              java.util.Set<String> writtenPaths) throws Exception {
+        JsonObject tex = new JsonObject();
+        tex.addProperty("layer0", texture);
+        JsonObject model = new JsonObject();
+        model.addProperty("parent", "minecraft:item/generated");
+        model.add("textures", tex);
+        addZipEntry(zos, "assets/" + MOD_ID + "/models/item/" + itemId + ".json",
+            GSON.toJson(model).getBytes(StandardCharsets.UTF_8), writtenPaths);
+    }
+
     private static void addZipEntry(ZipOutputStream zos, String path, byte[] data,
                                      java.util.Set<String> writtenPaths) throws Exception {
         if (!writtenPaths.add(path)) {

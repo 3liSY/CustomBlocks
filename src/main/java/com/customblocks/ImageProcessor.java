@@ -407,14 +407,16 @@ public final class ImageProcessor {
 
     /**
      * Returns true if this pixel should be treated as background during flood-fill.
-     * Uses configurable CIE-Lab Delta E distance from pure white.
+     * Uses the configured white-background colour distance mode.
      */
     public static boolean isBackground(int argb) {
         int a = (argb >> 24) & 0xFF;
         if (a < OPAQUE_THRESHOLD) return true;
         if (CustomBlocksConfig.bgRemovalTolerance <= 0) return false;
-        double distance = deltaE(rgbToLab(argb), LAB_WHITE);
-        return distance <= CustomBlocksConfig.bgRemovalTolerance;
+        int tolerance = CustomBlocksConfig.bgRemovalTolerance;
+        return CustomBlocksConfig.bgRemovalUseYcbcr
+            ? isNearWhiteYcbcr(argb, tolerance)
+            : deltaE(rgbToLab(argb), LAB_WHITE) <= tolerance;
     }
 
     // ── Phase 9: Video-to-texture (MP4/MOV) ────────────────────────────────────
@@ -1015,6 +1017,18 @@ public final class ImageProcessor {
 
     private static final double[] LAB_WHITE = rgbToLab(0xFFFFFFFF);
 
+    private static boolean isNearWhiteYcbcr(int argb, int tolerance) {
+        int r = (argb >> 16) & 0xFF;
+        int g = (argb >> 8) & 0xFF;
+        int b = argb & 0xFF;
+        double y  = 0.299 * r + 0.587 * g + 0.114 * b;
+        double cb = 128.0 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+        double cr = 128.0 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+        double lumaGap = 255.0 - y;
+        double chromaDistance = Math.hypot(cb - 128.0, cr - 128.0);
+        return lumaGap <= tolerance * 1.8 && chromaDistance <= tolerance * 0.85;
+    }
+
     /**
      * Returns true if this pixel is a fringe candidate (anti-aliased edge pixel).
      * Uses a higher tolerance than isBackground to catch subtly-bright edge pixels.
@@ -1023,9 +1037,10 @@ public final class ImageProcessor {
         int a = (argb >> 24) & 0xFF;
         if (a < OPAQUE_THRESHOLD) return true;
         if (CustomBlocksConfig.bgRemovalTolerance <= 0) return false;
-        double distance = deltaE(rgbToLab(argb), LAB_WHITE);
-        // Fringe uses a slighter wider tolerance, e.g. + 15
-        return distance <= (CustomBlocksConfig.bgRemovalTolerance + 15);
+        int tolerance = CustomBlocksConfig.bgRemovalTolerance + 15;
+        return CustomBlocksConfig.bgRemovalUseYcbcr
+            ? isNearWhiteYcbcr(argb, tolerance)
+            : deltaE(rgbToLab(argb), LAB_WHITE) <= tolerance;
     }
 
     /**

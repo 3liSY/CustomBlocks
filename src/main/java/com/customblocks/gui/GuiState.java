@@ -127,6 +127,10 @@ public record GuiState(
         return new GuiState(GuiMode.HELP_CATEGORY, null, category, false, 0, false);
     }
 
+    public static GuiState bgStudio() {
+        return new GuiState(GuiMode.BG_STUDIO, null, 0, false, 0, false);
+    }
+
     // ── Mutation (returns new instance) ──────────────────────────────────────
 
     public GuiState withConfirmDelete(boolean confirm) {

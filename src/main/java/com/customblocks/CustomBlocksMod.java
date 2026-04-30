@@ -20,6 +20,14 @@ import com.customblocks.item.ColorTriangleItem;
 
 import com.customblocks.item.RectangleToolItem;
 
+import com.customblocks.item.GoldenHexagonItem;
+
+import com.customblocks.item.LuminaBrushItem;
+
+import com.customblocks.item.AmethystChiselItem;
+
+import com.customblocks.item.DiamondTriangleItem;
+
 import com.customblocks.network.FullSyncPayload;
 
 import com.customblocks.network.NetworkManager;
@@ -202,6 +210,10 @@ public class CustomBlocksMod implements ModInitializer {
 
         }
 
+        Identifier customSquareId = Identifier.of(MOD_ID, ColorSquareItem.CUSTOM_SQUARE_REGISTRY_ID);
+        ColorSquareItem customSquareItem = new ColorSquareItem("custom", "Custom", new Item.Settings().maxCount(1));
+        Registry.register(Registries.ITEM, customSquareId, customSquareItem);
+
 
 
         // ── Color Triangle items ─────────────────────────────────────────────
@@ -224,6 +236,10 @@ public class CustomBlocksMod implements ModInitializer {
 
         }
 
+        Identifier customTriangleId = Identifier.of(MOD_ID, ColorTriangleItem.CUSTOM_TRIANGLE_REGISTRY_ID);
+        ColorTriangleItem customTriangleItem = new ColorTriangleItem(255, 255, 255, "Custom", new Item.Settings().maxCount(1));
+        Registry.register(Registries.ITEM, customTriangleId, customTriangleItem);
+
 
 
         // ── Rainbow Rectangle ────────────────────────────────────────────────
@@ -236,13 +252,52 @@ public class CustomBlocksMod implements ModInitializer {
 
 
 
+        // ── Golden Hexagon (UV Face Rotate/Flip) ─────────────────────────────
+
+        Identifier hexId = Identifier.of(MOD_ID, "golden_hexagon");
+
+        GoldenHexagonItem hexItem = new GoldenHexagonItem(new Item.Settings().maxCount(1));
+
+        Registry.register(Registries.ITEM, hexId, hexItem);
+
+
+
+        // ── Lumina Brush (Property Painter) ──────────────────────────────────
+
+        Identifier brushId = Identifier.of(MOD_ID, "lumina_brush");
+
+        LuminaBrushItem brushItem = new LuminaBrushItem(new Item.Settings().maxCount(1));
+
+        Registry.register(Registries.ITEM, brushId, brushItem);
+
+
+
+        // ── Amethyst Chisel (Shape Editor Shortcut) ─────────────────────────
+
+        Identifier chiselId = Identifier.of(MOD_ID, "amethyst_chisel");
+
+        AmethystChiselItem chiselItem = new AmethystChiselItem(new Item.Settings().maxCount(1));
+
+        Registry.register(Registries.ITEM, chiselId, chiselItem);
+
+
+
+        // ── Diamond Triangle (Background Studio Master) ──────────────────
+
+        Identifier diamondId = Identifier.of(MOD_ID, "diamond_triangle");
+
+        DiamondTriangleItem diamondItem = new DiamondTriangleItem(new Item.Settings().maxCount(1));
+
+        Registry.register(Registries.ITEM, diamondId, diamondItem);
+
+
+
         // ── Chat intercept ───────────────────────────────────────────────────
 
         ServerMessageEvents.ALLOW_CHAT_MESSAGE.register((message, sender, params) -> {
 
             String content = message.getContent().getString();
 
-            if (com.customblocks.assistant.AssistantManager.handleChatCommand(sender, content)) return false;
 
             if (GuiManager.handleChatInput(sender, content)) return false;
 
@@ -405,9 +460,16 @@ public class CustomBlocksMod implements ModInitializer {
 
                             }
 
-                            Item rect = Registries.ITEM.get(Identifier.of(MOD_ID, "rainbow_rectangle"));
+                            Item customSquare = Registries.ITEM.get(Identifier.of(MOD_ID, ColorSquareItem.CUSTOM_SQUARE_REGISTRY_ID));
+                            if (customSquare != null && customSquare != Items.AIR) entries.add(ColorSquareItem.createCustomStack(customSquare, 0x55CCFF));
 
-                            if (rect != null && rect != Items.AIR) entries.add(rect);
+                            Item customTriangle = Registries.ITEM.get(Identifier.of(MOD_ID, ColorTriangleItem.CUSTOM_TRIANGLE_REGISTRY_ID));
+                            if (customTriangle != null && customTriangle != Items.AIR) entries.add(ColorTriangleItem.createCustomStack(customTriangle, 0x55CCFF));
+
+                            for (String tool : new String[]{"rainbow_rectangle", "golden_hexagon", "lumina_brush", "amethyst_chisel", "diamond_triangle"}) {
+                                Item item = Registries.ITEM.get(Identifier.of(MOD_ID, tool));
+                                if (item != null && item != Items.AIR) entries.add(item);
+                            }
 
                         })
 
@@ -466,7 +528,6 @@ public class CustomBlocksMod implements ModInitializer {
 
         ServerTickEvents.END_SERVER_TICK.register(server -> {
 
-            com.customblocks.assistant.AssistantManager.tick(server);
 
             NetworkManager.onServerTick(server);
 
@@ -478,53 +539,10 @@ public class CustomBlocksMod implements ModInitializer {
 
 
 
-        // ── Assistant Interaction (Right-Click NPC) ──────────────────────────
-
-        UseEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
-
-            if (!world.isClient
-                    && player instanceof ServerPlayerEntity serverPlayer
-                    && com.customblocks.assistant.AssistantManager.isManagedAssistant(entity)) {
-
-                GuiManager.openAssistantControl(serverPlayer);
-
-                return net.minecraft.util.ActionResult.SUCCESS;
-
-            }
-
-            return net.minecraft.util.ActionResult.PASS;
-
-        });
-
-        // ── Assistant Diamond Command (Go Here) ──────────────────────────────
-
-        UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
-
-            if (!world.isClient && player.getStackInHand(hand).isOf(Items.DIAMOND)) {
-
-                if (com.customblocks.assistant.AssistantManager.isSpawned()) {
-
-                    net.minecraft.util.math.BlockPos pos = hitResult.getBlockPos().offset(hitResult.getSide());
-
-                    com.customblocks.assistant.AssistantManager.setFollowing(false, null);
-
-                    com.customblocks.assistant.AssistantManager.orderMoveTo(pos);
-
-                    player.sendMessage(Text.literal("§0§l[§b§lAI§0§l] §fMoving there. §a✔"), false);
-
-                }
-
-            }
-
-            return net.minecraft.util.ActionResult.PASS;
-
-        });
-
 
 
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
             SlotManager.flushSave();
-            com.customblocks.assistant.AssistantManager.hide();
 
         });
 

@@ -715,6 +715,7 @@ public class CustomBlocksClient implements ClientModInitializer {
                     if (rpDirtyWhilePaused) {
                         rpDirtyWhilePaused = false;
                         CustomBlocksMod.LOGGER.info("[CustomBlocks] Deferred reload — triggering now.");
+                        clearCachedHash(context.client().runDirectory);
                         scheduleGenerateAndReload(context.client(), 500L);
                     }
                 }
@@ -1600,19 +1601,21 @@ public class CustomBlocksClient implements ClientModInitializer {
 
 
     /** Clear the server hash file (data changed locally, stale). */
-
     private static void clearServerHash(File runDir) {
-
         try {
-
             Files.deleteIfExists(runDir.toPath().resolve(SERVER_HASH_FILE));
-
         } catch (IOException e) {
-
             CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not clear server hash: {}", e.getMessage());
-
         }
+    }
 
+    /** Clear the cached texture hash file to force a reload. */
+    private static void clearCachedHash(File runDir) {
+        try {
+            Files.deleteIfExists(runDir.toPath().resolve(CACHE_HASH_FILE));
+        } catch (IOException e) {
+            CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not clear cache hash: {}", e.getMessage());
+        }
     }
 
 
