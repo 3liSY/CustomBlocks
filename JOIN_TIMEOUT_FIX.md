@@ -1,4 +1,4 @@
-# Join Timeout Fix — Pack Generation Optimization
+but# Join Timeout Fix — Pack Generation Optimization
 
 ## Problem
 YoCube1 (and any client with stale cache) gets kicked on join: **"Timed out"**.

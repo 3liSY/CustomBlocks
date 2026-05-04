@@ -57,7 +57,7 @@ public class RectangleToolItem extends Item {
     @Override
     public Text getName(ItemStack stack)    { return getName(); }
     @Override
-    public boolean hasGlint(ItemStack stack){ return true; }
+    public boolean hasGlint(ItemStack stack){ return com.customblocks.core.MagicItemsManager.getConfig("rainbow_rectangle").visualGlint; }
 
     @Override
     public void inventoryTick(ItemStack stack, World world, net.minecraft.entity.Entity entity, int slot, boolean selected) {
@@ -71,18 +71,41 @@ public class RectangleToolItem extends Item {
 
     @Override
     public ActionResult useOnBlock(ItemUsageContext ctx) {
+        com.customblocks.core.MagicItemsManager.MagicItemConfig cfg = com.customblocks.core.MagicItemsManager.getConfig("rainbow_rectangle");
+        if (!cfg.enabled) return ActionResult.PASS;
+
         World        world  = ctx.getWorld();
         BlockPos     pos    = ctx.getBlockPos();
         PlayerEntity player = ctx.getPlayer();
 
         if (world.isClient) return ActionResult.PASS;
 
-        BlockState state = world.getBlockState(pos);
-        if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
+        if (player instanceof ServerPlayerEntity sp) {
+            if (cfg.requirePermission && !com.customblocks.command.PermissionHelper.canUseTool(sp, "rainbowrectangle")) {
+                sp.sendMessage(Text.literal("§c[CustomBlocks] You do not have permission to use this magic item."), true);
+                if (world instanceof ServerWorld sw)
+                    sw.playSound(null, player.getBlockPos(),
+                        net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),
+                        net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
+                return ActionResult.FAIL;
+            }
+            if (cfg.worksInCreativeOnly && !sp.isCreative()) {
+                sp.sendMessage(Text.literal("§c[CustomBlocks] This item only works in Creative Mode."), true);
+                return ActionResult.FAIL;
+            }
+        }
 
-        if (player != null && !player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
-            player.sendMessage(Text.literal("§c[CustomBlocks] You need OP to use the Rainbow Rectangle."), true);
-            return ActionResult.FAIL;
+        BlockState state = world.getBlockState(pos);
+        if (!(state.getBlock() instanceof SlotBlock sb)) {
+            if (cfg.worksOnNonCustomBlocks) {
+                return ActionResult.PASS; // Vanilla block logic not supported yet.
+            }
+            if (player instanceof ServerPlayerEntity sp) sp.sendMessage(Text.literal("§cThis item only works on CustomBlocks!"), true);
+            return ActionResult.PASS;
+        }
+
+        if (player.isSneaking() && !cfg.allowSneakAction) {
+            return ActionResult.PASS;
         }
 
         SlotData data = SlotManager.getBySlot(sb.getSlotKey());
@@ -114,9 +137,18 @@ public class RectangleToolItem extends Item {
         player.sendMessage(Text.literal("§7Type §ccancel §7to abort."), false);
 
         if (world instanceof ServerWorld sw) {
-            sw.spawnParticles(net.minecraft.particle.ParticleTypes.GLOW, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 10, 0.2, 0.2, 0.2, 0.05);
-            sw.playSound(null, pos, net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, net.minecraft.sound.SoundCategory.PLAYERS, 1f, 1.2f);
+            if (cfg.particlesOnUse) {
+                sw.spawnParticles(net.minecraft.particle.ParticleTypes.GLOW, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 10, 0.2, 0.2, 0.2, 0.05);
+            }
+            if (!cfg.soundOnUse.isEmpty()) {
+                net.minecraft.sound.SoundEvent se = net.minecraft.registry.Registries.SOUND_EVENT.get(net.minecraft.util.Identifier.tryParse(cfg.soundOnUse));
+                if (se == null) se = net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME;
+                sw.playSound(null, pos, se, net.minecraft.sound.SoundCategory.PLAYERS, 1f, 1.2f);
+            }
         }
+        
+        if (cfg.cooldownTicks > 0 && player != null) player.getItemCooldownManager().set(this, cfg.cooldownTicks);
+        if (cfg.consumeOnUse && player != null && !player.isCreative()) ctx.getStack().decrement(1);
 
         return ActionResult.SUCCESS;
     }

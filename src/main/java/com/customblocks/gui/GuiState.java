@@ -95,9 +95,6 @@ public record GuiState(
         return new GuiState(GuiMode.RESOURCE_CENTER, null, 0, false, 0, false);
     }
 
-    public static GuiState assistantControl() {
-        return new GuiState(GuiMode.ASSISTANT_CONTROL, null, 0, false, 0, false);
-    }
 
     public static GuiState bulkDelete(int page) {
         return new GuiState(GuiMode.BULK_DELETE, null, page, false, 0, false);
@@ -129,6 +126,22 @@ public record GuiState(
 
     public static GuiState bgStudio() {
         return new GuiState(GuiMode.BG_STUDIO, null, 0, false, 0, false);
+    }
+
+    public static GuiState quickActions(String editingId) {
+        return new GuiState(GuiMode.QUICK_ACTIONS, editingId, 0, false, 0, false);
+    }
+
+    public static GuiState colorStudio() {
+        return new GuiState(GuiMode.COLOR_STUDIO, null, 0, false, 0, false);
+    }
+
+    public static GuiState colorStudio(String editingId) {
+        return new GuiState(GuiMode.COLOR_STUDIO, editingId, 0, false, 0, false);
+    }
+
+    public static GuiState editMagicItems(String editingId) {
+        return new GuiState(GuiMode.EDIT_MAGIC_ITEMS, editingId, 0, false, 0, false);
     }
 
     // ── Mutation (returns new instance) ──────────────────────────────────────

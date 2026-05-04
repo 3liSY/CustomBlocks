@@ -24,7 +24,7 @@ import com.customblocks.item.GoldenHexagonItem;
 
 import com.customblocks.item.LuminaBrushItem;
 
-import com.customblocks.item.AmethystChiselItem;
+import com.customblocks.item.CrystalEditorItem;
 
 import com.customblocks.item.DiamondTriangleItem;
 
@@ -124,6 +124,14 @@ public class CustomBlocksMod implements ModInitializer {
 
             RegistryKey.of(RegistryKeys.ITEM_GROUP, Identifier.of(MOD_ID, "blocks"));
 
+    // ── Golden Hexagon indicator mode tracking ───────────────────────────
+    /** Per-player hexagon indicator mode index (0-5). */
+    public static final java.util.concurrent.ConcurrentHashMap<java.util.UUID, Integer> HEXAGON_MODES = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Mode names matching the plan: Overlay, Particles, Ghost Preview, Edge Glow, Corner Markers, Off. */
+    public static final String[] HEXAGON_MODE_NAMES = {
+            "Overlay", "Particles", "Ghost Preview", "Edge Glow", "Corner Markers", "Off"
+    };
+
 
 
     @Override
@@ -135,6 +143,7 @@ public class CustomBlocksMod implements ModInitializer {
         // ── Load config first ────────────────────────────────────────────────
 
         CustomBlocksConfig.load();
+        com.customblocks.core.MagicItemsManager.loadAll();
 
         int maxSlots = CustomBlocksConfig.maxSlots;
 
@@ -267,20 +276,12 @@ public class CustomBlocksMod implements ModInitializer {
         Identifier brushId = Identifier.of(MOD_ID, "lumina_brush");
 
         LuminaBrushItem brushItem = new LuminaBrushItem(new Item.Settings().maxCount(1));
-
         Registry.register(Registries.ITEM, brushId, brushItem);
 
-
-
-        // ── Amethyst Chisel (Shape Editor Shortcut) ─────────────────────────
-
+        // ── Crystal Editor (Shape Editor Shortcut) ─────────────────────────
         Identifier chiselId = Identifier.of(MOD_ID, "amethyst_chisel");
-
-        AmethystChiselItem chiselItem = new AmethystChiselItem(new Item.Settings().maxCount(1));
-
+        CrystalEditorItem chiselItem = new CrystalEditorItem(new Item.Settings().maxCount(1));
         Registry.register(Registries.ITEM, chiselId, chiselItem);
-
-
 
         // ── Diamond Triangle (Background Studio Master) ──────────────────
 
@@ -332,6 +333,10 @@ public class CustomBlocksMod implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(
                 com.customblocks.network.SyncRequestPayload.ID,
                 com.customblocks.network.SyncRequestPayload.CODEC);
+
+        PayloadTypeRegistry.playC2S().register(
+                com.customblocks.network.CycleHexagonModePayload.ID,
+                com.customblocks.network.CycleHexagonModePayload.CODEC);
 
         PayloadTypeRegistry.playS2C().register(
                 com.customblocks.network.RpPausePayload.ID,
@@ -407,6 +412,46 @@ public class CustomBlocksMod implements ModInitializer {
                     });
                 }
         );
+
+        // ── CycleHexagonMode C2S handler ─────────────────────────────────────
+        ServerPlayNetworking.registerGlobalReceiver(
+                com.customblocks.network.CycleHexagonModePayload.ID,
+                (payload, context) -> {
+                    context.server().execute(() -> {
+                        ServerPlayerEntity player = context.player();
+                        java.util.UUID uuid = player.getUuid();
+
+                        // Verify player is holding a Golden Hexagon
+                        net.minecraft.item.ItemStack held = player.getMainHandStack();
+                        boolean isHexagon = held != null
+                                && held.getItem() instanceof com.customblocks.item.GoldenHexagonItem;
+                        if (!isHexagon) {
+                            held = player.getOffHandStack();
+                            isHexagon = held != null
+                                    && held.getItem() instanceof com.customblocks.item.GoldenHexagonItem;
+                        }
+                        if (!isHexagon) return;
+
+                        int current = HEXAGON_MODES.getOrDefault(uuid, 0);
+                        int next = (current + 1) % HEXAGON_MODE_NAMES.length;
+                        HEXAGON_MODES.put(uuid, next);
+
+                        player.sendMessage(Text.literal(
+                                "§6§lHexagon Indicator: §f" + HEXAGON_MODE_NAMES[next]), true);
+
+                        // Sensory feedback
+                        if (player.getWorld() instanceof net.minecraft.server.world.ServerWorld sw) {
+                            sw.playSound(null, player.getBlockPos(),
+                                    net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_CHIME.value(),
+                                    net.minecraft.sound.SoundCategory.PLAYERS, 0.6f, 1.2f + next * 0.15f);
+                            sw.spawnParticles(net.minecraft.particle.ParticleTypes.END_ROD,
+                                    player.getX(), player.getY() + 1.5, player.getZ(),
+                                    5, 0.2, 0.3, 0.2, 0.02);
+                        }
+                    });
+                }
+        );
+
 
         // ── Creative tab ─────────────────────────────────────────────────────
 
@@ -521,6 +566,8 @@ public class CustomBlocksMod implements ModInitializer {
             RectangleToolItem.onPlayerDisconnect(handler.player.getUuid());
 
             GuiManager.onPlayerDisconnect(handler.player.getUuid());
+
+            HEXAGON_MODES.remove(handler.player.getUuid());
 
         });
 

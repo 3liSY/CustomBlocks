@@ -250,6 +250,13 @@ public class GuiManager {
         openScreenFromGuiState(player, GuiState.picker(page), buildPicker(page, false), "§b§l▶ §r§fPick a Block");
     }
 
+    public static void openQuickActions(ServerPlayerEntity player, String id) {
+        SlotData d = SlotManager.getById(id);
+        if (d == null) return;
+        pushBackStack(player.getUuid());
+        openScreenFromGuiState(player, GuiState.quickActions(id), buildQuickActions(d), "§b§l⚡ §r§fQuick Actions §8— " + d.displayName);
+    }
+
     public static void openEditor(ServerPlayerEntity player, String id, int returnPage, boolean fromCommand) {
         SlotData d = SlotManager.getById(id);
         if (d == null) { openMain(player, returnPage); return; }
@@ -350,23 +357,23 @@ public class GuiManager {
             "§7Textures registered: §f" + texCount,
             "§7HTTP Server: " + (httpUp ? "§a✔ Running §7(port §f" + port + "§7)" : "§c✖ Stopped")));
 
-        inv.setStack(20, uiGlint(Items.ECHO_SHARD, "§b§lGet Download Link",
+        inv.setStack(20, lock(player, "resource.link", uiGlint(Items.ECHO_SHARD, "§b§lGet Download Link",
             "§7Creates a shareable URL for your texture pack",
-            "§b§nClick to broadcast to chat"));
+            "§b§nClick to broadcast to chat")));
 
-        inv.setStack(22, uiGlint(Items.NETHER_STAR, "§a§lForce Sync",
+        inv.setStack(22, lock(player, "resource.sync", uiGlint(Items.NETHER_STAR, "§a§lForce Sync",
             "§7Sends latest textures to all players",
-            "§e§lClick to broadcast"));
+            "§e§lClick to broadcast")));
 
-        inv.setStack(24, uiGlint(Items.ECHO_SHARD, "§6§l⏸ Pause Reloads",
+        inv.setStack(24, lock(player, "resource.pause", uiGlint(Items.ECHO_SHARD, "§6§l⏸ Pause Reloads",
             "§7Pauses resource pack reloading on all clients.",
             "§7Useful when making many edits in a row.",
-            "§8Click to pause"));
+            "§8Click to pause")));
 
-        inv.setStack(26, uiGlint(Items.AMETHYST_SHARD, "§a§l▶ Resume Reloads",
+        inv.setStack(26, lock(player, "resource.resume", uiGlint(Items.AMETHYST_SHARD, "§a§l▶ Resume Reloads",
             "§7Resumes resource pack reloading on all clients.",
             "§7Triggers a reload if changes were made while paused.",
-            "§8Click to resume"));
+            "§8Click to resume")));
 
         inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
         return inv;
@@ -449,6 +456,9 @@ public class GuiManager {
                 case HELP_CATEGORY -> openHelpCategory(player, state.page());
                 case ANIM_CONFIRM_ABANDON -> reopenAnimGui(player, state.editingId(), state.page());
                 case BG_STUDIO -> openBgStudio(player, false);
+                case QUICK_ACTIONS -> openQuickActions(player, state.editingId());
+                case COLOR_STUDIO -> openColorStudio(player, state);
+                case EDIT_MAGIC_ITEMS -> openEditMagicItems(player, state.editingId());
                 default -> openMain(player, 0);
             }
         } finally {
@@ -467,6 +477,12 @@ public class GuiManager {
             playClick(player);
             state = STATES.get(player.getUuid());
             if (state == null) return;
+            if (player.currentScreenHandler != null && slot >= 0 && slot < player.currentScreenHandler.slots.size()) {
+                if (player.currentScreenHandler.slots.get(slot).getStack().isOf(net.minecraft.item.Items.BARRIER)) {
+                    playError(player);
+                    return;
+                }
+            }
             switch (state.mode()) {
                 case MAIN         -> handleMainClick(player, state, slot);
                 case PICKER       -> handlePickerClick(player, state, slot, false);
@@ -493,6 +509,9 @@ public class GuiManager {
                 case HELP_CATEGORY  -> handleHelpCategoryClick(player, state, slot);
                 case ANIM_CONFIRM_ABANDON -> handleAnimConfirmAbandonClick(player, state, slot);
                 case BG_STUDIO -> handleBgStudioClick(player, state, slot, button);
+                case QUICK_ACTIONS -> handleQuickActionsClick(player, state, slot, button);
+                case COLOR_STUDIO  -> handleColorStudioClick(player, state, slot, button);
+                case EDIT_MAGIC_ITEMS -> handleEditMagicItemsClick(player, state, slot, button);
             }
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] GUI Command Error: {}", e.getMessage(), e);
@@ -829,13 +848,11 @@ public class GuiManager {
                         case "resourcePackPort" -> CustomBlocksConfig.resourcePackPort = Math.max(0, Math.min(65535, Integer.parseInt(text)));
                         case "reloadDebounceMs" -> CustomBlocksConfig.reloadDebounceMs = Math.max(500, Math.min(10000, Long.parseLong(text)));
                         case "cloudShareUrl" -> CustomBlocksConfig.cloudShareUrl = text.trim();
-                        case "aiName" -> CustomBlocksConfig.aiName = text.replace("&", "§");
                         case "undoMode" -> {
                             String v = text.toLowerCase().trim();
                             if (List.of("global", "per_player", "both").contains(v)) CustomBlocksConfig.undoMode = v;
                             else { send(player, "§cMust be: global / per_player / both"); openConfigGui(player, false); return true; }
                         }
-                        case "aiStyle" -> CustomBlocksConfig.aiStyle = text;
                         default -> { send(player, "§cUnknown config key."); openConfigGui(player, false); return true; }
                     }
                     CustomBlocksConfig.save();
@@ -1002,6 +1019,107 @@ public class GuiManager {
         // Bottom row
         inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
         return inv;
+    }
+
+    // ── Edit Magic Items GUI ──────────────────────────────────────────────────
+
+    public static void openEditMagicItems(ServerPlayerEntity player) { openEditMagicItems(player, "diamond_triangle"); }
+
+    public static void openEditMagicItems(ServerPlayerEntity player, String activeItem) {
+        pushBackStack(player.getUuid());
+        openScreenFromGuiState(player, GuiState.editMagicItems(activeItem), buildEditMagicItemsGui(activeItem), "§5§l✦ §r§fEdit Magic Items");
+    }
+
+    private static SimpleInventory buildEditMagicItemsGui(String activeId) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+
+        // Navigation Row
+        String[] ids = {"diamond_triangle", "golden_hexagon", "amethyst_chisel", "lumina_brush", "rainbow_rectangle"};
+        Item[] icons = {Items.DIAMOND, Items.GOLDEN_APPLE, Items.AMETHYST_SHARD, Items.BLAZE_ROD, Items.PAINTING};
+        String[] names = {"Diamond Triangle", "Golden Hexagon", "Crystal Editor", "Lumina Brush", "Rainbow Rectangle"};
+
+        for (int i = 0; i < ids.length; i++) {
+            boolean active = ids[i].equals(activeId);
+            inv.setStack(2 + i, active 
+                ? uiGlint(icons[i], "§e✦ " + names[i]) 
+                : ui(icons[i], "§7" + names[i], "§8Click to select"));
+        }
+
+        com.customblocks.core.MagicItemsManager.MagicItemConfig cfg = com.customblocks.core.MagicItemsManager.getConfig(activeId);
+
+        // Settings
+        inv.setStack(18, toggleItem("Enabled globally", cfg.enabled, "Enable or disable this item entirely"));
+        inv.setStack(19, toggleItem("Require Permission", cfg.requirePermission, "Players need permission node to use this"));
+        inv.setStack(20, toggleItem("Visual Glint", cfg.visualGlint, "Should the item have an enchantment glint?"));
+        inv.setStack(21, toggleItem("Particles on Use", cfg.particlesOnUse, "Spawn particles when the item is used?"));
+        
+        inv.setStack(27, toggleItem("Works on non-custom blocks", cfg.worksOnNonCustomBlocks, "Can this be used on vanilla blocks?"));
+        inv.setStack(28, toggleItem("Works in Creative ONLY", cfg.worksInCreativeOnly, "Restrict usage to creative mode only?"));
+        inv.setStack(29, toggleItem("Allow Sneak Action", cfg.allowSneakAction, "Allow alternative actions when sneaking?"));
+        inv.setStack(30, toggleItem("Consume on Use", cfg.consumeOnUse, "Remove 1 from stack when used?"));
+
+        inv.setStack(38, numItem("Cooldown Ticks", cfg.cooldownTicks, "Delay between uses (20 ticks = 1 second)"));
+        inv.setStack(39, numItem("Max Uses", cfg.maxUses, "Durability. -1 for infinite"));
+
+        inv.setStack(41, ui(Items.NAME_TAG, "§e✏ Edit Display Name", "§7Current: " + cfg.displayName));
+        inv.setStack(42, ui(Items.PAPER, "§e✏ Edit Sound on Use", "§7Current: " + cfg.soundOnUse));
+
+        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
+        inv.setStack(53, uiGlint(Items.EMERALD_BLOCK, "§a✅ Save All Changes"));
+
+        return inv;
+    }
+
+    private static void handleEditMagicItemsClick(ServerPlayerEntity player, GuiState state, int slot, int button) {
+        String activeId = state.editingId();
+        if (activeId == null) activeId = "diamond_triangle";
+
+        if (slot == 45) { handleEscBack(player); return; }
+
+        if (slot >= 2 && slot <= 6) {
+            String[] ids = {"diamond_triangle", "golden_hexagon", "amethyst_chisel", "lumina_brush", "rainbow_rectangle"};
+            openEditMagicItems(player, ids[slot - 2]);
+            playClick(player);
+            return;
+        }
+
+        com.customblocks.core.MagicItemsManager.MagicItemConfig cfg = com.customblocks.core.MagicItemsManager.getConfig(activeId);
+        boolean changed = false;
+
+        switch (slot) {
+            case 18 -> { cfg.enabled = !cfg.enabled; changed = true; }
+            case 19 -> { cfg.requirePermission = !cfg.requirePermission; changed = true; }
+            case 20 -> { cfg.visualGlint = !cfg.visualGlint; changed = true; }
+            case 21 -> { cfg.particlesOnUse = !cfg.particlesOnUse; changed = true; }
+            case 27 -> { cfg.worksOnNonCustomBlocks = !cfg.worksOnNonCustomBlocks; changed = true; }
+            case 28 -> { cfg.worksInCreativeOnly = !cfg.worksInCreativeOnly; changed = true; }
+            case 29 -> { cfg.allowSneakAction = !cfg.allowSneakAction; changed = true; }
+            case 30 -> { cfg.consumeOnUse = !cfg.consumeOnUse; changed = true; }
+            case 38 -> { cfg.cooldownTicks += (button == 0 ? 5 : -5); if (cfg.cooldownTicks < 0) cfg.cooldownTicks = 0; changed = true; }
+            case 39 -> { cfg.maxUses += (button == 0 ? 10 : -10); if (cfg.maxUses < -1) cfg.maxUses = -1; changed = true; }
+            case 41 -> {
+                openShortInputPrompt(player, new PendingInput(InputAction.CREATE_NAME, activeId, null, null, null, 0), "§eDisplay Name", new ItemStack(Items.NAME_TAG), cfg.displayName);
+                return;
+            }
+            case 42 -> {
+                openShortInputPrompt(player, new PendingInput(InputAction.CREATE_URL, activeId, null, null, null, 0), "§eSound ID", new ItemStack(Items.PAPER), cfg.soundOnUse);
+                return;
+            }
+            case 53 -> {
+                com.customblocks.core.MagicItemsManager.saveAll();
+                playSuccess(player);
+                player.sendMessage(Text.literal("§a[CustomBlocks] Magic Items config saved!"), true);
+                openMain(player, 0);
+                return;
+            }
+        }
+
+        if (changed) {
+            com.customblocks.core.MagicItemsManager.ITEMS.put(activeId, cfg);
+            playClick(player);
+            openEditMagicItems(player, activeId);
+        }
     }
 
     private static void handleMagicItemsClick(ServerPlayerEntity player, GuiState state, int slot) {
@@ -1408,9 +1526,7 @@ public class GuiManager {
         SimpleInventory inv = new SimpleInventory(54);
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
         // Row 1: Toggles
-        inv.setStack(11, toggleItem("AI System Ready", CustomBlocksConfig.aiEnabled, "Keep the AI assistant system enabled"));
-        inv.setStack(12, toggleItem("AI Status Halo", CustomBlocksConfig.aiHologram, "Show a floating status label above the assistant"));
-        inv.setStack(13, toggleItem("Cloud Share", CustomBlocksConfig.cloudShareEnabled, "Upload and fetch share codes from the Cloud Vault"));
+        inv.setStack(11, toggleItem("Cloud Share", CustomBlocksConfig.cloudShareEnabled, "Upload and fetch share codes from the Cloud Vault"));
         // Row 2: Numbers
         inv.setStack(19, numItem("Block Capacity", CustomBlocksConfig.maxSlots, "How many custom blocks this server can hold (restart required)"));
         inv.setStack(20, numItem("Texture Quality", CustomBlocksConfig.defaultTextureSize, "Default resolution used when new textures are processed"));
@@ -1424,10 +1540,8 @@ public class GuiManager {
         inv.setStack(25, numItem("Communication Door", CustomBlocksConfig.resourcePackPort, "Port used by the local texture server (0 disables it)"));
         inv.setStack(26, numItem("Pack Rebuild Delay", CustomBlocksConfig.reloadDebounceMs, "How long to wait before rebuilding the pack again"));
         // Row 3: Strings
-        inv.setStack(28, strItem("AI Display Name", CustomBlocksConfig.aiName, "The name shown above your assistant"));
-        inv.setStack(29, strItem("History Mode", CustomBlocksConfig.undoMode, "Choose whether undo history is shared or per-player"));
-        inv.setStack(32, strItem("AI Style", CustomBlocksConfig.aiStyle, "Visual style for the assistant AI"));
-        inv.setStack(33, strItem("Cloud Vault URL", truncate(CustomBlocksConfig.normalizedCloudShareUrl(), 30), "Base URL used for cross-server share codes"));
+        inv.setStack(28, strItem("History Mode", CustomBlocksConfig.undoMode, "Choose whether undo history is shared or per-player"));
+        inv.setStack(29, strItem("Cloud Vault URL", truncate(CustomBlocksConfig.normalizedCloudShareUrl(), 30), "Base URL used for cross-server share codes"));
         // Row 5: Back
         inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
         return inv;
@@ -1452,21 +1566,9 @@ public class GuiManager {
         switch (slot) {
             // Toggles
             case 11 -> {
-                CustomBlocksConfig.aiEnabled = !CustomBlocksConfig.aiEnabled;
-                CustomBlocksConfig.save();
-                send(player, "§a[Config] aiEnabled = " + CustomBlocksConfig.aiEnabled);
-                openConfigGui(player, false);
-            }
-            case 12 -> {
-                CustomBlocksConfig.aiHologram = !CustomBlocksConfig.aiHologram;
-                CustomBlocksConfig.save();
-                send(player, "§a[Config] aiHologram = " + CustomBlocksConfig.aiHologram);
-                openConfigGui(player, false);
-            }
-            case 13 -> {
                 CustomBlocksConfig.cloudShareEnabled = !CustomBlocksConfig.cloudShareEnabled;
                 CustomBlocksConfig.save();
-                send(player, "Â§a[Config] cloudShareEnabled = " + CustomBlocksConfig.cloudShareEnabled);
+                send(player, "§a[Config] cloudShareEnabled = " + CustomBlocksConfig.cloudShareEnabled);
                 openConfigGui(player, false);
             }
             // Numbers
@@ -1479,10 +1581,8 @@ public class GuiManager {
             case 25 -> configPrompt(player, "resourcePackPort", "Communication Door (0 disables it):");
             case 26 -> configPrompt(player, "reloadDebounceMs", "Pack Rebuild Delay (500-10000 ms):");
             // Strings
-            case 28 -> configPrompt(player, "aiName", "AI Display Name:");
-            case 29 -> configPrompt(player, "undoMode", "History Mode (global / per_player / both):");
-            case 32 -> configPrompt(player, "aiStyle", "AI Style:");
-            case 33 -> configPrompt(player, "cloudShareUrl", "Cloud Vault URL:");
+            case 28 -> configPrompt(player, "undoMode", "History Mode (global / per_player / both):");
+            case 29 -> configPrompt(player, "cloudShareUrl", "Cloud Vault URL:");
             case 45 -> openMain(player, 0);
         }
     }
@@ -2560,6 +2660,102 @@ public class GuiManager {
 
     // ── Builders ──────────────────────────────────────────────────────────────
 
+    private static SimpleInventory buildQuickActions(SlotData d) {
+        SimpleInventory inv = new SimpleInventory(27);
+        for (int i = 0; i < 27; i++) inv.setStack(i, glass());
+
+        // Target block in center
+        ItemStack target = CustomBlocksMod.safeSlotItem(d.index) != null
+            ? new ItemStack(CustomBlocksMod.safeSlotItem(d.index))
+            : new ItemStack(Items.STONE);
+        target.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§f" + d.displayName).styled(s -> s.withItalic(false)));
+        target.set(DataComponentTypes.LORE, new LoreComponent(List.of(
+            lore("§7ID: §b" + d.customId),
+            lore("§7Slot: §f" + d.index)
+        )));
+        target.set(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE, true);
+        inv.setStack(13, target);
+
+        // Actions around it
+        inv.setStack(10, uiGlint(Items.AMETHYST_CLUSTER, "§e✦ Adjust Light",
+            "§7Current: §f" + d.lightLevel, "§8Left-click: +1", "§8Right-click: -1"));
+
+        inv.setStack(11, uiGlint(Items.OBSIDIAN, "§8❖ Adjust Hardness",
+            "§7Current: §f" + hardnessLabel(d.hardness), "§8Left-click: Next", "§8Right-click: Prev"));
+
+        inv.setStack(15, uiGlint(Items.NOTE_BLOCK, "§d♫ Change Sound",
+            "§7Current: §f" + d.soundType, "§8Click to open Sound Menu"));
+
+        inv.setStack(16, uiGlint(Items.CRAFTING_TABLE, "§6✎ Full Editor",
+            "§7Open the complete Block Editor"));
+
+        inv.setStack(22, uiGlint(Items.CHEST, "§a⧉ Duplicate",
+            "§7Create a copy of this block"));
+
+        return inv;
+    }
+
+    private static void handleQuickActionsClick(ServerPlayerEntity player, GuiState state, int slot, int button) {
+        String id = state.editingId();
+        SlotData d = SlotManager.getById(id);
+        if (d == null) { openMain(player, 0); return; }
+
+        switch (slot) {
+            case 10 -> { // Light
+                int newLight = d.lightLevel + (button == 1 ? -1 : 1);
+                if (newLight > 15) newLight = 0;
+                if (newLight < 0) newLight = 15;
+                UndoManager.pushUndoMutation(id, d, "quick light to " + newLight, player.getUuid());
+                SlotManager.setLightLevel(id, newLight);
+                SlotManager.saveAll();
+                NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setlight", d.index, id, null, null, newLight, 0, "stone"));
+                player.playSound(net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_CHIME.value(), 1f, 1f + (newLight * 0.05f));
+                refreshScreen(player, buildQuickActions(SlotManager.getById(id)));
+            }
+            case 11 -> { // Hardness
+                float newHard = button == 1 ? prevHardness(d.hardness) : nextHardness(d.hardness);
+                UndoManager.pushUndoMutation(id, d, "quick hardness to " + newHard, player.getUuid());
+                SlotManager.setHardness(id, newHard);
+                SlotManager.saveAll();
+                NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("sethardness", d.index, id, null, null, 0, newHard, "stone"));
+                player.playSound(net.minecraft.sound.SoundEvents.BLOCK_ANVIL_PLACE, 1f, 1f);
+                refreshScreen(player, buildQuickActions(SlotManager.getById(id)));
+            }
+            case 15 -> { // Sound
+                openSoundMenu(player, id, 0);
+            }
+            case 16 -> { // Editor
+                openEditor(player, id, 0);
+            }
+            case 22 -> { // Duplicate
+                if (SlotManager.freeSlots() == 0) { send(player, "§c[GUI] No free slots to duplicate!"); return; }
+                String newId = id + "_copy_" + (System.currentTimeMillis() % 1000);
+                String newName = d.displayName + " (Copy)";
+                byte[] texCopy = null;
+                try { if (d.texture != null) texCopy = d.texture.clone(); } catch (OutOfMemoryError oom) { send(player, "§c[GUI] OOM cloning texture."); return; }
+                SlotData copy = SlotManager.assign(newId, newName, texCopy);
+                if (copy != null) {
+                    SlotManager.setLightLevel(newId, d.lightLevel);
+                    SlotManager.setHardness(newId, d.hardness);
+                    SlotManager.setSoundType(newId, d.soundType);
+                    if (d.animMeta != null) SlotManager.setAnimMeta(newId, d.animMeta);
+                    for (var e : d.faceTextures.entrySet()) SlotManager.setFaceTexture(newId, e.getKey(), e.getValue().clone());
+                    if (d.shapeBoxes != null) SlotManager.setShape(newId, new ArrayList<>(d.shapeBoxes));
+                    if (d.noCollision) SlotManager.setCollision(newId, false);
+                    UndoManager.pushUndoCreate(newId, player.getUuid());
+                    SlotManager.saveAll();
+                    SlotData fresh = SlotManager.getById(newId);
+                    NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("add", fresh.index, newId, newName, texCopy, fresh.lightLevel, fresh.hardness, fresh.soundType, null, null, fresh.animMeta));
+                    for (var fe : fresh.faceTextures.entrySet()) NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setface", fresh.index, newId, null, fe.getValue(), fresh.lightLevel, fresh.hardness, fresh.soundType, fe.getKey()));
+                    broadcastShape(player.getServer(), fresh);
+                    if (fresh.noCollision) NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setcollision", fresh.index, newId, null, null, 0, 0, "stone", null, "false"));
+                    send(player, "§a[GUI] Duplicated as '§f" + newId + "§a'.");
+                    openEditor(player, newId, 0);
+                }
+            }
+        }
+    }
+
     private static SimpleInventory buildToolsGui(ServerPlayerEntity player) {
         SimpleInventory inv = new SimpleInventory(54);
         for(int i=0; i<54; i++) inv.setStack(i, glass());
@@ -2597,14 +2793,14 @@ public class GuiManager {
             "§8Type /cb help for commands"));
 
         // Row 2: primary actions (spaced by 1 slot)
-        inv.setStack(19, uiGlint(Items.CRAFTING_TABLE, "§e§lBlock Manager",
-            "§7Browse, edit, or create blocks", "§8" + blockCount + " block(s) registered"));
-        inv.setStack(21, uiGlint(Items.EMERALD, "§a§l+ Create New Block",
-            "§7Create a new custom block", "§8Type an ID in chat"));
-        inv.setStack(23, uiGlint(Items.SPYGLASS, "§f§lSearch Blocks",
-            "§7Find a block by name or ID", "§8Type a query in chat"));
-        inv.setStack(25, uiGlint(Items.BRUSH, "§d§lMagic Items",
-            "§7Wands, color squares, triangles"));
+        inv.setStack(19, lock(player, "main.block_manager", uiGlint(Items.CRAFTING_TABLE, "§e§lBlock Manager",
+            "§7Browse, edit, or create blocks", "§8" + blockCount + " block(s) registered")));
+        inv.setStack(21, lock(player, "main.create_block", uiGlint(Items.EMERALD, "§a§l+ Create New Block",
+            "§7Create a new custom block", "§8Type an ID in chat")));
+        inv.setStack(23, lock(player, "main.search_blocks", uiGlint(Items.SPYGLASS, "§f§lSearch Blocks",
+            "§7Find a block by name or ID", "§8Type a query in chat")));
+        inv.setStack(25, lock(player, "main.magic_items", uiGlint(Items.BRUSH, "§d§lMagic Items",
+            "§7Wands, color squares, triangles")));
 
         // Row 3: recent blocks (inline, spaced)
         Deque<String> recent = RECENT_BLOCKS.getOrDefault(uuid, new ArrayDeque<>());
@@ -2621,28 +2817,27 @@ public class GuiManager {
         }
 
         // Row 4: secondary actions (spaced by 1 slot)
-        inv.setStack(37, uiGlint(Items.ARMOR_STAND, "§b§lAssistant Hub",
-            "§7Spawn, control, and configure the AI assistant"));
-        inv.setStack(39, uiGlint(Items.STRUCTURE_VOID, "§6§lServer Tools",
+        inv.setStack(37, glass()); // AI Assistant completely purged
+        inv.setStack(39, lock(player, "main.server_tools", uiGlint(Items.STRUCTURE_VOID, "§6§lServer Tools",
             "§7Broken blocks, resource pack, data",
-            brokenCount > 0 ? "§c" + brokenCount + " broken" : "§aAll OK"));
-        inv.setStack(41, uiGlint(Items.LAVA_BUCKET, "§c§l⚠ Bulk Delete",
-            "§7Select and delete multiple blocks"));
-        inv.setStack(43, uiGlint(Items.BOOK, "§a§lHelp & Info", "§7Interactive help guide"));
+            brokenCount > 0 ? "§c" + brokenCount + " broken" : "§aAll OK")));
+        inv.setStack(41, lock(player, "main.bulk_delete", uiGlint(Items.LAVA_BUCKET, "§c§l⚠ Bulk Delete",
+            "§7Select and delete multiple blocks")));
+        inv.setStack(43, lock(player, "main.help", uiGlint(Items.BOOK, "§a§lHelp & Info", "§7Interactive help guide")));
 
         // Row 5: navigation (undo, history, redo, config)
-        inv.setStack(46, undoSz > 0
+        inv.setStack(46, lock(player, "main.undo", undoSz > 0
             ? uiGlint(Items.GOLDEN_PICKAXE, "§6§l↩ Undo §e(" + undoSz + ")", "§7Click to undo last action")
-            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Undo (Empty)"));
-        inv.setStack(48, (undoSz + redoSz) > 0
+            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Undo (Empty)")));
+        inv.setStack(48, lock(player, "main.history", (undoSz + redoSz) > 0
             ? uiGlint(Items.KNOWLEDGE_BOOK, "§6§lHistory §7(" + (undoSz + redoSz) + ")",
                 "§7Browse undo/redo entries", "§8Click to open picker")
-            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8History (Empty)"));
-        inv.setStack(50, redoSz > 0
+            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8History (Empty)")));
+        inv.setStack(50, lock(player, "main.redo", redoSz > 0
             ? uiGlint(Items.DIAMOND_PICKAXE, "§b§l↪ Redo §3(" + redoSz + ")", "§7Click to redo last undone action")
-            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Redo (Empty)"));
-        inv.setStack(52, uiGlint(Items.COMPARATOR, "§6§l⚙ Config",
-            "§7View and edit server-wide settings"));
+            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Redo (Empty)")));
+        inv.setStack(52, lock(player, "main.config", uiGlint(Items.COMPARATOR, "§6§l⚙ Config",
+            "§7View and edit server-wide settings")));
 
         return inv;
     }
@@ -2667,10 +2862,10 @@ public class GuiManager {
             "§7Players: §f" + players + " §7Online"));
 
         // ── Row 2: Tools ──────────────────────────────────────────────────────
-        inv.setStack(19, uiGlint(Items.PAINTING, "§a§lSet Tab Icon", "§7Change dynamic creative tab icon", "§aUse a square PNG for best results."));
-        inv.setStack(21, uiGlint(Items.DAMAGED_ANVIL, "§c§lBroken Block Finder", "§7Find and fix blocks with missing textures.", "§aCleans up missing textures."));
-        inv.setStack(23, uiGlint(Items.BEACON, "§b§lResource Pack", "§7Manage the texture pack & sync.", "§aEnsure players can download your textures."));
-        inv.setStack(25, uiGlint(Items.PLAYER_HEAD, "§e§lAI Assistant", "§7Manage your in-world AI assistant.", "§aToggle presence & behaviors."));
+        inv.setStack(19, lock(player, "tools.tab_icon", uiGlint(Items.PAINTING, "§a§lSet Tab Icon", "§7Change dynamic creative tab icon", "§aUse a square PNG for best results.")));
+        inv.setStack(21, lock(player, "tools.broken_blocks", uiGlint(Items.DAMAGED_ANVIL, "§c§lBroken Block Finder", "§7Find and fix blocks with missing textures.", "§aCleans up missing textures.")));
+        inv.setStack(23, lock(player, "tools.resource_pack", uiGlint(Items.BEACON, "§b§lResource Pack", "§7Manage the texture pack & sync.", "§aEnsure players can download your textures.")));
+        inv.setStack(25, glass()); // AI Assistant completely purged
 
         // ── Row 3: Slot Usage & Network ──────────────────────────────────────
         int used = SlotManager.usedSlots();
@@ -2780,7 +2975,7 @@ public class GuiManager {
                 inv.setStack(13, uiGlint(Items.HOPPER, "§aImport Folder", "§7/cb importfolder", "§8Bulk-imports from config/customblocks/import/."));
                 inv.setStack(14, uiGlint(Items.REPEATER, "§aReload", "§7/cb reload", "§8Reloads all data and syncs to players."));
                 inv.setStack(15, uiGlint(Items.COMPARATOR, "§aConfig", "§7/cb config", "§8Opens the server configuration GUI."));
-                inv.setStack(19, uiGlint(Items.PLAYER_HEAD, "§aAI Assistant", "§7/cb ai [spawn|hide|come|stay|tp|scan|status]", "§8Manage the in-world AI assistant."));
+                inv.setStack(19, glass()); // AI Assistant purged
                 inv.setStack(20, uiGlint(Items.NETHER_STAR, "§aMagic Items", "§7/cb magicitems", "§8Opens the magic items GUI."));
                 inv.setStack(21, uiGlint(Items.COMPASS, "§aResource Pack", "§7/cb rp", "§8Resource pack management hub."));
             }
@@ -3309,7 +3504,7 @@ public class GuiManager {
                  "downloadTimeoutSeconds", "texturePayloadsPerTick", "resourcePackPort",
                  "reloadDebounceMs" -> Items.REPEATER;
             case "undoMode" -> Items.COMPARATOR;
-            case "aiStyle" -> Items.PAINTING;
+
             case "cloudShareUrl" -> Items.ENDER_PEARL;
             default -> Items.NAME_TAG;
         };
@@ -3327,9 +3522,7 @@ public class GuiManager {
             case "resourcePackPort" -> String.valueOf(CustomBlocksConfig.resourcePackPort);
             case "reloadDebounceMs" -> String.valueOf(CustomBlocksConfig.reloadDebounceMs);
             case "cloudShareUrl" -> CustomBlocksConfig.normalizedCloudShareUrl();
-            case "aiName" -> stripFormattingCodes(CustomBlocksConfig.aiName);
             case "undoMode" -> CustomBlocksConfig.undoMode;
-            case "aiStyle" -> CustomBlocksConfig.aiStyle;
             default -> "";
         };
     }
@@ -3704,6 +3897,170 @@ public class GuiManager {
     private static void send(ServerPlayerEntity p, String m) { ChatHelper.info(p, normalizeFormattingCodes(m)); }
     private static void thread(ServerPlayerEntity p, Runnable r) { EXECUTOR.submit(r); }
 
+    // ── Color Studio ─────────────────────────────────────────────────────────
+
+    public static void openColorStudio(ServerPlayerEntity player, GuiState state) {
+        if (state == null) state = GuiState.colorStudio();
+        openScreenFromGuiState(player, state, buildColorStudioGui(player, state), "§d§l🎨 §r§fColor Studio");
+    }
+
+    private static SimpleInventory buildColorStudioGui(ServerPlayerEntity player, GuiState state) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+
+        int theme = state.page();
+        int activeColor = state.shapeBoxPage();
+        if (activeColor == 0) activeColor = 0xEE5588; // Default pink
+
+        // Row 1: Themes
+        inv.setStack(0, ui(Items.RED_CONCRETE, "§c◀ Back"));
+        inv.setStack(1, theme == 1 ? uiGlint(Items.ORANGE_DYE, "§6🔥 Warm") : ui(Items.ORANGE_DYE, "§6🔥 Warm"));
+        inv.setStack(2, theme == 2 ? uiGlint(Items.LIGHT_BLUE_DYE, "§b🌊 Cool") : ui(Items.LIGHT_BLUE_DYE, "§b🌊 Cool"));
+        inv.setStack(3, theme == 3 ? uiGlint(Items.GREEN_DYE, "§2🌿 Earth") : ui(Items.GREEN_DYE, "§2🌿 Earth"));
+        inv.setStack(4, theme == 0 ? uiGlint(Items.PURPLE_DYE, "§d🎨 Studio") : ui(Items.PURPLE_DYE, "§d🎨 Studio"));
+        inv.setStack(5, theme == 5 ? uiGlint(Items.RED_DYE, "§c🌅 Sunset") : ui(Items.RED_DYE, "§c🌅 Sunset"));
+        inv.setStack(6, theme == 6 ? uiGlint(Items.MAGENTA_DYE, "§5🌙 Neon") : ui(Items.MAGENTA_DYE, "§5🌙 Neon"));
+        inv.setStack(7, theme == 7 ? uiGlint(Items.CYAN_DYE, "§3⚡ Cyber") : ui(Items.CYAN_DYE, "§3⚡ Cyber"));
+        inv.setStack(8, ui(Items.SLIME_BALL, "§a🎲 Random", "§7Picks a random color"));
+
+        // Row 2-3: Color Palette (18 swatches) based on theme
+        int[] palette = generatePaletteForTheme(theme);
+        for (int i = 0; i < 18; i++) {
+            if (i < palette.length) {
+                int c = palette[i];
+                Item icon = c == activeColor ? Items.GLOWSTONE_DUST : Items.REDSTONE;
+                String hex = String.format("#%06X", c);
+                if (c == activeColor) {
+                    inv.setStack(9 + i, uiGlint(icon, "§e✦ Selected: " + hex, "§7Click to apply"));
+                } else {
+                    inv.setStack(9 + i, ui(icon, "§fColor: " + hex, "§7Click to select"));
+                }
+            } else {
+                inv.setStack(9 + i, glass());
+            }
+        }
+        
+        // Row 3 specials (slots 21, 22, 23, 24, 25, 26)
+        inv.setStack(21, ui(Items.BREWING_STAND, "§6🔀 Mixer", "§7Blend colors"));
+        inv.setStack(22, ui(Items.GLASS_BOTTLE, "§b🧪 Steal from Block", "§7Click to sample from a block"));
+        inv.setStack(23, uiGlint(Items.AMETHYST_SHARD, "§d👁 Live Preview", "§7Current: #" + String.format("%06X", activeColor)));
+        inv.setStack(24, ui(Items.HEART_OF_THE_SEA, "§b♡ Complementary", "§7Auto-suggested opposite"));
+        inv.setStack(25, ui(Items.EMERALD, "§a♡ Analogous", "§7Neighboring colors"));
+        inv.setStack(26, ui(Items.GOLD_INGOT, "§e♡ Triadic", "§73-color scheme"));
+
+        // Row 4: Shade Bar
+        int[] shades = com.customblocks.util.ColorUtils.getShades(activeColor);
+        inv.setStack(27, ui(Items.BLACK_DYE, "§8◀ Darker"));
+        for (int i = 0; i < 7; i++) {
+            int sh = shades[i];
+            String hex = String.format("#%06X", sh);
+            Item icon = Items.INK_SAC;
+            if (i == 4) {
+                inv.setStack(28 + i, uiGlint(icon, "§e✦ Base: " + hex));
+            } else {
+                inv.setStack(28 + i, ui(icon, "§7Shade: " + hex));
+            }
+        }
+        inv.setStack(35, ui(Items.WHITE_DYE, "§fLighter ▶"));
+
+        // Row 5: Memory
+        com.customblocks.core.PlayerColorData data = com.customblocks.core.PlayerColorData.get(player.getUuid());
+        inv.setStack(36, ui(Items.NETHER_STAR, "§e⭐ Save Favorite", "§7Saves current color"));
+        for (int i = 0; i < 4; i++) {
+            int fav = data.favorites.size() > i ? data.favorites.get(i) : 0xFFFFFF;
+            inv.setStack(37 + i, fav == 0xFFFFFF ? ui(Items.LIGHT_GRAY_DYE, "§7Empty Fav") : ui(Items.DIAMOND, "§bFav: #" + String.format("%06X", fav)));
+        }
+        inv.setStack(41, ui(Items.CLOCK, "§6🕐 History"));
+        for (int i = 0; i < 2; i++) {
+            int hist = data.history.size() > i ? data.history.get(i) : 0xFFFFFF;
+            inv.setStack(42 + i, hist == 0xFFFFFF ? glass() : ui(Items.PAPER, "§fRecent: #" + String.format("%06X", hist)));
+        }
+        inv.setStack(44, ui(Items.NAME_TAG, "§e✏️ Type Hex Code"));
+
+        // Row 6: Create
+        inv.setStack(45, ui(Items.RED_CONCRETE, "§c◀ Back"));
+        inv.setStack(46, uiGlint(Items.PRISMARINE_SHARD, "§b△ Triangle", "§7Shape toggle"));
+        inv.setStack(47, ui(Items.BRICK, "§7□ Square", "§7Shape toggle"));
+        inv.setStack(48, ui(Items.COPPER_INGOT, "§6△□ Both", "§7Shape toggle"));
+        inv.setStack(49, uiGlint(Items.PAPER, "§d🏷️ Smart Name"));
+        inv.setStack(50, ui(Items.LIME_DYE, "§a×1 Quantity"));
+        inv.setStack(51, ui(Items.GRAY_DYE, "§7×5 Quantity"));
+        inv.setStack(52, ui(Items.CHEST, "§6🎁 Gift"));
+        inv.setStack(53, uiGlint(Items.EMERALD_BLOCK, "§a✅ Create!", "§7Generate customized item"));
+
+        return inv;
+    }
+
+    private static int[] generatePaletteForTheme(int theme) {
+        if (theme == 1) return new int[]{0xCC0000, 0xDD6600, 0xCCAA00, 0xEE5588, 0xDD2244, 0xAA0022, 0xDD8855, 0xAA5522, 0xCC2200, 0xDD7700, 0xDDDD44, 0xAA4400};
+        if (theme == 2) return new int[]{0x0044CC, 0x0088DD, 0x00CCAA, 0x5588EE, 0x2244DD, 0x0022AA, 0x5588DD, 0x2255AA, 0x0022CC, 0x0077DD, 0x44DDDD, 0x0044AA};
+        return new int[]{0xEE5588, 0x44AADD, 0x44DD77, 0xDDDD44, 0xDD44AA, 0xAA22AA, 0x222222, 0xFFFFFF};
+    }
+
+    private static void handleColorStudioClick(ServerPlayerEntity player, GuiState state, int slot, int button) {
+        if (slot == 0 || slot == 45) {
+            handleEscBack(player);
+            return;
+        }
+        
+        int activeColor = state.shapeBoxPage();
+        if (activeColor == 0) activeColor = 0xEE5588;
+
+        if (slot >= 1 && slot <= 7) { openColorStudio(player, state.withPage(slot)); return; }
+        if (slot == 8) { openColorStudio(player, state.withShapeBoxPage(new Random().nextInt(0xFFFFFF))); playClick(player); return; }
+        if (slot >= 9 && slot <= 20) {
+            int[] pal = generatePaletteForTheme(state.page());
+            if (slot - 9 < pal.length) {
+                com.customblocks.core.PlayerColorData.get(player.getUuid()).addHistory(player.getUuid(), pal[slot - 9]);
+                openColorStudio(player, state.withShapeBoxPage(pal[slot - 9]));
+                playClick(player);
+            }
+            return;
+        }
+
+        if (slot == 24) openColorStudio(player, state.withShapeBoxPage(com.customblocks.util.ColorUtils.getComplementary(activeColor)));
+        else if (slot == 25) openColorStudio(player, state.withShapeBoxPage(com.customblocks.util.ColorUtils.getAnalogous(activeColor)[0]));
+        else if (slot == 26) openColorStudio(player, state.withShapeBoxPage(com.customblocks.util.ColorUtils.getTriadic(activeColor)[0]));
+        else if (slot >= 28 && slot <= 34) {
+            openColorStudio(player, state.withShapeBoxPage(com.customblocks.util.ColorUtils.getShades(activeColor)[slot - 28]));
+            playClick(player);
+        } else if (slot == 36) {
+            com.customblocks.core.PlayerColorData.get(player.getUuid()).addFavorite(player.getUuid(), 0, activeColor);
+            playSuccess(player);
+            openColorStudio(player, state);
+        } else if (slot >= 37 && slot <= 40) {
+            com.customblocks.core.PlayerColorData data = com.customblocks.core.PlayerColorData.get(player.getUuid());
+            if (data.favorites.size() > slot - 37) { openColorStudio(player, state.withShapeBoxPage(data.favorites.get(slot - 37))); playClick(player); }
+        } else if (slot >= 42 && slot <= 43) {
+            com.customblocks.core.PlayerColorData data = com.customblocks.core.PlayerColorData.get(player.getUuid());
+            if (data.history.size() > slot - 42) { openColorStudio(player, state.withShapeBoxPage(data.history.get(slot - 42))); playClick(player); }
+        } else if (slot == 22) {
+            SlotData data = state.editingId() != null ? SlotManager.getBySlot(state.editingId()) : null;
+            if (data != null && data.texture != null) {
+                // Async processing
+                if (player.currentScreenHandler != null) {
+                    player.currentScreenHandler.slots.get(22).setStack(uiGlint(Items.CLOCK, "§eProcessing...", "§7Extracting dominant color..."));
+                }
+                playClick(player);
+                java.util.concurrent.CompletableFuture.supplyAsync(() -> 
+                    com.customblocks.util.ColorUtils.extractDominantColor(data.texture), EXECUTOR
+                ).thenAccept(color -> {
+                    player.server.execute(() -> {
+                        openColorStudio(player, state.withShapeBoxPage(color));
+                        playSuccess(player);
+                    });
+                });
+            } else {
+                player.sendMessage(Text.literal("§cNo block selected or block has no texture!"), true);
+                playError(player);
+            }
+        } else if (slot == 53) {
+            playSuccess(player);
+            player.sendMessage(Text.literal("§a[Color Studio] Item created! #" + String.format("%06X", activeColor)), true);
+            player.closeHandledScreen();
+        }
+    }
+
     private static ItemStack soundItem(SlotData d, String sound, Item item, String label) {
         return sound.equals(d.soundType)?uiGlint(item,label+" §a✔","§aCurrently active"):ui(item,label,"§7Click to use §f"+sound+" §7sound");
     }
@@ -3720,6 +4077,10 @@ public class GuiManager {
         s.set(DataComponentTypes.CUSTOM_NAME,Text.literal(name).styled(st->st.withItalic(false)));
         if(lore.length>0){List<Text> ll=new ArrayList<>();for(String l:lore)ll.add(lore(l));s.set(DataComponentTypes.LORE,new LoreComponent(ll));}
         return s;
+    }
+    static ItemStack lock(ServerPlayerEntity player, String node, ItemStack stack) {
+        if (com.customblocks.command.PermissionHelper.dynamicCheck(player, "customblocks.gui." + node, 2)) return stack;
+        return ui(Items.BARRIER, "§c§lNo Permission", "§7Required node:", "§8customblocks.gui." + node);
     }
     static ItemStack uiGlint(Item item, String name, String... lore) { ItemStack s=ui(item,name,lore); s.set(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE,true); return s; }
     static Text lore(String t) { return Text.literal(t).styled(s->s.withItalic(false)); }

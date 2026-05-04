@@ -19,38 +19,40 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
 /**
- * Lumina Brush — property painter.
+ * Crystal Editor — visual shape editor shortcut.
  *
- * Right-click any Custom Block to jump straight into the Royal Properties GUI
- * (light level slider, hardness slider, collision toggle). No need to navigate
- * through the editor — one click and you're adjusting glow in real-time.
+ * Right-click any Custom Block to jump straight into the Shape Editor GUI.
+ * Browse presets (slab, stairs, carpet, etc.), toggle collision, and manage
+ * custom hitboxes — all without navigating through the block editor first.
+ *
+ * <p><b>Registry ID:</b> {@code amethyst_chisel} (preserved for data compatibility).
  */
-public class LuminaBrushItem extends Item {
+public class CrystalEditorItem extends Item {
 
-    public LuminaBrushItem(Settings settings) { super(settings); }
+    public CrystalEditorItem(Settings settings) { super(settings); }
 
     @Override
-    public Text getName()                { return Text.literal("§b§lLumina §r§fBrush"); }
+    public Text getName()                { return Text.literal("§5§lCrystal §r§dEditor"); }
     @Override
     public Text getName(ItemStack stack) { return getName(); }
     @Override
-    public boolean hasGlint(ItemStack stack) { return com.customblocks.core.MagicItemsManager.getConfig("lumina_brush").visualGlint; }
+    public boolean hasGlint(ItemStack stack) { return com.customblocks.core.MagicItemsManager.getConfig("amethyst_chisel").visualGlint; }
 
     @Override
     public void inventoryTick(ItemStack stack, World world, net.minecraft.entity.Entity entity, int slot, boolean selected) {
-        if (selected && !world.isClient && world.getTime() % 6 == 0 && world instanceof ServerWorld sw) {
-            sw.spawnParticles(net.minecraft.particle.ParticleTypes.SMALL_FLAME,
+        if (selected && !world.isClient && world.getTime() % 7 == 0 && world instanceof ServerWorld sw) {
+            sw.spawnParticles(net.minecraft.particle.ParticleTypes.WITCH,
                 entity.getX(), entity.getY() + 1.3, entity.getZ(),
                 1, 0.12, 0.15, 0.12, 0.01);
             sw.spawnParticles(net.minecraft.particle.ParticleTypes.GLOW,
                 entity.getX(), entity.getY() + 1.1, entity.getZ(),
-                1, 0.15, 0.15, 0.15, 0.01);
+                1, 0.2, 0.2, 0.2, 0.01);
         }
     }
 
     @Override
     public ActionResult useOnBlock(ItemUsageContext ctx) {
-        com.customblocks.core.MagicItemsManager.MagicItemConfig cfg = com.customblocks.core.MagicItemsManager.getConfig("lumina_brush");
+        com.customblocks.core.MagicItemsManager.MagicItemConfig cfg = com.customblocks.core.MagicItemsManager.getConfig("amethyst_chisel");
         if (!cfg.enabled) return ActionResult.PASS;
 
         World        world  = ctx.getWorld();
@@ -60,7 +62,7 @@ public class LuminaBrushItem extends Item {
         if (world.isClient) return ActionResult.PASS;
 
         if (player instanceof ServerPlayerEntity sp) {
-            if (cfg.requirePermission && !com.customblocks.command.PermissionHelper.canUseTool(sp, "luminabrush")) {
+            if (cfg.requirePermission && !com.customblocks.command.PermissionHelper.canUseTool(sp, "crystaleditor")) {
                 sp.sendMessage(Text.literal("§c[CustomBlocks] You do not have permission to use this magic item."), true);
                 if (world instanceof ServerWorld sw)
                     sw.playSound(null, player.getBlockPos(),
@@ -77,7 +79,8 @@ public class LuminaBrushItem extends Item {
         BlockState state = world.getBlockState(pos);
         if (!(state.getBlock() instanceof SlotBlock sb)) {
             if (cfg.worksOnNonCustomBlocks) {
-                // Not supported for vanilla blocks
+                // If it works on non custom blocks... shape editor doesn't make sense for vanilla blocks.
+                // We just return PASS.
                 return ActionResult.PASS;
             }
             if (player instanceof ServerPlayerEntity sp) sp.sendMessage(Text.literal("§cThis item only works on CustomBlocks!"), true);
@@ -89,19 +92,19 @@ public class LuminaBrushItem extends Item {
 
         if (!(player instanceof ServerPlayerEntity sp)) return ActionResult.PASS;
 
-        // Open the Royal Properties GUI directly for this block
-        GuiManager.openPropertiesGui(sp, data.customId, 0);
+        // Open the Shape Editor GUI directly for this block
+        GuiManager.openShapeEditor(sp, data.customId, 0);
 
         if (world instanceof ServerWorld sw) {
             if (cfg.particlesOnUse) {
-                sw.spawnParticles(net.minecraft.particle.ParticleTypes.END_ROD,
+                sw.spawnParticles(net.minecraft.particle.ParticleTypes.ENCHANT,
                     pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
-                    8, 0.2, 0.2, 0.2, 0.03);
+                    12, 0.3, 0.3, 0.3, 0.05);
             }
             if (!cfg.soundOnUse.isEmpty()) {
                 net.minecraft.sound.SoundEvent se = net.minecraft.registry.Registries.SOUND_EVENT.get(net.minecraft.util.Identifier.tryParse(cfg.soundOnUse));
                 if (se == null) se = net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME;
-                sw.playSound(null, pos, se, net.minecraft.sound.SoundCategory.PLAYERS, 0.6f, 1.5f);
+                sw.playSound(null, pos, se, net.minecraft.sound.SoundCategory.PLAYERS, 0.7f, 1.2f);
             }
         }
         

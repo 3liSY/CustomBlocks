@@ -23,18 +23,13 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.texture.NativeImage;
 
 
-
 import java.awt.Color;
-
+import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
 import java.io.*;
-
 import java.nio.charset.StandardCharsets;
-
 import java.nio.file.*;
-
 import java.util.Map;
-
-
 
 @Environment(EnvType.CLIENT)
 
@@ -330,7 +325,8 @@ public class ResourcePackGenerator {
 
                 JsonObject bs       = new JsonObject(); bs.add("variants", variants);
 
-                writeJson(bs, new File(assets, "blockstates/" + slotKey + ".json"));
+                File bsFile = new File(assets, "blockstates/" + slotKey + ".json");
+                if (!bsFile.exists()) writeJson(bs, bsFile);
 
 
 
@@ -466,7 +462,8 @@ public class ResourcePackGenerator {
 
                 }
 
-                writeJson(bm, new File(assets, "models/block/" + slotKey + ".json"));
+                File bmFile = new File(assets, "models/block/" + slotKey + ".json");
+                if (!bmFile.exists()) writeJson(bm, bmFile);
 
 
 
@@ -476,7 +473,8 @@ public class ResourcePackGenerator {
 
                 im.addProperty("parent", modelRef);
 
-                writeJson(im, new File(assets, "models/item/" + slotKey + ".json"));
+                File imFile = new File(assets, "models/item/" + slotKey + ".json");
+                if (!imFile.exists()) writeJson(im, imFile);
 
             }
 
@@ -615,10 +613,29 @@ public class ResourcePackGenerator {
             File customTriangleTex = new File(assets, "textures/item/custom_triangle.png");
             Files.write(customTriangleTex.toPath(), makeTrianglePng(85, 204, 255));
             writeGeneratedItemModel(assets, "custom_triangle", MOD_ID + ":item/custom_triangle");
-            writeGeneratedItemModel(assets, "golden_hexagon", "minecraft:item/golden_apple");
-            writeGeneratedItemModel(assets, "lumina_brush", "minecraft:item/blaze_rod");
-            writeGeneratedItemModel(assets, "amethyst_chisel", "minecraft:item/amethyst_shard");
-            writeGeneratedItemModel(assets, "diamond_triangle", "minecraft:item/diamond");
+
+            java.util.concurrent.ExecutorService EXECUTOR = java.util.concurrent.Executors.newSingleThreadExecutor();
+            EXECUTOR.submit(() -> {
+                try {
+                    File hexTex = new File(assets, "textures/item/golden_hexagon.png");
+                    Files.write(hexTex.toPath(), makeHexagonPng());
+                    writeGeneratedItemModel(assets, "golden_hexagon", MOD_ID + ":item/golden_hexagon");
+
+                    File luminaTex = new File(assets, "textures/item/lumina_brush.png");
+                    Files.write(luminaTex.toPath(), makeLuminaBrushPng());
+                    writeGeneratedItemModel(assets, "lumina_brush", MOD_ID + ":item/lumina_brush");
+
+                    File chiselTex = new File(assets, "textures/item/amethyst_chisel.png");
+                    Files.write(chiselTex.toPath(), makeCrystalPng());
+                    writeGeneratedItemModel(assets, "amethyst_chisel", MOD_ID + ":item/amethyst_chisel");
+
+                    File diaTex = new File(assets, "textures/item/diamond_triangle.png");
+                    Files.write(diaTex.toPath(), makeDiamondTrianglePng());
+                    writeGeneratedItemModel(assets, "diamond_triangle", MOD_ID + ":item/diamond_triangle");
+                } catch (Exception e) {
+                    CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed generating tool art async", e);
+                }
+            });
 
 
 
@@ -1485,6 +1502,57 @@ public class ResourcePackGenerator {
 
     }
 
+    private static byte[] makeCustomShape(String itemName, int width, int height, java.util.function.Consumer<java.awt.Graphics2D> drawer) {
+        File override = new File("config/customblocks/items/" + itemName + ".png");
+        if (override.exists()) {
+            try { return Files.readAllBytes(override.toPath()); } catch (Exception ignored) {}
+        }
+        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        java.awt.Graphics2D g2d = img.createGraphics();
+        g2d.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+        drawer.accept(g2d);
+        g2d.dispose();
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        try { javax.imageio.ImageIO.write(img, "png", baos); } catch (Exception ignored) {}
+        return baos.toByteArray();
+    }
+
+    private static byte[] makeDiamondTrianglePng() {
+        return makeCustomShape("diamond_triangle", 16, 16, g2d -> {
+            g2d.setColor(new java.awt.Color(0, 255, 255));
+            g2d.fillPolygon(new int[]{8, 14, 2}, new int[]{2, 14, 14}, 3);
+            g2d.setColor(new java.awt.Color(0, 150, 150));
+            g2d.drawPolygon(new int[]{8, 14, 2}, new int[]{2, 14, 14}, 3);
+        });
+    }
+
+    private static byte[] makeHexagonPng() {
+        return makeCustomShape("golden_hexagon", 16, 16, g2d -> {
+            g2d.setColor(new java.awt.Color(255, 215, 0));
+            g2d.fillPolygon(new int[]{8, 14, 14, 8, 2, 2}, new int[]{2, 5, 11, 14, 11, 5}, 6);
+            g2d.setColor(new java.awt.Color(184, 134, 11));
+            g2d.drawPolygon(new int[]{8, 14, 14, 8, 2, 2}, new int[]{2, 5, 11, 14, 11, 5}, 6);
+        });
+    }
+
+    private static byte[] makeCrystalPng() {
+        return makeCustomShape("amethyst_chisel", 16, 16, g2d -> {
+            g2d.setColor(new java.awt.Color(153, 50, 204));
+            g2d.fillPolygon(new int[]{8, 12, 8, 4}, new int[]{2, 8, 14, 8}, 4);
+            g2d.setColor(new java.awt.Color(75, 0, 130));
+            g2d.drawPolygon(new int[]{8, 12, 8, 4}, new int[]{2, 8, 14, 8}, 4);
+        });
+    }
+
+    private static byte[] makeLuminaBrushPng() {
+        return makeCustomShape("lumina_brush", 16, 16, g2d -> {
+            g2d.setColor(new java.awt.Color(138, 43, 226)); // Purple-blue brush
+            g2d.fillRect(6, 2, 4, 6);
+            g2d.setColor(new java.awt.Color(139, 69, 19)); // Brown handle
+            g2d.fillRect(7, 8, 2, 6);
+        });
+    }
+
     private static void writeGeneratedItemModel(File assets, String itemId, String texture) throws IOException {
         JsonObject tex = new JsonObject();
         tex.addProperty("layer0", texture);
@@ -1593,6 +1661,5 @@ public class ResourcePackGenerator {
         0x49,0x45,0x4E,0x44,(byte)0xAE,0x42,0x60,(byte)0x82
 
     };
-
 }
 
