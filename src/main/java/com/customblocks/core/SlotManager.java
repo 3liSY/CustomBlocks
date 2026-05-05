@@ -548,55 +548,84 @@ public final class SlotManager {
 
 
 
+    /** 
+     * Extracts rotating backup logic into a generic utility for any JSON config file.
+     * TRD § 5.7 Comprehensive Backups
+     */
+    public static void rotateBackups(Path file) {
+        try {
+            String base = file.getFileName().toString().replace(".json", "");
+            Path dir = file.getParent();
+            Path bak3 = dir.resolve(base + ".bak3.json");
+            Path bak2 = dir.resolve(base + ".bak2.json");
+            Path bak1 = dir.resolve(base + ".bak1.json");
+
+            if (Files.exists(bak2)) Files.move(bak2, bak3, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            if (Files.exists(bak1)) Files.move(bak1, bak2, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            if (Files.exists(file)) Files.copy(file, bak1, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            LOGGER.info("[CustomBlocks] Backup saved to {}", bak1.getFileName());
+        } catch (Exception bakEx) {
+            LOGGER.warn("[CustomBlocks] Could not create backup: {}", bakEx.getMessage());
+        }
+    }
+
     public static void loadAll() {
-
         Path dir = Path.of(DATA_DIR);
-
         Path file = dir.resolve(DATA_FILE);
+        Path bak1 = dir.resolve("slots.bak1.json");
 
         try {
-
             Files.createDirectories(dir);
 
             if (!Files.exists(file)) {
+                if (Files.exists(bak1)) {
+                    LOGGER.warn("[CustomBlocks] Primary file slots.json missing! Auto-restoring from backup.");
+                    Files.copy(bak1, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                } else {
+                    LOGGER.info("[CustomBlocks] No slot data file found, starting fresh.");
+                    // Layer 1: In-Memory State Materialization (Zero-Defect Fix)
+                    synchronized (SlotManager.class) {
+                        byId.clear();
+                        bySlot.clear();
+                        rebuildFreeSlotSet();
+                    }
+                    // Layer 2: Global Directory & File Auto-Generation (Atomic Operations)
+                    try {
+                        Path tmpSlots = dir.resolve("slots.json.tmp");
+                        Files.writeString(tmpSlots, "{ \"slots\": [] }", StandardCharsets.UTF_8);
+                        Files.move(tmpSlots, file, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
 
-                LOGGER.info("[CustomBlocks] No slot data file found, starting fresh.");
-
-                return;
-
+                        Path catFile = dir.resolve("categories.json");
+                        if (!Files.exists(catFile)) {
+                            Path tmpCat = dir.resolve("categories.json.tmp");
+                            Files.writeString(tmpCat, "{ \"categories\": [], \"assignments\": {} }", StandardCharsets.UTF_8);
+                            Files.move(tmpCat, catFile, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                        }
+                    } catch (Exception e) {
+                        LOGGER.error("[CustomBlocks] Failed to generate fresh config files", e);
+                    }
+                    return;
+                }
             }
 
-
-
-            // ── Rotating backup: keep last 3 copies ─────────────────────
-
+            // ── Load & Parse with Layer 3 Backup Fallback ─────────────────────
+            JsonObject root = null;
             try {
-
-                Path bak3 = dir.resolve("slots.bak3.json");
-
-                Path bak2 = dir.resolve("slots.bak2.json");
-
-                Path bak1 = dir.resolve("slots.bak1.json");
-
-                if (Files.exists(bak2)) Files.move(bak2, bak3, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-
-                if (Files.exists(bak1)) Files.move(bak1, bak2, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-
-                Files.copy(file, bak1, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-
-                LOGGER.info("[CustomBlocks] Backup saved to slots.bak1.json");
-
-            } catch (Exception bakEx) {
-
-                LOGGER.warn("[CustomBlocks] Could not create backup: {}", bakEx.getMessage());
-
+                String json = Files.readString(file, StandardCharsets.UTF_8);
+                root = JsonParser.parseString(json).getAsJsonObject();
+            } catch (Exception parseEx) {
+                LOGGER.error("[CustomBlocks] slots.json is corrupted! Attempting auto-restore from .bak1...", parseEx);
+                if (Files.exists(bak1)) {
+                    Files.copy(bak1, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    String json = Files.readString(file, StandardCharsets.UTF_8);
+                    root = JsonParser.parseString(json).getAsJsonObject();
+                    LOGGER.info("[CustomBlocks] Successfully restored and parsed from .bak1!");
+                } else {
+                    throw new RuntimeException("Corrupted slots.json and no backup available!");
+                }
             }
 
-
-
-            String json = Files.readString(file, StandardCharsets.UTF_8);
-
-            JsonObject root = JsonParser.parseString(json).getAsJsonObject();
+            rotateBackups(file);
 
 
 
