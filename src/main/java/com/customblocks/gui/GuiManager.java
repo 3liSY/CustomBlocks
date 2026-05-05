@@ -900,6 +900,7 @@ public class GuiManager {
                         case "icon" -> old.withIconItem(text.trim());
                         case "color" -> old.withColor(text.trim());
                         case "badge" -> old.withBadge(text.trim());
+                        case "parent" -> old.withParentKey(text.trim().isEmpty() ? null : text.trim());
                         default -> old;
                     };
                     com.customblocks.core.CategoryManager.addCategory(updated);
@@ -4127,6 +4128,15 @@ public class GuiManager {
             inv.setStack(22, uiGlint(net.minecraft.item.Items.PAPER, "§eBadge Overflow Mode", "§7Current: " + (cat.badgeOverflowMode() != null ? cat.badgeOverflowMode() : "cap_3_more")));
             inv.setStack(24, uiGlint(net.minecraft.item.Items.WRITTEN_BOOK, "§eLore Prefix Position", "§7Current: " + (cat.lorePrefixPosition() != null ? cat.lorePrefixPosition() : "above_badge")));
             inv.setStack(31, uiGlint(net.minecraft.item.Items.WRITABLE_BOOK, "§eChange Lore Prefix", "§7Current: " + (cat.lorePrefix() != null ? cat.lorePrefix() : "None")));
+        } else if (tabIndex == 3) { // Subcategories
+            long childCount = com.customblocks.core.CategoryManager.getAllCategories().stream().filter(c -> cat.key().equals(c.parentKey())).count();
+            inv.setStack(20, uiGlint(net.minecraft.item.Items.OAK_SAPLING, "§eSet Parent Category", "§7Current: " + (cat.parentKey() != null ? cat.parentKey() : "None")));
+            inv.setStack(22, uiGlint(net.minecraft.item.Items.HOPPER, "§eRemove Parent", "§7Make this a Root Category"));
+            inv.setStack(24, uiGlint(net.minecraft.item.Items.CHEST, "§eSubcategory Controller", "§7" + childCount + " Child Categories"));
+        } else if (tabIndex == 4) { // Auto-Rules
+            inv.setStack(20, uiGlint(net.minecraft.item.Items.COMMAND_BLOCK, "§eAdd Auto-Rule", "§7Match incoming blocks by ID"));
+            inv.setStack(22, uiGlint(net.minecraft.item.Items.REPEATER, "§eManage Rules", "§7Active Rules: 0"));
+            inv.setStack(24, uiGlint(net.minecraft.item.Items.COMPARATOR, "§ePriority Settings", "§7Current Priority: " + cat.sortOrder()));
         } else if (tabIndex == 5) {
             inv.setStack(22, uiGlint(net.minecraft.item.Items.BARRIER, "§c§lDelete Category", "§7Delete this category entirely"));
         } else {
@@ -4177,6 +4187,25 @@ public class GuiManager {
                 PENDING_CATEGORIES.get(player.getUuid()).put("editKey", state.editingId());
                 openShortInputPrompt(player, new PendingInput(InputAction.EDIT_CAT_PROP, state.editingId(), "badge", null, null, 2), "§6New Badge Text", new net.minecraft.item.ItemStack(net.minecraft.item.Items.NAME_TAG), com.customblocks.core.CategoryManager.getCategory(state.editingId()).badge());
                 return;
+            }
+        } else if (state.page() == 3) { // Subcategories
+            if (slot == 20) {
+                PENDING_CATEGORIES.put(player.getUuid(), new java.util.concurrent.ConcurrentHashMap<>());
+                PENDING_CATEGORIES.get(player.getUuid()).put("editKey", state.editingId());
+                openShortInputPrompt(player, new PendingInput(InputAction.EDIT_CAT_PROP, state.editingId(), "parent", null, null, 3), "§6Set Parent Key", new net.minecraft.item.ItemStack(net.minecraft.item.Items.OAK_SAPLING), com.customblocks.core.CategoryManager.getCategory(state.editingId()).parentKey() != null ? com.customblocks.core.CategoryManager.getCategory(state.editingId()).parentKey() : "");
+                return;
+            }
+            if (slot == 22) {
+                com.customblocks.core.Category updated = com.customblocks.core.CategoryManager.getCategory(state.editingId()).withParentKey(null);
+                com.customblocks.core.CategoryManager.addCategory(updated);
+                playSuccess(player);
+                openCategoryEditor(player, state.editingId(), 3);
+                return;
+            }
+        } else if (state.page() == 4) { // Auto-Rules
+            if (slot == 20) {
+                send(player, "§c[CB] Full rule UI is rolling out in v1.1. CLI setup supported soon.");
+                playError(player);
             }
         } else if (state.page() == 5) { // Danger Zone
             if (slot == 22) {
