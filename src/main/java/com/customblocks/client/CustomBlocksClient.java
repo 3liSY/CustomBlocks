@@ -116,8 +116,6 @@ public class CustomBlocksClient implements ClientModInitializer {
     private static volatile boolean rpPaused = false;
     /** Set when a reload was suppressed during pause — triggers reload on resume. */
     private static volatile boolean rpDirtyWhilePaused = false;
-    /** Latch for Ctrl+Shift hexagon mode cycling — prevents repeat-fire. */
-    private static boolean hexModeLatch = false;
 
 
 
@@ -287,34 +285,6 @@ public class CustomBlocksClient implements ClientModInitializer {
 
                 }
 
-            }
-
-            // ── Golden Hexagon: Ctrl+Shift mode cycling ──────────────────────
-            if (client.player != null && client.currentScreen == null) {
-                long handle = client.getWindow().getHandle();
-                boolean ctrl = net.minecraft.client.util.InputUtil.isKeyPressed(handle,
-                        org.lwjgl.glfw.GLFW.GLFW_KEY_LEFT_CONTROL)
-                        || net.minecraft.client.util.InputUtil.isKeyPressed(handle,
-                        org.lwjgl.glfw.GLFW.GLFW_KEY_RIGHT_CONTROL);
-                boolean shift = net.minecraft.client.util.InputUtil.isKeyPressed(handle,
-                        org.lwjgl.glfw.GLFW.GLFW_KEY_LEFT_SHIFT)
-                        || net.minecraft.client.util.InputUtil.isKeyPressed(handle,
-                        org.lwjgl.glfw.GLFW.GLFW_KEY_RIGHT_SHIFT);
-
-                boolean holdingHexagon = client.player.getMainHandStack().getItem()
-                        instanceof com.customblocks.item.GoldenHexagonItem
-                        || client.player.getOffHandStack().getItem()
-                        instanceof com.customblocks.item.GoldenHexagonItem;
-
-                if (ctrl && shift && holdingHexagon) {
-                    if (!hexModeLatch) {
-                        hexModeLatch = true;
-                        net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(
-                                new com.customblocks.network.CycleHexagonModePayload());
-                    }
-                } else {
-                    hexModeLatch = false;
-                }
             }
 
         });

@@ -55,7 +55,7 @@ public class GoldenHexagonItem extends Item {
     @Override
     public Text getName(ItemStack stack) { return getName(); }
     @Override
-    public boolean hasGlint(ItemStack stack) { return com.customblocks.core.MagicItemsManager.getConfig("golden_hexagon").visualGlint; }
+    public boolean hasGlint(ItemStack stack) { return true; }
 
     @Override
     public void inventoryTick(ItemStack stack, World world, net.minecraft.entity.Entity entity, int slot, boolean selected) {
@@ -71,41 +71,23 @@ public class GoldenHexagonItem extends Item {
 
     @Override
     public ActionResult useOnBlock(ItemUsageContext ctx) {
-        com.customblocks.core.MagicItemsManager.MagicItemConfig cfg = com.customblocks.core.MagicItemsManager.getConfig("golden_hexagon");
-        if (!cfg.enabled) return ActionResult.PASS;
-
         World        world  = ctx.getWorld();
         BlockPos     pos    = ctx.getBlockPos();
         PlayerEntity player = ctx.getPlayer();
 
         if (world.isClient) return ActionResult.PASS;
 
-        if (player instanceof ServerPlayerEntity sp) {
-            if (cfg.requirePermission && !com.customblocks.command.PermissionHelper.canUseTool(sp, "goldenhexagon")) {
-                sp.sendMessage(Text.literal("§c[CustomBlocks] You do not have permission to use this magic item."), true);
-                if (world instanceof ServerWorld sw)
-                    sw.playSound(null, player.getBlockPos(),
-                        net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),
-                        net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
-                return ActionResult.FAIL;
-            }
-            if (cfg.worksInCreativeOnly && !sp.isCreative()) {
-                sp.sendMessage(Text.literal("§c[CustomBlocks] This item only works in Creative Mode."), true);
-                return ActionResult.FAIL;
-            }
-        }
-
         BlockState state = world.getBlockState(pos);
-        if (!(state.getBlock() instanceof SlotBlock sb)) {
-            if (cfg.worksOnNonCustomBlocks) {
-                return ActionResult.PASS; // Vanilla block logic not supported yet.
-            }
-            if (player instanceof ServerPlayerEntity sp) sp.sendMessage(Text.literal("§cThis item only works on CustomBlocks!"), true);
-            return ActionResult.PASS;
-        }
+        if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
 
-        if (player.isSneaking() && !cfg.allowSneakAction) {
-            return ActionResult.PASS;
+        if (player != null && !player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
+            player.sendMessage(
+                Text.literal("§c[CustomBlocks] You need OP to use the Golden Hexagon."), true);
+            if (world instanceof ServerWorld sw)
+                sw.playSound(null, player.getBlockPos(),
+                    net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),
+                    net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
+            return ActionResult.FAIL;
         }
 
         SlotData data = SlotManager.getBySlot(sb.getSlotKey());
@@ -209,20 +191,13 @@ public class GoldenHexagonItem extends Item {
                         "§0§l[§b§lCB§0§l] §a" + actionLabel + " §a✔"), true);
 
                     if (world instanceof ServerWorld sw) {
-                        com.customblocks.core.MagicItemsManager.MagicItemConfig currentCfg = com.customblocks.core.MagicItemsManager.getConfig("golden_hexagon");
-                        if (currentCfg.particlesOnUse) {
-                            sw.spawnParticles(net.minecraft.particle.ParticleTypes.END_ROD,
-                                pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
-                                15, 0.3, 0.3, 0.3, 0.05);
-                        }
-                        if (!currentCfg.soundOnUse.isEmpty()) {
-                            net.minecraft.sound.SoundEvent se = net.minecraft.registry.Registries.SOUND_EVENT.get(net.minecraft.util.Identifier.tryParse(currentCfg.soundOnUse));
-                            if (se == null) se = net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME;
-                            sw.playSound(null, pos, se, net.minecraft.sound.SoundCategory.PLAYERS, 0.8f, 1.4f);
-                        }
+                        sw.spawnParticles(net.minecraft.particle.ParticleTypes.END_ROD,
+                            pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+                            15, 0.3, 0.3, 0.3, 0.05);
+                        sw.playSound(null, pos,
+                            net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME,
+                            net.minecraft.sound.SoundCategory.PLAYERS, 0.8f, 1.4f);
                     }
-                    if (cfg.cooldownTicks > 0) player.getItemCooldownManager().set(GoldenHexagonItem.this, cfg.cooldownTicks);
-                    if (cfg.consumeOnUse && !player.isCreative()) ctx.getStack().decrement(1);
                 });
             } catch (Exception e) {
                 CustomBlocksMod.LOGGER.error("[CustomBlocks] Golden Hexagon transform error", e);

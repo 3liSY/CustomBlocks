@@ -99,13 +99,11 @@ public class CustomBlockCommand {
     public static void register() {
         CommandRegistrationCallback.EVENT.register((dispatcher, reg, env) -> {
             LiteralArgumentBuilder<ServerCommandSource> tree = CommandManager.literal("customblock")
-                .requires(src -> PermissionHelper.canUseCommand(src, "main"))
+                .requires(src -> PermissionHelper.canUse(src))
                 .executes(ctx -> cmdGui(ctx.getSource()))
 
                 // ── create / createurl ──────────────────────────────────────
                 .then(CommandManager.literal("create")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "create"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .then(CommandManager.argument("name", StringArgumentType.string())
                             // /cb create <id> <name> <size> <url>  — size first so greedy URL still works
@@ -126,8 +124,6 @@ public class CustomBlockCommand {
 
                 // ── delete ──────────────────────────────────────────────────
                 .then(CommandManager.literal("delete")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "delete"))
                     .executes(ctx -> usage(ctx.getSource(), "delete"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
@@ -135,26 +131,14 @@ public class CustomBlockCommand {
 
                 // ── bulkdelete ──────────────────────────────────────────────
                 .then(CommandManager.literal("bulkdelete")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "bulkdelete"))
                     .executes(ctx -> usage(ctx.getSource(), "bulkdelete"))
                     .then(CommandManager.argument("ids", StringArgumentType.greedyString())
                         .suggests(MULTI_BLOCK_SUGGESTIONS)
                         .executes(ctx -> cmdBulkDelete(ctx.getSource(),
                             StringArgumentType.getString(ctx, "ids")))))
 
-                // ── editmagicitems ──────────────────────────────────────────
-                .then(CommandManager.literal("editmagicitems")
-                    .requires(src -> PermissionHelper.canUseCommand(src, "editmagicitems"))
-                    .executes(ctx -> {
-                        if (ctx.getSource().getPlayer() != null) GuiManager.openEditMagicItems(ctx.getSource().getPlayer());
-                        return 1;
-                    }))
-
                 // ── rename ──────────────────────────────────────────────────
                 .then(CommandManager.literal("rename")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "rename"))
                     .executes(ctx -> usage(ctx.getSource(), "rename"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
@@ -165,8 +149,6 @@ public class CustomBlockCommand {
 
                 // ── reid ────────────────────────────────────────────────────
                 .then(CommandManager.literal("reid")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "reid"))
                     .executes(ctx -> usage(ctx.getSource(), "reid"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
@@ -177,8 +159,6 @@ public class CustomBlockCommand {
 
                 // ── exportblock ─────────────────────────────────────────────
                 .then(CommandManager.literal("exportblock")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "exportblock"))
                     .executes(ctx -> usage(ctx.getSource(), "exportblock"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
@@ -187,8 +167,6 @@ public class CustomBlockCommand {
 
                 // ── importblock ─────────────────────────────────────────────
                 .then(CommandManager.literal("importblock")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "importblock"))
                     .executes(ctx -> usage(ctx.getSource(), "importblock"))
                     .then(CommandManager.argument("code", StringArgumentType.greedyString())
                         .executes(ctx -> cmdImportBlock(ctx.getSource(),
@@ -196,8 +174,6 @@ public class CustomBlockCommand {
 
                 // ── retexture ───────────────────────────────────────────────
                 .then(CommandManager.literal("retexture")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "retexture"))
                     .executes(ctx -> usage(ctx.getSource(), "retexture"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
@@ -215,8 +191,6 @@ public class CustomBlockCommand {
 
                 // ── give ────────────────────────────────────────────────────
                 .then(CommandManager.literal("give")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "give"))
                     .executes(ctx -> usage(ctx.getSource(), "give"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
@@ -234,8 +208,6 @@ public class CustomBlockCommand {
 
                 // ── setglow ─────────────────────────────────────────────────
                 .then(CommandManager.literal("setglow")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "setglow"))
                     .executes(ctx -> usage(ctx.getSource(), "setglow"))
                     .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
                         .then(CommandManager.argument("level", IntegerArgumentType.integer(0, 15))
@@ -245,8 +217,6 @@ public class CustomBlockCommand {
 
                 // ── sethardness ─────────────────────────────────────────────
                 .then(CommandManager.literal("sethardness")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "sethardness"))
                     .executes(ctx -> usage(ctx.getSource(), "sethardness"))
                     .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
                         .then(CommandManager.argument("hardness", FloatArgumentType.floatArg(-1f, 50f))
@@ -256,8 +226,6 @@ public class CustomBlockCommand {
 
                 // ── setsound ────────────────────────────────────────────────
                 .then(CommandManager.literal("setsound")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "setsound"))
                     .executes(ctx -> usage(ctx.getSource(), "setsound"))
                     .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
                         .then(CommandManager.argument("type", StringArgumentType.word()).suggests(SOUND_SUGGESTIONS)
@@ -267,8 +235,6 @@ public class CustomBlockCommand {
 
                 // ── showbrokenblocks ────────────────────────────────────────
                 .then(CommandManager.literal("showbrokenblocks")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "showbrokenblocks"))
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
                         if (p != null) GuiManager.openBrokenBlocks(p);
@@ -277,9 +243,6 @@ public class CustomBlockCommand {
                     }))
 
                 .then(CommandManager.literal("settabicon")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "settabicon"))
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
                         if (p != null) GuiManager.openTabIconPicker(p, 0);
@@ -291,8 +254,6 @@ public class CustomBlockCommand {
                             StringArgumentType.getString(ctx, "url").trim()))))
                 // ── resize ──────────────────────────────────────────────────
                 .then(CommandManager.literal("resize")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "resize"))
                     .executes(ctx -> usage(ctx.getSource(), "resize"))
                     .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
                         .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
@@ -302,16 +263,12 @@ public class CustomBlockCommand {
 
                 // ── undo ────────────────────────────────────────────────────
                 .then(CommandManager.literal("undo")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "undo"))
                     .executes(ctx -> cmdUndo(ctx.getSource()))
                     .then(CommandManager.argument("count", IntegerArgumentType.integer(1, 50))
                         .executes(ctx -> cmdUndoN(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "count")))))
 
                 // ── redo ────────────────────────────────────────────────────
                 .then(CommandManager.literal("redo")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "redo"))
                     .executes(ctx -> cmdRedo(ctx.getSource()))
                     .then(CommandManager.argument("count", IntegerArgumentType.integer(1, 50))
                         .executes(ctx -> cmdRedoN(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "count")))))
@@ -320,8 +277,6 @@ public class CustomBlockCommand {
 
                 // ── dupe / duplicate (one-click clone) ───────────────────────
                 .then(CommandManager.literal("dupe")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "dupe"))
                     .executes(ctx -> usage(ctx.getSource(), "dupe"))
                     .then(CommandManager.argument("sourceId", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
@@ -329,9 +284,6 @@ public class CustomBlockCommand {
                             StringArgumentType.getString(ctx, "sourceId")))))
 
                 .then(CommandManager.literal("duplicate")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "duplicate"))
                     .executes(ctx -> usage(ctx.getSource(), "dupe"))
                     .then(CommandManager.argument("sourceId", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
@@ -340,32 +292,19 @@ public class CustomBlockCommand {
 
                 // ── data commands ───────────────────────────────────────────
                 .then(CommandManager.literal("export")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "export"))
                     .executes(ctx -> cmdExport(ctx.getSource())))
 
                 .then(CommandManager.literal("importfolder")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "importfolder"))
                     .executes(ctx -> cmdImportFolder(ctx.getSource())))
 
                 .then(CommandManager.literal("list")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "list"))
                     .executes(ctx -> cmdList(ctx.getSource())))
 
                 .then(CommandManager.literal("help")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "help"))
                     .executes(ctx -> cmdHelp(ctx.getSource())))
 
                 // ── new graphical interfaces ─────────────────────────────────
                 .then(CommandManager.literal("listgui")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "listgui"))
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
                         if (p != null) GuiManager.openEditorPicker(p, 0);
@@ -374,9 +313,6 @@ public class CustomBlockCommand {
                     }))
 
                 .then(CommandManager.literal("helpgui")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "helpgui"))
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
                         if (p != null) GuiManager.openHelpGui(p);
@@ -385,9 +321,6 @@ public class CustomBlockCommand {
                     }))
 
                 .then(CommandManager.literal("magicitems")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "magicitems"))
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
                         if (p != null) GuiManager.openMagicItemsGui(p);
@@ -397,8 +330,6 @@ public class CustomBlockCommand {
 
                 // ── editor — works with or without ID ──────────────────────
                 .then(CommandManager.literal("editor")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "editor"))
                     .executes(ctx -> cmdEditorPicker(ctx.getSource()))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
@@ -407,14 +338,10 @@ public class CustomBlockCommand {
 
                 // ── gui ──────────────────────────────────────────────────────
                 .then(CommandManager.literal("gui")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "gui"))
                     .executes(ctx -> cmdGui(ctx.getSource())))
 
                 // ── search ───────────────────────────────────────────────────
                 .then(CommandManager.literal("search")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "search"))
                     .executes(ctx -> usage(ctx.getSource(), "search"))
                     .then(CommandManager.argument("query", StringArgumentType.greedyString())
                         .executes(ctx -> {
@@ -428,8 +355,6 @@ public class CustomBlockCommand {
 
                 // ── config ───────────────────────────────────────────────────
                 .then(CommandManager.literal("config")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "config"))
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
                         if (p != null) GuiManager.openConfigWarningGui(p);
@@ -439,14 +364,10 @@ public class CustomBlockCommand {
 
                 // ── reload ───────────────────────────────────────────────────
                 .then(CommandManager.literal("reload")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "reload"))
                     .executes(ctx -> cmdReload(ctx.getSource())))
 
                 // ── resourcepack ─────────────────────────────────────────────
                 .then(CommandManager.literal("resourcepack")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "resourcepack"))
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
                         if (p != null) GuiManager.openResourceHub(p);
@@ -456,8 +377,6 @@ public class CustomBlockCommand {
 
                 // ── rp (Alias + pause/resume) ─────────────────────────────────
                 .then(CommandManager.literal("rp")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "rp"))
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
                         if (p != null) GuiManager.openResourceHub(p);
@@ -465,18 +384,12 @@ public class CustomBlockCommand {
                         return 1;
                     })
                     .then(CommandManager.literal("pause")
-
-                        .requires(src -> PermissionHelper.canUseCommand(src, "pause"))
                         .executes(ctx -> cmdRpPause(ctx.getSource(), true)))
                     .then(CommandManager.literal("resume")
-
-                        .requires(src -> PermissionHelper.canUseCommand(src, "resume"))
                         .executes(ctx -> cmdRpPause(ctx.getSource(), false))))
 
                 // ── setshape ─────────────────────────────────────────────────
                 .then(CommandManager.literal("setshape")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "setshape"))
                     .executes(ctx -> usage(ctx.getSource(), "setshape"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
@@ -487,9 +400,6 @@ public class CustomBlockCommand {
                                 StringArgumentType.getString(ctx, "shape"))))))
 
                 .then(CommandManager.literal("addshape")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "addshape"))
                     .executes(ctx -> usage(ctx.getSource(), "addshape"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
@@ -499,9 +409,6 @@ public class CustomBlockCommand {
                                 StringArgumentType.getString(ctx, "coords"))))))
 
                 .then(CommandManager.literal("removeshape")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "removeshape"))
                     .executes(ctx -> usage(ctx.getSource(), "removeshape"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
@@ -511,9 +418,6 @@ public class CustomBlockCommand {
                                 IntegerArgumentType.getInteger(ctx, "boxindex"))))))
 
                 .then(CommandManager.literal("clearshape")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "clearshape"))
                     .executes(ctx -> usage(ctx.getSource(), "clearshape"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
@@ -521,27 +425,17 @@ public class CustomBlockCommand {
                             StringArgumentType.getString(ctx, "id")))))
 
                 .then(CommandManager.literal("setcollision")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "setcollision"))
                     .executes(ctx -> usage(ctx.getSource(), "setcollision"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
                         .then(CommandManager.literal("on")
-
-                            .requires(src -> PermissionHelper.canUseCommand(src, "on"))
                             .executes(ctx -> cmdSetCollision(ctx.getSource(),
                                 StringArgumentType.getString(ctx, "id"), true)))
                         .then(CommandManager.literal("off")
-
-                            .requires(src -> PermissionHelper.canUseCommand(src, "off"))
                             .executes(ctx -> cmdSetCollision(ctx.getSource(),
                                 StringArgumentType.getString(ctx, "id"), false)))))
 
                 .then(CommandManager.literal("shapeeditor")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "shapeeditor"))
                     .executes(ctx -> usage(ctx.getSource(), "shapeeditor"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
@@ -549,9 +443,6 @@ public class CustomBlockCommand {
                             StringArgumentType.getString(ctx, "id")))))
 
                 .then(CommandManager.literal("facechangegui")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "facechangegui"))
                     .executes(ctx -> usage(ctx.getSource(), "facechangegui"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
@@ -559,9 +450,6 @@ public class CustomBlockCommand {
                             StringArgumentType.getString(ctx, "id")))))
 
                 .then(CommandManager.literal("square")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "square"))
                     .executes(ctx -> usage(ctx.getSource(), "square"))
                     .then(CommandManager.argument("color", StringArgumentType.word())
                         .suggests((ctx, b) -> { b.suggest("black"); b.suggest("yellow"); b.suggest("green"); return b.buildFuture(); })
@@ -569,9 +457,6 @@ public class CustomBlockCommand {
                             StringArgumentType.getString(ctx, "color")))))
 
                 .then(CommandManager.literal("triangle")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "triangle"))
                     .executes(ctx -> usage(ctx.getSource(), "triangle"))
                     .then(CommandManager.argument("color", StringArgumentType.word())
                         .suggests((ctx, b) -> { b.suggest("black"); b.suggest("yellow"); b.suggest("green"); return b.buildFuture(); })
@@ -579,39 +464,21 @@ public class CustomBlockCommand {
                             StringArgumentType.getString(ctx, "color")))))
 
                 .then(CommandManager.literal("rectangle")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "rectangle"))
                     .executes(ctx -> cmdGiveRectangle(ctx.getSource())))
 
                 .then(CommandManager.literal("hexagon")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "hexagon"))
                     .executes(ctx -> cmdGiveHexagonInternal(ctx.getSource())))
 
                 .then(CommandManager.literal("brush")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "brush"))
                     .executes(ctx -> cmdGiveBrushInternal(ctx.getSource())))
 
                 .then(CommandManager.literal("chisel")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "chisel"))
                     .executes(ctx -> cmdGiveChiselInternal(ctx.getSource())))
 
                 .then(CommandManager.literal("diamondtriangle")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "diamondtriangle"))
                     .executes(ctx -> cmdGiveDiamondInternal(ctx.getSource())))
 
                 .then(CommandManager.literal("customtriangle")
-
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "customtriangle"))
                     .executes(ctx -> usage(ctx.getSource(), "customtriangle"))
                     .then(CommandManager.argument("hex", StringArgumentType.word())
                         .executes(ctx -> cmdGiveCustomColorToolsInternal(ctx.getSource(),
@@ -619,8 +486,6 @@ public class CustomBlockCommand {
 
                 // ── setface ──────────────────────────────────────────────────
                 .then(CommandManager.literal("setface")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "setface"))
                     .executes(ctx -> usage(ctx.getSource(), "setface"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
@@ -641,8 +506,6 @@ public class CustomBlockCommand {
 
                 // ── clearface ────────────────────────────────────────────────
                 .then(CommandManager.literal("clearface")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "clearface"))
                     .executes(ctx -> usage(ctx.getSource(), "clearface"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
@@ -653,8 +516,6 @@ public class CustomBlockCommand {
 
                 // ── clearallfaces ────────────────────────────────────────────
                 .then(CommandManager.literal("clearallfaces")
-
-                    .requires(src -> PermissionHelper.canUseCommand(src, "clearallfaces"))
                     .executes(ctx -> usage(ctx.getSource(), "clearallfaces"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
@@ -663,7 +524,7 @@ public class CustomBlockCommand {
 
             dispatcher.register(tree);
             dispatcher.register(CommandManager.literal("cb")
-                .requires(src -> PermissionHelper.canUseCommand(src, "main"))
+                .requires(src -> PermissionHelper.canUse(src))
                 .executes(ctx -> cmdGui(ctx.getSource()))
                 .redirect(dispatcher.getRoot().getChild("customblock")));
         });

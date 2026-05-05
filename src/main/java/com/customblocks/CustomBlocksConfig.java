@@ -68,6 +68,15 @@ public final class CustomBlocksConfig {
     public static volatile boolean cloudShareEnabled = true;
 
 
+    // ── Assistant NPC (The Helper) ───────────────────────────────────────────
+    /** Whether the assistant AI is currently active in the world. */
+    public static volatile boolean aiEnabled = false;
+    /** The assistant AI display name. */
+    public static volatile String aiName = "CustomBlocks AI";
+    /** The assistant AI visual style. */
+    public static volatile String aiStyle = "Echo";
+    /** Whether the live status hologram is visible. */
+    public static volatile boolean aiHologram = true;
 
     // ── Public API ───────────────────────────────────────────────────────────
 
@@ -117,7 +126,10 @@ public final class CustomBlocksConfig {
             joinDebounceMs        = getLong(root, "joinDebounceMs", joinDebounceMs);
             cloudShareUrl         = getString(root, "cloudShareUrl", cloudShareUrl);
             cloudShareEnabled     = getBool(root, "cloudShareEnabled", cloudShareEnabled);
-
+            aiEnabled             = getBool(root, "aiEnabled", getBool(root, "helperEnabled", aiEnabled));
+            aiName                = getString(root, "aiName", getString(root, "helperName", aiName));
+            aiStyle               = getString(root, "aiStyle", getString(root, "helperSkin", aiStyle));
+            aiHologram            = getBool(root, "aiHologram", getBool(root, "helperHologram", aiHologram));
 
             // Clamp values
             int clampedMaxSlots = Math.max(1, Math.min(8192, maxSlots));
@@ -202,7 +214,10 @@ public final class CustomBlocksConfig {
             root.addProperty("joinDebounceMs", joinDebounceMs);
             root.addProperty("cloudShareUrl", cloudShareUrl);
             root.addProperty("cloudShareEnabled", cloudShareEnabled);
-
+            root.addProperty("aiEnabled", aiEnabled);
+            root.addProperty("aiName", aiName);
+            root.addProperty("aiStyle", aiStyle);
+            root.addProperty("aiHologram", aiHologram);
             Path tempFile = dir.resolve(CONFIG_FILE + ".tmp");
             Files.writeString(tempFile, GSON.toJson(root), StandardCharsets.UTF_8);
             java.nio.file.Files.move(tempFile, file,
@@ -248,6 +263,10 @@ public final class CustomBlocksConfig {
             || !root.has("joinDebounceMs")
             || !root.has("cloudShareUrl")
             || !root.has("cloudShareEnabled")
+            || !root.has("aiEnabled")
+            || !root.has("aiName")
+            || !root.has("aiStyle")
+            || !root.has("aiHologram")
 ;
     }
 

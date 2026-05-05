@@ -128,7 +128,7 @@ public final class NetworkManager {
         int texCount = 0, faceCount = 0, nullCount = 0;
         for (SlotData data : SlotManager.allSlots()) {
             if (data.texture != null && data.texture.length > 0) {
-                enqueueForPlayer(player, new SlotUpdatePayload("add", data.index, data.customId,
+                queue.enqueue(new SlotUpdatePayload("add", data.index, data.customId,
                         data.displayName, data.texture,
                         data.lightLevel, data.hardness, data.soundType, null, null, data.animMeta));
                 texCount++;
@@ -137,7 +137,7 @@ public final class NetworkManager {
             }
             // Also send per-face texture overrides
             for (var face : data.faceTextures.entrySet()) {
-                enqueueForPlayer(player, new SlotUpdatePayload("setface", data.index, data.customId,
+                queue.enqueue(new SlotUpdatePayload("setface", data.index, data.customId,
                         null, face.getValue(),
                         data.lightLevel, data.hardness, data.soundType, face.getKey()));
                 faceCount++;
