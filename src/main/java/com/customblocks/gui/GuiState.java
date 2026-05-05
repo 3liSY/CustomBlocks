@@ -17,7 +17,7 @@ public record GuiState(
         int     shapeBoxPage,
         boolean fromCommand
 ) {
-    // ── Factory methods ──────────────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Factory methods Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     public static GuiState main(int page) {
         return new GuiState(GuiMode.MAIN, null, page, false, 0, false);
@@ -131,7 +131,35 @@ public record GuiState(
         return new GuiState(GuiMode.BG_STUDIO, null, 0, false, 0, false);
     }
 
-    // ── Mutation (returns new instance) ──────────────────────────────────────
+    public static GuiState uncategorizedPicker(int page) {
+        return new GuiState(GuiMode.UNCATEGORIZED_PICKER, null, page, false, 0, false);
+    }
+
+    public static GuiState assignmentDecision(String blockId, int returnPage) {
+        return new GuiState(GuiMode.ASSIGNMENT_DECISION, blockId, returnPage, false, 0, false);
+    }
+
+    public static GuiState categoryPicker(String blockId, int page) {
+        return new GuiState(GuiMode.CATEGORY_PICKER, blockId, page, false, 0, false);
+    }
+
+    public static GuiState categoryBrowser(int page) {
+        return new GuiState(GuiMode.CATEGORY_BROWSER, null, page, false, 0, false);
+    }
+
+    public static GuiState categoryDetail(String categoryKey, int page) {
+        return new GuiState(GuiMode.CATEGORY_DETAIL, categoryKey, page, false, 0, false);
+    }
+
+    public static GuiState categoryController(int page) {
+        return new GuiState(GuiMode.CATEGORY_CONTROLLER, null, page, false, 0, false);
+    }
+
+    public static GuiState categoryEditor(String categoryKey, int tabIndex) {
+        return new GuiState(GuiMode.CATEGORY_EDITOR, categoryKey, tabIndex, false, 0, false);
+    }
+
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Mutation (returns new instance) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     public GuiState withConfirmDelete(boolean confirm) {
         return new GuiState(mode, editingId, page, confirm, shapeBoxPage, fromCommand);
@@ -145,7 +173,7 @@ public record GuiState(
         return new GuiState(mode, editingId, newPage, confirmDelete, shapeBoxPage, fromCommand);
     }
 
-    // ── Back-stack helper ────────────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Back-stack helper Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     /**
      * Creates a new back-stack initialized with the main menu as the bottom.
@@ -154,3 +182,5 @@ public record GuiState(
         return new ArrayDeque<>();
     }
 }
+
+
