@@ -542,7 +542,7 @@ public class GuiManager {
         int rp = pending.returnPage();
 
         if (text.equalsIgnoreCase("cancel")) {
-            send(player, "§7[CustomBlocks] Cancelled.");
+            send(player, "§0§l[§b§lCB§0§l] Cancelled.");
             switch (pending.action()) {
                 case CONFIG_VALUE -> openConfigGui(player, false);
                 case ADMIN_CUSTOM_TITLE -> {
@@ -599,7 +599,7 @@ public class GuiManager {
                 String id = pending.partialId(), name = pending.partialName();
                 if (id == null || name == null) { openMain(player, rp); return true; }
                 if (SlotManager.freeSlots() == 0) { send(player, "§cAll slots full!"); openMain(player, rp); return true; }
-                send(player, "§e[CB] Downloading '" + name + "'…");
+                send(player, "§0§l[§b§lCB§0§l] Downloading '" + name + "'…");
                 MinecraftServer srv = player.getServer();
                 thread(player, () -> { try {
                     // Unified pipeline: handles GIFs (disposal + animMeta), PNG, WebP.
@@ -626,7 +626,7 @@ public class GuiManager {
             }
             case RETEXTURE_URL -> {
                 if (!isUrl(text)) { playError(player); send(player, "§cNeeds a URL."); openEditor(player, blockId, rp); return true; }
-                send(player, "§e[CB] Downloading texture…");
+                send(player, "§0§l[§b§lCB§0§l] Downloading texture…");
                 MinecraftServer srv = player.getServer();
                 thread(player, () -> { try {
                     ImageProcessor.ProcessResult result = ImageProcessor.downloadAndProcess(text, CustomBlocksConfig.defaultTextureSize);
@@ -648,7 +648,7 @@ public class GuiManager {
             case SETFACE_URL -> {
                 if (!isUrl(text)) { send(player, "§cNeeds a URL."); openFaceEditor(player, blockId, rp); return true; }
                 String face = pending.face();
-                send(player, "§e[CB] Downloading " + face + " face…");
+                send(player, "§0§l[§b§lCB§0§l] Downloading " + face + " face…");
                 MinecraftServer srv = player.getServer();
                 thread(player, () -> { try {
                     ImageProcessor.ProcessResult result = ImageProcessor.downloadAndProcess(text, CustomBlocksConfig.defaultTextureSize);
@@ -671,7 +671,7 @@ public class GuiManager {
                                 d.lightLevel, d.hardness, d.soundType, face, null,
                                 result.isAnimated() ? result.mcmeta() : null));
                         String suffix = result.isAnimated() ? " §8(animated)" : "";
-                        send(player, "§a[CB] §f" + face.toUpperCase() + " §aface set on '§f" + blockId + "§a'." + suffix);
+                        send(player, "§0§l[§b§lCB§0§l] §f" + face.toUpperCase() + " §aface set on '§f" + blockId + "§a'." + suffix);
                         openFaceEditor(player, blockId, rp);
                     });
                 } catch (Exception e) { srv.execute(() -> { playError(player); send(player, "§c[GUI] Failed: " + e.getMessage()); openFaceEditor(player, blockId, rp); }); } });
@@ -682,7 +682,7 @@ public class GuiManager {
                 String face = pending.face();
                 SlotData orig = SlotManager.getById(blockId);
                 if (orig == null) { openMain(player, rp); return true; }
-                send(player, "§e[CB] Creating variant with " + face + " face…");
+                send(player, "§0§l[§b§lCB§0§l] Creating variant with " + face + " face…");
                 MinecraftServer srv = player.getServer();
                 thread(player, () -> { try {
                     ImageProcessor.ProcessResult result = ImageProcessor.downloadAndProcess(text, CustomBlocksConfig.defaultTextureSize);
@@ -706,7 +706,7 @@ public class GuiManager {
                                 NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("setface", fresh.index, varId, null, fe.getValue(), fresh.lightLevel, fresh.hardness, fresh.soundType, fe.getKey()));
                         }
                         player.getInventory().insertStack(nb.index < CustomBlocksMod.SLOT_ITEMS.length && CustomBlocksMod.SLOT_ITEMS[nb.index] != null ? new ItemStack(CustomBlocksMod.SLOT_ITEMS[nb.index], 1) : ItemStack.EMPTY);
-                        send(player, "§a[CB] Variant '§f" + varId + "§a' created & given!");
+                        send(player, "§0§l[§b§lCB§0§l] Variant '§f" + varId + "§a' created & given!");
                         openFaceEditor(player, varId, rp);
                     });
                 } catch (Exception e) { srv.execute(() -> { send(player, "§c[GUI] Failed: " + e.getMessage()); openFaceEditor(player, blockId, rp); }); } });
@@ -720,7 +720,7 @@ public class GuiManager {
                 UndoManager.pushUndoMutation(blockId, d, "rename", player.getUuid());
                 SlotManager.rename(blockId, convertedText); SlotManager.saveAll();
                 NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("rename", d.index, blockId, convertedText, null, 0, 0, "stone"));
-                send(player, "§a[CB] Renamed to '§f" + convertedText + "§a'.");
+                send(player, "§0§l[§b§lCB§0§l] Renamed to '§f" + convertedText + "§a'.");
                 player.getServerWorld().playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_ANVIL_USE, net.minecraft.sound.SoundCategory.MASTER, 1f, 1f);
                 openEditor(player, blockId, rp); return true;
             }
@@ -729,7 +729,7 @@ public class GuiManager {
                 String targetId = text.toLowerCase().trim();
                 boolean isBlock = SlotManager.hasId(targetId);
                 if (!isUrl(text) && !isBlock) { send(player, "§cNeeds a URL or Block ID."); openMain(player, rp); return true; }
-                send(player, "§e[CB] Processing tab icon…");
+                send(player, "§0§l[§b§lCB§0§l] Processing tab icon…");
                 MinecraftServer srv = player.getServer();
                 thread(player, () -> { try {
                     byte[] finalBytes;
@@ -753,7 +753,7 @@ public class GuiManager {
                             }
                         }
                         NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("tabicon", -1, null, null, bytes, 0, 0, "stone"));
-                        send(player, "§a[CB] Tab icon updated!");
+                        send(player, "§0§l[§b§lCB§0§l] Tab icon updated!");
                         openMain(player, rp);
                     });
                 } catch (Exception e) { srv.execute(() -> { send(player, "§c[GUI] Failed: " + e.getMessage()); openMain(player, rp); }); } });
@@ -769,14 +769,14 @@ public class GuiManager {
                     if (!List.of("black","yellow","green").contains(col)) { send(player, "§cChoose: §fblack §7| §fyellow §7| §fgreen"); openMain(player, rp); return true; }
                     Item it = net.minecraft.registry.Registries.ITEM.get(net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, col + "_square"));
                     if (it != null && it != Items.AIR) player.getInventory().insertStack(new ItemStack(it, 1));
-                    send(player, "§a[CB] Given §f" + col + " Square§a!"); openMain(player, rp); return true;
+                    send(player, "§0§l[§b§lCB§0§l] Given §f" + col + " Square§a!"); openMain(player, rp); return true;
                 }
                 if ("__givetriangle__".equals(blockId)) {
                     String col = text.toLowerCase().trim();
                     if (!List.of("black","yellow","green").contains(col)) { send(player, "§cChoose: §fblack §7| §fyellow §7| §fgreen"); openMain(player, rp); return true; }
                     Item it = net.minecraft.registry.Registries.ITEM.get(net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, col + "_triangle"));
                     if (it != null && it != Items.AIR) player.getInventory().insertStack(new ItemStack(it, 1));
-                    send(player, "§a[CB] Given §f" + col + " Triangle§a!"); openMain(player, rp); return true;
+                    send(player, "§0§l[§b§lCB§0§l] Given §f" + col + " Triangle§a!"); openMain(player, rp); return true;
                 }
                 String newId = text.toLowerCase().replaceAll("[^a-z0-9_\\-]", "_");
                 if (newId.isEmpty())          { send(player, "§cInvalid ID."); openEditor(player, blockId, rp); return true; }
@@ -787,11 +787,11 @@ public class GuiManager {
                 SlotData upd = SlotManager.getById(newId);
                 NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("remove", d.index, blockId, null, null, 0, 0, "stone"));
                 NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("add", upd.index, newId, upd.displayName, upd.texture, upd.lightLevel, upd.hardness, upd.soundType, null, null, upd.animMeta));
-                send(player, "§a[CB] Re-ID'd '§f" + blockId + "§a' → '§f" + newId + "§a'.");
+                send(player, "§0§l[§b§lCB§0§l] Re-ID'd '§f" + blockId + "§a' → '§f" + newId + "§a'.");
                 openEditor(player, newId, rp); return true;
             }
             case ADMIN_CUSTOM_TITLE -> {
-                send(player, "§7[CustomBlocks] Action cancelled.");
+                send(player, "§0§l[§b§lCB§0§l] Action cancelled.");
                 openMain(player, 0);
                 return true;
             }
@@ -806,7 +806,7 @@ public class GuiManager {
                     SlotManager.setLightLevel(blockId, light);
                     SlotManager.saveAll();
                     syncProp(player, SlotManager.getById(blockId)); 
-                    send(player, "§a[CB] Light level set to " + light + ".");
+                    send(player, "§0§l[§b§lCB§0§l] Light level set to " + light + ".");
                     openPropertiesGui(player, blockId, rp);
                 } catch (NumberFormatException e) {
                     send(player, "§cInvalid light level. Must be 0-15.");
@@ -825,7 +825,7 @@ public class GuiManager {
                     SlotManager.setHardness(blockId, hardness);
                     SlotManager.saveAll();
                     syncProp(player, SlotManager.getById(blockId)); 
-                    send(player, "§a[CB] Hardness set to " + hardness + ".");
+                    send(player, "§0§l[§b§lCB§0§l] Hardness set to " + hardness + ".");
                     openPropertiesGui(player, blockId, rp);
                 } catch (NumberFormatException e) {
                     send(player, "§cInvalid hardness value.");
@@ -1729,7 +1729,7 @@ public class GuiManager {
                     net.minecraft.item.Item item = net.minecraft.registry.Registries.ITEM.get(net.minecraft.util.Identifier.of(com.customblocks.CustomBlocksMod.MOD_ID, "rainbow_rectangle"));
                     if (item != null && item != net.minecraft.item.Items.AIR) {
                         player.getInventory().insertStack(new net.minecraft.item.ItemStack(item));
-                        send(player, "§6[CustomBlocks] §eGiven §6Rainbow Rectangle§e!");
+                        send(player, "§0§l[§b§lCB§0§l] §eGiven §6Rainbow Rectangle§e!");
                     }
                 } catch (Exception e) { send(player, "§cCould not give rectangle wand."); }
             }
@@ -1791,7 +1791,8 @@ public class GuiManager {
                 String targetId = blocks.get(idx).customId;
                 if (actionType == net.minecraft.screen.slot.SlotActionType.QUICK_MOVE ||
                     actionType == net.minecraft.screen.slot.SlotActionType.CLONE ||
-                    actionType == net.minecraft.screen.slot.SlotActionType.THROW) {
+                    actionType == net.minecraft.screen.slot.SlotActionType.THROW ||
+                    actionType == net.minecraft.screen.slot.SlotActionType.QUICK_CRAFT) {
                     openAssignmentDecision(player, targetId, page);
                 } else {
                     openEditor(player, targetId, page);
@@ -2053,7 +2054,7 @@ public class GuiManager {
 
                     // Achievement unlock sound — loud and celebratory
                     player.playSound(net.minecraft.sound.SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
-                } catch (Exception ex) { send(player, "§c[CB] Share failed: " + ex.getMessage()); }
+                } catch (Exception ex) { send(player, "§0§l[§b§lCB§0§l] Share failed: " + ex.getMessage()); }
             }
             case 52 -> {
                 // Cancel deletion — reopen normal editor
@@ -4108,17 +4109,19 @@ public class GuiManager {
             openBlocksGui(player, state.page() + 1);
             return;
         }
-        int start = state.page() * BLOCKS_PER_PAGE;
-        int idx = start + slot;
-        java.util.List<com.customblocks.core.SlotData> all = new java.util.ArrayList<>(com.customblocks.core.SlotManager.allSlots());
-        java.util.List<com.customblocks.core.SlotData> uncategorized = new java.util.ArrayList<>();
-        for (com.customblocks.core.SlotData d : all) {
-            if (!"tab_icon".equals(d.customId) && com.customblocks.core.CategoryManager.getCategoriesForBlock(d.customId).isEmpty()) {
-                uncategorized.add(d);
+        if (slot >= 18 && slot <= 35) {
+            int start = state.page() * BLOCKS_PER_PAGE;
+            int idx = start + (slot - 18);
+            java.util.List<com.customblocks.core.SlotData> all = new java.util.ArrayList<>(com.customblocks.core.SlotManager.allSlots());
+            java.util.List<com.customblocks.core.SlotData> uncategorized = new java.util.ArrayList<>();
+            for (com.customblocks.core.SlotData d : all) {
+                if (!"tab_icon".equals(d.customId) && com.customblocks.core.CategoryManager.getCategoriesForBlock(d.customId).isEmpty()) {
+                    uncategorized.add(d);
+                }
             }
-        }
-        if (idx < uncategorized.size()) {
-            openAssignmentDecision(player, uncategorized.get(idx).customId, state.page());
+            if (idx < uncategorized.size()) {
+                openAssignmentDecision(player, uncategorized.get(idx).customId, state.page());
+            }
         }
     }
 
