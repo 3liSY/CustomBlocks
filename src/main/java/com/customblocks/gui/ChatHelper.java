@@ -6,7 +6,7 @@ import net.minecraft.text.Text;
 
 public class ChatHelper {
 
-    private static final String PREFIX = "§6§l[§b§lCB§6§l] ";
+    private static final String PREFIX = "§0§l[§b§lCB§0§l] ";
 
     public static void success(ServerPlayerEntity player, String message) {
         player.sendMessage(Text.literal(PREFIX + "§f" + message + " §a✔"), false);

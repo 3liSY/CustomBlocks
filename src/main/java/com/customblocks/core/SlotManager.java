@@ -269,6 +269,22 @@ public final class SlotManager {
             IO_EXECUTOR.submit(() -> writeTextureFile(slotIdx, texCopy));
         }
 
+        // Auto-categorize: run rules; if no rule fires, fall back to default category
+        try {
+            String applied = com.customblocks.core.AutoCategorizeManager.applyRulesTo(customId);
+            if (applied == null) {
+                for (com.customblocks.core.Category c : com.customblocks.core.CategoryManager.getAllCategories()) {
+                    if (c.isDefault()) {
+                        com.customblocks.core.CategoryManager.assignBlock(customId, c.key());
+                        break;
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            // Never let categorization break block creation
+            LOGGER.warn("[CustomBlocks] Auto-categorize failed for '{}': {}", customId, t.getMessage());
+        }
+
         return data;
 
     }
@@ -371,6 +387,7 @@ public final class SlotManager {
             // Phase 1: clean up texture files
             final int slotIdx = data.index;
             IO_EXECUTOR.submit(() -> deleteTextureFiles(slotIdx));
+            CategoryManager.clearAssignments(customId);
         }
 
         return data;
@@ -525,8 +542,15 @@ public final class SlotManager {
         byId.remove(oldId);
 
         SlotData updated = data.withCustomId(newId);
-
         put(updated);
+
+        java.util.Set<String> cats = CategoryManager.getCategoriesForBlock(oldId);
+        if (!cats.isEmpty()) {
+            for (String cat : cats) {
+                CategoryManager.assignBlock(newId, cat);
+            }
+            CategoryManager.clearAssignments(oldId);
+        }
 
         return true;
 

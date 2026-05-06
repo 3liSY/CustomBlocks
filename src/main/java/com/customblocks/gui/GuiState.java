@@ -159,6 +159,44 @@ public record GuiState(
         return new GuiState(GuiMode.CATEGORY_EDITOR, categoryKey, tabIndex, false, 0, false);
     }
 
+    public static GuiState subcategoryController(String parentKey, int page) {
+        return new GuiState(GuiMode.SUBCATEGORY_CONTROLLER, parentKey, page, false, 0, false);
+    }
+
+    public static GuiState importConflict(String blockId) {
+        return new GuiState(GuiMode.IMPORT_CONFLICT, blockId, 0, false, 0, false);
+    }
+
+    public static GuiState deleteCategoryMenu(String categoryKey) {
+        return new GuiState(GuiMode.DELETE_CATEGORY_MENU, categoryKey, 0, false, 0, false);
+    }
+
+    public static GuiState mergeCategoryPickerTarget(String sourceCategoryKey, int page) {
+        return new GuiState(GuiMode.MERGE_CATEGORY_PICKER_TARGET, sourceCategoryKey, page, false, 0, false);
+    }
+
+    public static GuiState bulkAssignPicker(int page) {
+        return new GuiState(GuiMode.BULK_ASSIGN_PICKER, null, page, false, 0, false);
+    }
+
+    public static GuiState sortBlocksMenu(String categoryKey) {
+        return new GuiState(GuiMode.SORT_BLOCKS_MENU, categoryKey, 0, false, 0, false);
+    }
+
+    public static GuiState categoryStats(String categoryKey) {
+        return new GuiState(GuiMode.CATEGORY_STATS, categoryKey, 0, false, 0, false);
+    }
+
+    public static GuiState categoryBlockContext(String categoryKey, String blockId, int returnPage) {
+        // We need both categoryKey and blockId. Let's put categoryKey in editingId, and blockId in a temporary lookup, or vice-versa.
+        // Or we can encode it as categoryKey|blockId
+        return new GuiState(GuiMode.CATEGORY_BLOCK_CONTEXT, categoryKey + "|" + blockId, returnPage, false, 0, false);
+    }
+
+    public static GuiState categoryIconPicker(String categoryKey, int page, boolean isCustomTab) {
+        return new GuiState(GuiMode.CATEGORY_ICON_PICKER, categoryKey, page, isCustomTab, 0, false);
+    }
+
     // Ã¢â€â‚¬Ã¢â€â‚¬ Mutation (returns new instance) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     public GuiState withConfirmDelete(boolean confirm) {

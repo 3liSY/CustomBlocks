@@ -59,6 +59,44 @@ public final class PermissionHelper {
         return src.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin);
     }
 
+    // ── Category Permissions ────────────────────────────────────────────────
+    
+    public static boolean canCategoryView(ServerCommandSource src) {
+        return src.hasPermissionLevel(CustomBlocksConfig.permissionLevelUse);
+    }
+    
+    public static boolean canCategoryAssign(ServerCommandSource src) {
+        return src.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin);
+    }
+    
+    public static boolean canCategoryExport(ServerCommandSource src) {
+        return src.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin);
+    }
+    
+    public static boolean canCategoryManage(ServerCommandSource src) {
+        return src.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin);
+    }
+
+    public static boolean canCategoryRemove(ServerCommandSource src) {
+        return src.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin);
+    }
+
+    public static boolean canViewSpecificCategory(net.minecraft.server.network.ServerPlayerEntity player, String categoryKey) {
+        if (player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) return true;
+        // In a real LuckPerms setup we would check "customblocks.category." + categoryKey + ".view"
+        // Without an API, we assume non-admins can view unless it's explicitly restricted/hidden.
+        com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(categoryKey);
+        if (cat != null && cat.hidden()) return false;
+        return true;
+    }
+
+    public static boolean canAssignToSpecificCategory(net.minecraft.server.network.ServerPlayerEntity player, String categoryKey) {
+        if (player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) return true;
+        com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(categoryKey);
+        if (cat != null && cat.locked()) return false;
+        return true;
+    }
+
     /**
      * Check tool-item usage permission (for use inside Item classes that receive PlayerEntity).
      */

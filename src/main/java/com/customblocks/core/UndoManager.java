@@ -254,7 +254,105 @@ public final class UndoManager {
         return "";
     }
 
-    // ── Cleanup ──────────────────────────────────────────────────────────────
+    // ── Category Undo (Phase 10 — bulk assignments as one atomic entry) ──────
+
+    /**
+     * @param description           e.g. "bulk-assign 12 → food"
+     * @param beforeAssignments     snapshot of CategoryManager.assignments BEFORE the change
+     * @param beforeCategories      snapshot of all categories BEFORE the change (or empty if no cat-create)
+     * @param playerUuid            actor
+     */
+    public record CategoryUndoEntry(
+            String description,
+            java.util.Map<String, java.util.Set<String>> beforeAssignments,
+            java.util.Map<String, com.customblocks.core.Category> beforeCategories,
+            UUID playerUuid
+    ) {}
+
+    private static final Deque<CategoryUndoEntry> CATEGORY_UNDO = new ArrayDeque<>();
+    private static final Deque<CategoryUndoEntry> CATEGORY_REDO = new ArrayDeque<>();
+    private static final Map<UUID, Deque<CategoryUndoEntry>> CATEGORY_PLAYER_UNDO = new ConcurrentHashMap<>();
+    private static final Map<UUID, Deque<CategoryUndoEntry>> CATEGORY_PLAYER_REDO = new ConcurrentHashMap<>();
+
+    /** Capture the current CategoryManager state into a snapshot suitable for undo. */
+    public static CategoryUndoEntry captureCategorySnapshot(String description, UUID playerUuid) {
+        java.util.Map<String, java.util.Set<String>> assignSnap = new HashMap<>();
+        for (com.customblocks.core.SlotData d : com.customblocks.core.SlotManager.allSlots()) {
+            java.util.Set<String> cats = com.customblocks.core.CategoryManager.getCategoriesForBlock(d.customId);
+            if (!cats.isEmpty()) assignSnap.put(d.customId, new HashSet<>(cats));
+        }
+        java.util.Map<String, com.customblocks.core.Category> catSnap = new HashMap<>();
+        for (com.customblocks.core.Category c : com.customblocks.core.CategoryManager.getAllCategories()) {
+            catSnap.put(c.key(), c);
+        }
+        return new CategoryUndoEntry(description, assignSnap, catSnap, playerUuid);
+    }
+
+    public static synchronized void pushCategoryUndo(CategoryUndoEntry entry) {
+        int maxDepth = CustomBlocksConfig.maxUndoDepth;
+        String mode = CustomBlocksConfig.undoMode;
+        if ("global".equals(mode) || "both".equals(mode)) {
+            CATEGORY_UNDO.addFirst(entry);
+            while (CATEGORY_UNDO.size() > maxDepth) CATEGORY_UNDO.removeLast();
+            CATEGORY_REDO.clear();
+        }
+        if (("per_player".equals(mode) || "both".equals(mode)) && entry.playerUuid() != null) {
+            Deque<CategoryUndoEntry> stack = CATEGORY_PLAYER_UNDO.computeIfAbsent(entry.playerUuid(), k -> new ArrayDeque<>());
+            stack.addFirst(entry);
+            while (stack.size() > maxDepth) stack.removeLast();
+            CATEGORY_PLAYER_REDO.computeIfAbsent(entry.playerUuid(), k -> new ArrayDeque<>()).clear();
+        }
+    }
+
+    public static synchronized CategoryUndoEntry popCategoryUndo(UUID playerUuid) {
+        String mode = CustomBlocksConfig.undoMode;
+        if ("per_player".equals(mode)) {
+            Deque<CategoryUndoEntry> s = CATEGORY_PLAYER_UNDO.get(playerUuid);
+            return s != null ? s.pollFirst() : null;
+        } else if ("global".equals(mode)) {
+            return CATEGORY_UNDO.pollFirst();
+        } else {
+            Deque<CategoryUndoEntry> s = CATEGORY_PLAYER_UNDO.get(playerUuid);
+            CategoryUndoEntry e = s != null ? s.pollFirst() : null;
+            if (e != null) {
+                CATEGORY_UNDO.removeFirstOccurrence(e);
+                return e;
+            }
+            return CATEGORY_UNDO.pollFirst();
+        }
+    }
+
+    public static synchronized void pushCategoryRedo(CategoryUndoEntry entry) {
+        int maxDepth = CustomBlocksConfig.maxUndoDepth;
+        String mode = CustomBlocksConfig.undoMode;
+        if ("global".equals(mode) || "both".equals(mode)) {
+            CATEGORY_REDO.addFirst(entry);
+            while (CATEGORY_REDO.size() > maxDepth) CATEGORY_REDO.removeLast();
+        }
+        if (("per_player".equals(mode) || "both".equals(mode)) && entry.playerUuid() != null) {
+            Deque<CategoryUndoEntry> stack = CATEGORY_PLAYER_REDO.computeIfAbsent(entry.playerUuid(), k -> new ArrayDeque<>());
+            stack.addFirst(entry);
+            while (stack.size() > maxDepth) stack.removeLast();
+        }
+    }
+
+    public static synchronized CategoryUndoEntry popCategoryRedo(UUID playerUuid) {
+        String mode = CustomBlocksConfig.undoMode;
+        if ("per_player".equals(mode)) {
+            Deque<CategoryUndoEntry> s = CATEGORY_PLAYER_REDO.get(playerUuid);
+            return s != null ? s.pollFirst() : null;
+        } else if ("global".equals(mode)) {
+            return CATEGORY_REDO.pollFirst();
+        } else {
+            Deque<CategoryUndoEntry> s = CATEGORY_PLAYER_REDO.get(playerUuid);
+            CategoryUndoEntry e = s != null ? s.pollFirst() : null;
+            if (e != null) {
+                CATEGORY_REDO.removeFirstOccurrence(e);
+                return e;
+            }
+            return CATEGORY_REDO.pollFirst();
+        }
+    }
 
     /** Clear all stacks (used on reload). */
     public static synchronized void clearAll() {
@@ -262,12 +360,20 @@ public final class UndoManager {
         GLOBAL_REDO.clear();
         PLAYER_UNDO.clear();
         PLAYER_REDO.clear();
+        CATEGORY_UNDO.clear();
+        CATEGORY_REDO.clear();
+        CATEGORY_PLAYER_UNDO.clear();
+        CATEGORY_PLAYER_REDO.clear();
     }
+
+    // ── Cleanup ──────────────────────────────────────────────────────────────
 
     /** Remove a player's stacks (on disconnect). */
     public static synchronized void clearPlayer(UUID playerUuid) {
         PLAYER_UNDO.remove(playerUuid);
         PLAYER_REDO.remove(playerUuid);
+        CATEGORY_PLAYER_UNDO.remove(playerUuid);
+        CATEGORY_PLAYER_REDO.remove(playerUuid);
     }
 
     public static synchronized List<UndoEntry> getUndoEntries(UUID playerUuid, int max) {

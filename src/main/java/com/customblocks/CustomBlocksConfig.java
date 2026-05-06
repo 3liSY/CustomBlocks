@@ -53,6 +53,12 @@ public final class CustomBlocksConfig {
     /** Default OP level required for use commands (give/gui). */
     public static volatile int permissionLevelUse = 0;
 
+    // ── Item Lore & UI ───────────────────────────────────────────────────────
+    /** Whether to hide the "Custom Blocks" creative tab text from item lore. */
+    public static volatile boolean hideCustomBlockText = false;
+    /** Whether to hide category badges from item lore entirely. */
+    public static volatile boolean hideCategoryBadge = false;
+
     // ── Network ──────────────────────────────────────────────────────────────
     /** Number of texture payloads to drip-feed per server tick. */
     public static volatile int texturePayloadsPerTick = 8;
@@ -130,6 +136,8 @@ public final class CustomBlocksConfig {
             aiName                = getString(root, "aiName", getString(root, "helperName", aiName));
             aiStyle               = getString(root, "aiStyle", getString(root, "helperSkin", aiStyle));
             aiHologram            = getBool(root, "aiHologram", getBool(root, "helperHologram", aiHologram));
+            hideCustomBlockText   = getBool(root, "hideCustomBlockText", hideCustomBlockText);
+            hideCategoryBadge     = getBool(root, "hideCategoryBadge", hideCategoryBadge);
 
             // Clamp values
             int clampedMaxSlots = Math.max(1, Math.min(8192, maxSlots));
@@ -218,6 +226,8 @@ public final class CustomBlocksConfig {
             root.addProperty("aiName", aiName);
             root.addProperty("aiStyle", aiStyle);
             root.addProperty("aiHologram", aiHologram);
+            root.addProperty("hideCustomBlockText", hideCustomBlockText);
+            root.addProperty("hideCategoryBadge", hideCategoryBadge);
             Path tempFile = dir.resolve(CONFIG_FILE + ".tmp");
             Files.writeString(tempFile, GSON.toJson(root), StandardCharsets.UTF_8);
             java.nio.file.Files.move(tempFile, file,
@@ -267,6 +277,8 @@ public final class CustomBlocksConfig {
             || !root.has("aiName")
             || !root.has("aiStyle")
             || !root.has("aiHologram")
+            || !root.has("hideCustomBlockText")
+            || !root.has("hideCategoryBadge")
 ;
     }
 

@@ -64,6 +64,9 @@ public class CustomBlockCommand {
     private static final SuggestionProvider<ServerCommandSource> SOUND_SUGGESTIONS =
             (ctx, builder) -> { for (String s : VALID_SOUNDS) builder.suggest(s); return builder.buildFuture(); };
 
+    private static final SuggestionProvider<ServerCommandSource> CATEGORY_SUGGESTIONS =
+            (ctx, builder) -> { for (com.customblocks.core.Category cat : com.customblocks.core.CategoryManager.getAllCategories()) builder.suggest(cat.key()); return builder.buildFuture(); };
+
     private static final SuggestionProvider<ServerCommandSource> FACE_SUGGESTIONS =
             (ctx, builder) -> { for (String f : SlotData.FACE_KEYS) builder.suggest(f); return builder.buildFuture(); };
 
@@ -121,6 +124,100 @@ public class CustomBlockCommand {
                                     StringArgumentType.getString(ctx, "name"),
                                     StringArgumentType.getString(ctx, "url").trim(),
                                     128))))))
+
+                // ── blocks & blockscat ──────────────────────────────────────
+                .then(CommandManager.literal("blocks")
+                    .requires(src -> PermissionHelper.canCategoryView(src))
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) {
+                            GuiManager.playClick(p);
+                            GuiManager.openBlocksGui(p, 0);
+                        }
+                        else ctx.getSource().sendError(Text.literal("Player only."));
+                        return 1;
+                    }))
+                .then(CommandManager.literal("blockscategory")
+                    .requires(src -> PermissionHelper.canCategoryView(src))
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) {
+                            GuiManager.playClick(p);
+                            GuiManager.openCategoryBrowser(p, 0);
+                        }
+                        else ctx.getSource().sendError(Text.literal("Player only."));
+                        return 1;
+                    }))
+                .then(CommandManager.literal("blockscat")
+                    .requires(src -> PermissionHelper.canCategoryView(src))
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) {
+                            GuiManager.playClick(p);
+                            GuiManager.openCategoryBrowser(p, 0);
+                        }
+                        else ctx.getSource().sendError(Text.literal("Player only."));
+                        return 1;
+                    }))
+
+                // ── blockadd ────────────────────────────────────────────────
+                .then(CommandManager.literal("blockadd")
+                    .requires(src -> PermissionHelper.canCategoryAssign(src))
+                    .executes(ctx -> usage(ctx.getSource(), "blockadd"))
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("cat", StringArgumentType.word())
+                            .suggests(CATEGORY_SUGGESTIONS)
+                            .executes(ctx -> cmdBlockAdd(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "id"),
+                                StringArgumentType.getString(ctx, "cat"))))))
+
+                // ── givecategory ────────────────────────────────────────────
+                .then(CommandManager.literal("givecategory")
+                    .requires(src -> PermissionHelper.canCategoryAssign(src))
+                    .executes(ctx -> usage(ctx.getSource(), "givecategory"))
+                    .then(CommandManager.argument("cat", StringArgumentType.word())
+                        .suggests(CATEGORY_SUGGESTIONS)
+                        .executes(ctx -> cmdGiveCategory(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "cat")))))
+
+                // ── givedisplayblock ────────────────────────────────────────
+                .then(CommandManager.literal("givedisplayblock")
+                    .requires(src -> PermissionHelper.canCategoryAssign(src))
+                    .executes(ctx -> usage(ctx.getSource(), "givedisplayblock"))
+                    .then(CommandManager.argument("cat", StringArgumentType.word())
+                        .suggests(CATEGORY_SUGGESTIONS)
+                        .executes(ctx -> cmdGiveDisplayBlock(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "cat")))))
+
+                // ── exportcategory ──────────────────────────────────────────
+                .then(CommandManager.literal("exportcategory")
+                    .requires(src -> PermissionHelper.canCategoryExport(src))
+                    .executes(ctx -> usage(ctx.getSource(), "exportcategory"))
+                    .then(CommandManager.argument("cat", StringArgumentType.word())
+                        .suggests(CATEGORY_SUGGESTIONS)
+                        .executes(ctx -> cmdExportCategory(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "cat")))))
+
+                // ── exportall ───────────────────────────────────────────────
+                .then(CommandManager.literal("exportall")
+                    .requires(src -> PermissionHelper.canCategoryExport(src))
+                    .executes(ctx -> cmdExportAll(ctx.getSource())))
+
+                // ── sharecategory & importcategory ──────────────────────────
+                .then(CommandManager.literal("sharecategory")
+                    .requires(src -> PermissionHelper.canCategoryExport(src))
+                    .executes(ctx -> usage(ctx.getSource(), "sharecategory"))
+                    .then(CommandManager.argument("cat", StringArgumentType.word())
+                        .suggests(CATEGORY_SUGGESTIONS)
+                        .executes(ctx -> cmdShareCategory(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "cat")))))
+                .then(CommandManager.literal("importcategory")
+                    .requires(src -> PermissionHelper.canCategoryManage(src))
+                    .executes(ctx -> usage(ctx.getSource(), "importcategory"))
+                    .then(CommandManager.argument("code", StringArgumentType.word())
+                        .executes(ctx -> cmdImportCategory(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "code")))))
 
                 // ── delete ──────────────────────────────────────────────────
                 .then(CommandManager.literal("delete")
@@ -607,6 +704,13 @@ public class CustomBlockCommand {
 
         UndoManager.pushUndoCreate(newId, getPlayerUuid(src));
         SlotManager.saveAll();
+        // R12: duplicate inherits ALL the same categories from the source
+        try {
+            java.util.Set<String> srcCats = com.customblocks.core.CategoryManager.getCategoriesForBlock(sourceId);
+            for (String cat : srcCats) {
+                com.customblocks.core.CategoryManager.assignBlock(newId, cat);
+            }
+        } catch (Throwable ignored) {}
         d = SlotManager.getById(newId);
         NetworkManager.broadcastUpdate(src.getServer(),
             new SlotUpdatePayload("add", d.index, newId, finalName, texCopy,
@@ -1978,6 +2082,376 @@ public class CustomBlockCommand {
             com.customblocks.gui.GuiManager.logError();
             src.sendError(Text.literal("§0§l[§b§lCB§0§l] §cError: " + ex.getMessage())); 
         }
+        return 1;
+    }
+
+
+    private static int cmdBlockAdd(ServerCommandSource src, String rawId, String rawCat) {
+        String catKey = sanitize(rawCat);
+        com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(catKey);
+        if (cat == null) {
+            src.sendError(Text.literal("§c[CustomBlocks] Category '" + catKey + "' not found."));
+            return 0;
+        }
+
+        if (rawId.equals("*")) {
+            java.util.UUID uuid = src.getPlayer() != null ? src.getPlayer().getUuid() : null;
+            // Snapshot BEFORE the bulk change for atomic undo (R20)
+            com.customblocks.core.UndoManager.CategoryUndoEntry snap =
+                    com.customblocks.core.UndoManager.captureCategorySnapshot(
+                            "bulk-assign all → " + cat.displayName(), uuid);
+            java.util.Collection<SlotData> blocks = SlotManager.allSlots();
+            int count = 0;
+            for (SlotData d : blocks) {
+                if (!com.customblocks.core.CategoryManager.getCategoriesForBlock(d.customId).contains(catKey)) {
+                    com.customblocks.core.CategoryManager.assignBlock(d.customId, catKey);
+                    count++;
+                }
+            }
+            if (count > 0) com.customblocks.core.UndoManager.pushCategoryUndo(snap);
+            src.sendMessage(Text.literal("§a[CustomBlocks] Added §f" + count + "§a blocks to category §f" + cat.displayName() + "§a!"));
+            return 1;
+        } else {
+            String id = sanitize(rawId);
+            if (!SlotManager.hasId(id)) {
+                src.sendError(notFound(id));
+                return 0;
+            }
+            if (com.customblocks.core.CategoryManager.getCategoriesForBlock(id).contains(catKey)) {
+                src.sendMessage(Text.literal("§7[CustomBlocks] '" + id + "' is already in '" + cat.displayName() + "'."));
+                return 1;
+            }
+            com.customblocks.core.CategoryManager.assignBlock(id, catKey);
+            src.sendMessage(Text.literal("§a[CustomBlocks] Added '§f" + id + "§a' to category §f" + cat.displayName() + "§a!"));
+            return 1;
+        }
+    }
+
+    private static int cmdGiveDisplayBlock(ServerCommandSource src, String rawCat) {
+        String catKey = sanitize(rawCat);
+        com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(catKey);
+        if (cat == null) {
+            src.sendError(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7cCategory '" + catKey + "' not found."));
+            return 0;
+        }
+        ServerPlayerEntity p = src.getPlayer();
+        if (p == null) { src.sendError(Text.literal("Player only.")); return 0; }
+        if (!cat.displayBlockEnabled()) {
+            src.sendError(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7cDisplay block is disabled for this category."));
+            return 0;
+        }
+        ItemStack stack = com.customblocks.core.CategoryDisplayBlockManager.createDisplayBlockStack(cat);
+        if (!p.getInventory().insertStack(stack)) p.dropItem(stack, false);
+        src.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7aGave display block for \u00A7f" + cat.displayName() + "\u00A7a."));
+        return 1;
+    }
+
+    private static int cmdGiveCategory(ServerCommandSource src, String rawCat) {
+        String catKey = sanitize(rawCat);
+        com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(catKey);
+        if (cat == null) {
+            src.sendError(Text.literal("§c[CustomBlocks] Category '" + catKey + "' not found."));
+            return 0;
+        }
+        ServerPlayerEntity p = src.getPlayer();
+        if (p == null) {
+            src.sendError(Text.literal("Player only."));
+            return 0;
+        }
+        java.util.List<SlotData> blocks = com.customblocks.core.CategoryManager.getBlocksInCategory(catKey);
+        if (blocks.isEmpty()) {
+            src.sendMessage(Text.literal("§7[CustomBlocks] Category '" + cat.displayName() + "' is empty."));
+            return 1;
+        }
+        int given = 0;
+        for (SlotData d : blocks) {
+            SlotBlock.SlotItem item = CustomBlocksMod.safeSlotItem(d.index);
+            if (item != null) {
+                p.getInventory().insertStack(new ItemStack(item, 1));
+                given++;
+            }
+        }
+        src.sendMessage(Text.literal("§a[CustomBlocks] Given §f" + given + "§a blocks from §f" + cat.displayName() + "§a!"));
+        return 1;
+    }
+
+    private static int cmdExportCategory(ServerCommandSource src, String rawCat) {
+        String catKey = sanitize(rawCat);
+        com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(catKey);
+        if (cat == null) {
+            src.sendError(Text.literal("§c[CustomBlocks] Category '" + catKey + "' not found."));
+            return 0;
+        }
+        File dir = new File("config/customblocks"); dir.mkdirs();
+        File out = new File(dir, "export_cat_" + catKey + ".json");
+        try {
+            com.google.gson.JsonObject root = new com.google.gson.JsonObject();
+            com.google.gson.JsonObject catObj = new com.google.gson.JsonObject();
+            catObj.addProperty("key", cat.key());
+            catObj.addProperty("displayName", cat.displayName());
+            catObj.addProperty("iconItem", cat.iconItem());
+            if (cat.iconCustomBlockId() != null) catObj.addProperty("iconCustomBlockId", cat.iconCustomBlockId());
+            if (cat.color() != null) catObj.addProperty("color", cat.color());
+            if (cat.badge() != null) catObj.addProperty("badge", cat.badge());
+            if (cat.badgeColor() != null) catObj.addProperty("badgeColor", cat.badgeColor());
+            if (cat.parentKey() != null) catObj.addProperty("parentKey", cat.parentKey());
+            catObj.addProperty("hidden", cat.hidden());
+            catObj.addProperty("locked", cat.locked());
+            catObj.addProperty("isDefault", cat.isDefault());
+            if (cat.lorePrefix() != null) catObj.addProperty("lorePrefix", cat.lorePrefix());
+            if (cat.lorePrefixPosition() != null) catObj.addProperty("lorePrefixPosition", cat.lorePrefixPosition());
+            if (cat.subcategoryIndicator() != null) catObj.addProperty("subcategoryIndicator", cat.subcategoryIndicator());
+            catObj.addProperty("displayBlockEnabled", cat.displayBlockEnabled());
+            if (cat.displayBlockType() != null) catObj.addProperty("displayBlockType", cat.displayBlockType());
+            if (cat.badgeOverflowMode() != null) catObj.addProperty("badgeOverflowMode", cat.badgeOverflowMode());
+            if (cat.colorPlacement() != null) catObj.addProperty("colorPlacement", cat.colorPlacement());
+            catObj.addProperty("sortOrder", cat.sortOrder());
+            if (cat.description() != null) catObj.addProperty("description", cat.description());
+            root.add("category", catObj);
+            
+            java.util.List<SlotData> blocks = com.customblocks.core.CategoryManager.getBlocksInCategory(catKey);
+            com.google.gson.JsonArray blocksArr = new com.google.gson.JsonArray();
+            for (SlotData d : blocks) {
+                com.google.gson.JsonObject e = new com.google.gson.JsonObject();
+                e.addProperty("id", d.customId);
+                e.addProperty("displayName", d.displayName);
+                e.addProperty("lightLevel", d.lightLevel);
+                e.addProperty("hardness", d.hardness);
+                e.addProperty("soundType", d.soundType);
+                e.addProperty("animated", d.isAnimated());
+                blocksArr.add(e);
+            }
+            root.add("blocks", blocksArr);
+            root.addProperty("totalBlocks", blocks.size());
+            root.addProperty("exportedAt", System.currentTimeMillis());
+            try (java.io.FileWriter fw = new java.io.FileWriter(out, java.nio.charset.StandardCharsets.UTF_8)) {
+                new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(root, fw);
+            }
+            src.sendMessage(Text.literal("§a[CustomBlocks] Exported category '§f" + cat.displayName() + "§a' with §f" + blocks.size() + "§a blocks to config/customblocks/" + out.getName()));
+        } catch (Exception e) {
+            src.sendError(Text.literal("§c[CustomBlocks] Export failed: " + e.getMessage()));
+        }
+        return 1;
+    }
+
+    private static int cmdExportAll(ServerCommandSource src) {
+        File dir = new File("config/customblocks"); dir.mkdirs();
+        File out = new File(dir, "export_all_categories.json");
+        try {
+            com.google.gson.JsonObject root = new com.google.gson.JsonObject();
+            com.google.gson.JsonArray catsArr = new com.google.gson.JsonArray();
+            for (com.customblocks.core.Category cat : com.customblocks.core.CategoryManager.getAllCategories()) {
+                com.google.gson.JsonObject catObj = new com.google.gson.JsonObject();
+                catObj.addProperty("key", cat.key());
+                catObj.addProperty("displayName", cat.displayName());
+                catObj.addProperty("iconItem", cat.iconItem());
+                if (cat.iconCustomBlockId() != null) catObj.addProperty("iconCustomBlockId", cat.iconCustomBlockId());
+                if (cat.color() != null) catObj.addProperty("color", cat.color());
+                if (cat.badge() != null) catObj.addProperty("badge", cat.badge());
+                if (cat.badgeColor() != null) catObj.addProperty("badgeColor", cat.badgeColor());
+                if (cat.parentKey() != null) catObj.addProperty("parentKey", cat.parentKey());
+                catObj.addProperty("hidden", cat.hidden());
+                catObj.addProperty("locked", cat.locked());
+                catObj.addProperty("isDefault", cat.isDefault());
+                if (cat.lorePrefix() != null) catObj.addProperty("lorePrefix", cat.lorePrefix());
+                if (cat.lorePrefixPosition() != null) catObj.addProperty("lorePrefixPosition", cat.lorePrefixPosition());
+                if (cat.subcategoryIndicator() != null) catObj.addProperty("subcategoryIndicator", cat.subcategoryIndicator());
+                catObj.addProperty("displayBlockEnabled", cat.displayBlockEnabled());
+                if (cat.displayBlockType() != null) catObj.addProperty("displayBlockType", cat.displayBlockType());
+                if (cat.badgeOverflowMode() != null) catObj.addProperty("badgeOverflowMode", cat.badgeOverflowMode());
+                if (cat.colorPlacement() != null) catObj.addProperty("colorPlacement", cat.colorPlacement());
+                catObj.addProperty("sortOrder", cat.sortOrder());
+                if (cat.description() != null) catObj.addProperty("description", cat.description());
+                catsArr.add(catObj);
+            }
+            root.add("categories", catsArr);
+            root.addProperty("exportedAt", System.currentTimeMillis());
+            try (java.io.FileWriter fw = new java.io.FileWriter(out, java.nio.charset.StandardCharsets.UTF_8)) {
+                new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(root, fw);
+            }
+            src.sendMessage(Text.literal("§a[CustomBlocks] Exported all categories to config/customblocks/" + out.getName()));
+        } catch (Exception e) {
+            src.sendError(Text.literal("§c[CustomBlocks] Export failed: " + e.getMessage()));
+        }
+        return 1;
+    }
+
+    private static int cmdShareCategory(ServerCommandSource src, String rawCat) {
+        String catKey = sanitize(rawCat);
+        com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(catKey);
+        if (cat == null) {
+            src.sendError(Text.literal("§c[CustomBlocks] Category '" + catKey + "' not found."));
+            return 0;
+        }
+        
+        if (!com.customblocks.CustomBlocksConfig.isCloudShareEnabled()) {
+            src.sendError(Text.literal("§c[CustomBlocks] Cloud sharing is disabled in config."));
+            return 0;
+        }
+        
+        src.sendMessage(Text.literal("§e[CustomBlocks] Preparing category data for upload..."));
+        
+        try {
+            com.google.gson.JsonObject root = new com.google.gson.JsonObject();
+            com.google.gson.JsonObject catObj = new com.google.gson.JsonObject();
+            catObj.addProperty("key", cat.key());
+            catObj.addProperty("displayName", cat.displayName());
+            catObj.addProperty("iconItem", cat.iconItem());
+            if (cat.iconCustomBlockId() != null) catObj.addProperty("iconCustomBlockId", cat.iconCustomBlockId());
+            if (cat.color() != null) catObj.addProperty("color", cat.color());
+            if (cat.badge() != null) catObj.addProperty("badge", cat.badge());
+            if (cat.badgeColor() != null) catObj.addProperty("badgeColor", cat.badgeColor());
+            if (cat.parentKey() != null) catObj.addProperty("parentKey", cat.parentKey());
+            catObj.addProperty("hidden", cat.hidden());
+            catObj.addProperty("locked", cat.locked());
+            catObj.addProperty("isDefault", cat.isDefault());
+            if (cat.lorePrefix() != null) catObj.addProperty("lorePrefix", cat.lorePrefix());
+            if (cat.lorePrefixPosition() != null) catObj.addProperty("lorePrefixPosition", cat.lorePrefixPosition());
+            if (cat.subcategoryIndicator() != null) catObj.addProperty("subcategoryIndicator", cat.subcategoryIndicator());
+            catObj.addProperty("displayBlockEnabled", cat.displayBlockEnabled());
+            if (cat.displayBlockType() != null) catObj.addProperty("displayBlockType", cat.displayBlockType());
+            if (cat.badgeOverflowMode() != null) catObj.addProperty("badgeOverflowMode", cat.badgeOverflowMode());
+            if (cat.colorPlacement() != null) catObj.addProperty("colorPlacement", cat.colorPlacement());
+            catObj.addProperty("sortOrder", cat.sortOrder());
+            if (cat.description() != null) catObj.addProperty("description", cat.description());
+            root.add("category", catObj);
+            
+            java.util.List<SlotData> blocks = com.customblocks.core.CategoryManager.getBlocksInCategory(catKey);
+            com.google.gson.JsonArray blocksArr = new com.google.gson.JsonArray();
+            for (SlotData d : blocks) {
+                com.google.gson.JsonObject e = new com.google.gson.JsonObject();
+                e.addProperty("id", d.customId);
+                e.addProperty("displayName", d.displayName);
+                e.addProperty("lightLevel", d.lightLevel);
+                e.addProperty("hardness", d.hardness);
+                e.addProperty("soundType", d.soundType);
+                e.addProperty("animated", d.isAnimated());
+                // In a real scenario we'd attach base64 textures here too,
+                // but let's keep it compact for the example backend.
+                blocksArr.add(e);
+            }
+            root.add("blocks", blocksArr);
+            root.addProperty("totalBlocks", blocks.size());
+            
+            String jsonPayload = new com.google.gson.Gson().toJson(root);
+
+            thread(() -> {
+                try {
+                    java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder()
+                        .uri(java.net.URI.create(com.customblocks.CustomBlocksConfig.normalizedCloudShareUrl() + "/share"))
+                        .header("Content-Type", "application/json")
+                        .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonPayload))
+                        .build();
+                    java.net.http.HttpResponse<String> resp = java.net.http.HttpClient.newHttpClient().send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+                    
+                    if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
+                        com.google.gson.JsonObject res = com.google.gson.JsonParser.parseString(resp.body()).getAsJsonObject();
+                        String code = res.has("code") ? res.get("code").getAsString() : "BC#???";
+                        src.getServer().execute(() -> {
+                            src.sendMessage(Text.literal("§a[CustomBlocks] Successfully shared! Code: §f" + code).styled(s -> s.withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.COPY_TO_CLIPBOARD, code)).withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, Text.literal("Click to copy")))));
+                        });
+                    } else {
+                        src.getServer().execute(() -> {
+                            src.sendError(Text.literal("§c[CustomBlocks] Failed to upload. Server returned: " + resp.statusCode()));
+                        });
+                    }
+                } catch (Exception e) {
+                    src.getServer().execute(() -> {
+                        src.sendError(Text.literal("§c[CustomBlocks] Cloud error: " + e.getMessage()));
+                    });
+                }
+            });
+        } catch (Exception e) {
+            src.sendError(Text.literal("§c[CustomBlocks] Export failed: " + e.getMessage()));
+        }
+        return 1;
+    }
+
+    private static int cmdImportCategory(ServerCommandSource src, String code) {
+        if (!com.customblocks.CustomBlocksConfig.isCloudShareEnabled()) {
+            src.sendError(Text.literal("§c[CustomBlocks] Cloud sharing is disabled in config."));
+            return 0;
+        }
+        
+        src.sendMessage(Text.literal("§e[CustomBlocks] Downloading category data for code: " + code + "..."));
+        
+        thread(() -> {
+            try {
+                java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(com.customblocks.CustomBlocksConfig.normalizedCloudShareUrl() + "/import/" + code))
+                    .GET()
+                    .build();
+                java.net.http.HttpResponse<String> resp = java.net.http.HttpClient.newHttpClient().send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+                
+                if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
+                    com.google.gson.JsonObject root = com.google.gson.JsonParser.parseString(resp.body()).getAsJsonObject();
+                    src.getServer().execute(() -> {
+                        try {
+                            if (!root.has("category")) {
+                                src.sendError(Text.literal("§c[CustomBlocks] Invalid format received from cloud."));
+                                return;
+                            }
+                            com.google.gson.JsonObject catObj = root.getAsJsonObject("category");
+                            String catKey = catObj.get("key").getAsString();
+                            String displayName = catObj.has("displayName") ? catObj.get("displayName").getAsString() : catKey;
+                            
+                            // Check if category already exists
+                            com.customblocks.core.Category existingCat = com.customblocks.core.CategoryManager.getCategory(catKey);
+                            if (existingCat != null) {
+                                src.sendMessage(Text.literal("§e[CustomBlocks] Category '" + catKey + "' already exists. Resolving conflicts..."));
+                                ServerPlayerEntity player = src.getPlayer();
+                                if (player != null) {
+                                    com.customblocks.gui.GuiManager.PENDING_IMPORTS.put(player.getUuid(), root);
+                                    com.customblocks.gui.GuiManager.openImportConflictGui(player, 0);
+                                    return;
+                                }
+                            }
+                            
+                            com.customblocks.core.Category cat = com.customblocks.core.Category.create(displayName);
+                            if (catObj.has("iconItem")) cat = cat.withIconItem(catObj.get("iconItem").getAsString());
+                            if (catObj.has("color")) cat = cat.withColor(catObj.get("color").getAsString());
+                            if (catObj.has("badge")) cat = cat.withBadge(catObj.get("badge").getAsString());
+                            
+                            com.customblocks.core.CategoryManager.addCategory(cat);
+                            
+                            int imported = 0;
+                            if (root.has("blocks")) {
+                                com.google.gson.JsonArray blocksArr = root.getAsJsonArray("blocks");
+                                for (com.google.gson.JsonElement el : blocksArr) {
+                                    com.google.gson.JsonObject bObj = el.getAsJsonObject();
+                                    String bId = bObj.get("id").getAsString();
+                                    
+                                    if (!SlotManager.hasId(bId)) {
+                                        // We don't have textures via this simple cloud payload, but we assign ID
+                                        // A real import would download textures too.
+                                        src.sendMessage(Text.literal("§7Skipping block '" + bId + "' (textures missing in simplified cloud)"));
+                                    } else {
+                                        com.customblocks.core.CategoryManager.assignBlock(bId, cat.key());
+                                        imported++;
+                                    }
+                                }
+                            }
+                            src.sendMessage(Text.literal("§a[CustomBlocks] Successfully imported category '§f" + displayName + "§a' with §f" + imported + "§a block assignments."));
+                        } catch (Exception ex) {
+                            src.sendError(Text.literal("§c[CustomBlocks] Parse error: " + ex.getMessage()));
+                        }
+                    });
+                } else {
+                    src.getServer().execute(() -> {
+                        src.sendError(Text.literal("§c[CustomBlocks] Failed to download. Server returned: " + resp.statusCode()));
+                    });
+                }
+            } catch (Exception e) {
+                src.getServer().execute(() -> {
+                    src.sendError(Text.literal("§0§l[§b§lCB§0§l] §cCloud service unavailable. Try again later."));
+                    ServerPlayerEntity p = src.getPlayer();
+                    if (p != null) {
+                        p.playSound(net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), 1.0f, 1.0f);
+                        p.getServerWorld().spawnParticles(net.minecraft.particle.ParticleTypes.SMOKE, p.getX(), p.getY() + 1, p.getZ(), 10, 0.5, 0.5, 0.5, 0.05);
+                    }
+                });
+            }
+        });
         return 1;
     }
 

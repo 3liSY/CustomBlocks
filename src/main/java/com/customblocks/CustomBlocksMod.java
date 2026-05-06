@@ -543,7 +543,9 @@ public class CustomBlocksMod implements ModInitializer {
 
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
             SlotManager.flushSave();
-
+            com.customblocks.core.CategoryManager.saveAll();
+            com.customblocks.core.AutoCategorizeManager.saveAll();
+            com.customblocks.core.CategoryDisplayBlockManager.saveAll();
         });
 
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STARTED.register(server -> {
@@ -563,6 +565,62 @@ public class CustomBlocksMod implements ModInitializer {
         CustomBlockCommand.register();
 
         SlotManager.loadAll();
+        com.customblocks.core.CategoryManager.loadAll();
+        com.customblocks.core.AutoCategorizeManager.loadAll();
+        com.customblocks.core.CategoryDisplayBlockManager.loadAll();
+
+        // ── Display Block Hooks ──────────────────────────────────────────────
+        // Detect placement of a tagged display block, intercept right-clicks
+        // to open the category browser, and intercept sneak+right-click to
+        // pick the block back up.
+        UseBlockCallback.EVENT.register((player, world, hand, hit) -> {
+            if (world.isClient()) return net.minecraft.util.ActionResult.PASS;
+            if (!(player instanceof ServerPlayerEntity sp)) return net.minecraft.util.ActionResult.PASS;
+
+            net.minecraft.util.math.BlockPos hitPos = hit.getBlockPos();
+            String dimId = sp.getServerWorld().getRegistryKey().getValue().toString();
+
+            String existingCat = com.customblocks.core.CategoryDisplayBlockManager.getCategoryAt(dimId, hitPos);
+            if (existingCat != null) {
+                if (sp.isSneaking()) {
+                    com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(existingCat);
+                    if (cat != null) {
+                        ItemStack giveBack = com.customblocks.core.CategoryDisplayBlockManager.createDisplayBlockStack(cat);
+                        if (!sp.getInventory().insertStack(giveBack)) {
+                            sp.dropItem(giveBack, false);
+                        }
+                    }
+                    com.customblocks.core.CategoryDisplayBlockManager.unregister(dimId, hitPos);
+                    sp.getServerWorld().breakBlock(hitPos, false, sp);
+                    sp.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A77Picked up display block."), true);
+                    return net.minecraft.util.ActionResult.SUCCESS;
+                } else {
+                    com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(existingCat);
+                    if (cat != null) {
+                        GuiManager.openCategoryDetail(sp, existingCat, 0);
+                    } else {
+                        sp.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7cThis category no longer exists."), false);
+                    }
+                    return net.minecraft.util.ActionResult.SUCCESS;
+                }
+            }
+
+            ItemStack held = sp.getStackInHand(hand);
+            String catKey = com.customblocks.core.CategoryDisplayBlockManager.readCategoryFromStack(held);
+            if (catKey != null) {
+                net.minecraft.util.math.BlockPos placePos = hitPos.offset(hit.getSide());
+                if (sp.getServerWorld().getBlockState(placePos).isReplaceable()) {
+                    com.customblocks.core.CategoryDisplayBlockManager.register(dimId, placePos, catKey);
+                }
+            }
+            return net.minecraft.util.ActionResult.PASS;
+        });
+
+        PlayerBlockBreakEvents.AFTER.register((world, player, pos, state, be) -> {
+            if (world.isClient()) return;
+            String dimId = world.getRegistryKey().getValue().toString();
+            com.customblocks.core.CategoryDisplayBlockManager.unregister(dimId, pos);
+        });
 
 
 

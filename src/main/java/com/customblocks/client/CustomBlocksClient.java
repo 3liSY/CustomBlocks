@@ -42,6 +42,7 @@ import net.minecraft.client.MinecraftClient;
 
 import net.minecraft.client.gui.screen.ingame.CreativeInventoryScreen;
 
+import net.fabricmc.fabric.api.client.item.v1.ItemTooltipCallback;
 import net.minecraft.util.hit.BlockHitResult;
 
 import java.util.Map;
@@ -720,6 +721,107 @@ public class CustomBlocksClient implements ClientModInitializer {
                     }
                 }
             });
+        });
+
+        // ── Item Lore Badge Injection ──────────────────────────────────────────
+        ItemTooltipCallback.EVENT.register((stack, context, type, lines) -> {
+            if (stack.getItem() instanceof SlotBlock.SlotItem si) {
+                if (com.customblocks.CustomBlocksConfig.hideCustomBlockText) {
+                    lines.removeIf(text -> {
+                        String str = text.getString();
+                        return str.contains("Custom Blocks") && !str.equals(stack.getName().getString());
+                    });
+                }
+                
+                if (com.customblocks.CustomBlocksConfig.hideCategoryBadge) return;
+                
+                SlotData d = SlotManager.getBySlot(((SlotBlock) si.getBlock()).getSlotKey());
+                if (d != null && d.customId != null) {
+                    java.util.Set<String> catKeys = com.customblocks.core.CategoryManager.getCategoriesForBlock(d.customId);
+                    
+                    java.util.List<net.minecraft.text.Text> loreAbove = new java.util.ArrayList<>();
+                    java.util.List<net.minecraft.text.Text> loreBelow = new java.util.ArrayList<>();
+                    java.util.List<net.minecraft.text.MutableText> badges = new java.util.ArrayList<>();
+                    
+                    String globalOverflowMode = "cap_3_more";
+                    
+                    for (String key : catKeys) {
+                        com.customblocks.core.Category category = com.customblocks.core.CategoryManager.getCategory(key);
+                        if (category != null) {
+                            if (category.badgeOverflowMode() != null) globalOverflowMode = category.badgeOverflowMode();
+                            
+                            boolean replaceBadge = false;
+                            if (category.lorePrefix() != null && !category.lorePrefix().isEmpty()) {
+                                net.minecraft.text.Text prefixText = net.minecraft.text.Text.literal(category.lorePrefix());
+                                String pos = category.lorePrefixPosition() != null ? category.lorePrefixPosition() : "above_badge";
+                                if ("above_badge".equals(pos)) loreAbove.add(prefixText);
+                                else if ("below_badge".equals(pos)) loreBelow.add(prefixText);
+                                else if ("replace_badge".equals(pos)) replaceBadge = true;
+                            }
+                            
+                            if (!replaceBadge && category.badge() != null && !category.badge().isEmpty()) {
+                                String colorHex = category.badgeColor() != null ? category.badgeColor() : category.color();
+                                if (colorHex == null || !colorHex.startsWith("#")) colorHex = "#FFFFFF";
+                                int colorIntVal = 0xFFFFFF;
+                                try { colorIntVal = (int)(Long.parseLong(colorHex.replace("#", ""), 16) | 0xFF000000); } catch (Exception ignored) {}
+                                final int colorInt = colorIntVal;
+                                
+                                String ind = category.parentKey() != null && category.subcategoryIndicator() != null ? category.subcategoryIndicator() : "";
+                                
+                                net.minecraft.text.MutableText badgeText = net.minecraft.text.Text.literal("§8[§r" + ind)
+                                    .append(net.minecraft.text.Text.literal(category.badge()).styled(s -> s.withColor(colorInt)))
+                                    .append(net.minecraft.text.Text.literal("§8]"));
+                                badges.add(badgeText);
+                            }
+                        }
+                    }
+                    
+                    int insertIndex = 1;
+                    if (lines.size() <= 1) insertIndex = lines.size();
+                    
+                    for (net.minecraft.text.Text t : loreAbove) {
+                        lines.add(insertIndex++, t);
+                    }
+                    
+                    if (!badges.isEmpty()) {
+                        if ("one_line".equals(globalOverflowMode)) {
+                            net.minecraft.text.MutableText combined = net.minecraft.text.Text.literal("");
+                            for (int i = 0; i < badges.size(); i++) {
+                                combined.append(badges.get(i));
+                                if (i < badges.size() - 1) combined.append(net.minecraft.text.Text.literal(" "));
+                            }
+                            lines.add(insertIndex++, combined);
+                        } else if ("show_all".equals(globalOverflowMode)) {
+                            net.minecraft.text.MutableText currentLine = net.minecraft.text.Text.literal("");
+                            for (int i = 0; i < badges.size(); i++) {
+                                currentLine.append(badges.get(i)).append(net.minecraft.text.Text.literal(" "));
+                                if ((i + 1) % 3 == 0 || i == badges.size() - 1) {
+                                    lines.add(insertIndex++, currentLine);
+                                    currentLine = net.minecraft.text.Text.literal("");
+                                }
+                            }
+                        } else if ("cap_5".equals(globalOverflowMode)) {
+                            net.minecraft.text.MutableText currentLine = net.minecraft.text.Text.literal("");
+                            for (int i = 0; i < Math.min(5, badges.size()); i++) {
+                                currentLine.append(badges.get(i)).append(net.minecraft.text.Text.literal(" "));
+                            }
+                            if (badges.size() > 5) currentLine.append(net.minecraft.text.Text.literal("§8[+" + (badges.size() - 5) + "]"));
+                            lines.add(insertIndex++, currentLine);
+                        } else {
+                            net.minecraft.text.MutableText currentLine = net.minecraft.text.Text.literal("");
+                            for (int i = 0; i < Math.min(3, badges.size()); i++) {
+                                currentLine.append(badges.get(i)).append(net.minecraft.text.Text.literal(" "));
+                            }
+                            if (badges.size() > 3) currentLine.append(net.minecraft.text.Text.literal("§8[+" + (badges.size() - 3) + "]"));
+                            lines.add(insertIndex++, currentLine);
+                        }
+                    }
+                    
+                    for (net.minecraft.text.Text t : loreBelow) {
+                        lines.add(insertIndex++, t);
+                    }
+                }
+            }
         });
 
         // ── HUD overlay ───────────────────────────────────────────────────────
