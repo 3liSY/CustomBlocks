@@ -1231,9 +1231,11 @@ public class CustomBlocksClient implements ClientModInitializer {
             t.setDaemon(true);
 
             t.start();
-
+        } else {
+            // If already generating, a single-slot overwrite might be missed,
+            // so we flag a full reload to happen after the current cycle.
+            pendingFullReload.set(true);
         }
-
     }
 
 

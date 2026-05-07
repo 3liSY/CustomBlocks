@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CustomBlocks — trapped-hole fill (concept simulation)</title>
+  <style>
+    :root {
+      --bg: #1a1d23;
+      --panel: #252930;
+      --text: #e8eaef;
+      --muted: #9aa3b2;
+      --accent: #3fb982;
+      --warn: #e9b872;
+      --danger: #e07070;
+      --corner-fill: #2d8f46;
+      --hole-black: #0f0f0f;
+      --letter: #f5f5f5;
+      --checker-a: #bfc7d4;
+      --checker-b: #8f96a3;
+      font-family: "Segoe UI", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 1.5rem;
+      max-width: 960px;
+      margin-inline: auto;
+    }
+    h1 { font-size: 1.35rem; font-weight: 600; margin-top: 0; }
+    h2 { font-size: 1rem; margin: 2rem 0 0.75rem; color: var(--accent); }
+    p.note {
+      color: var(--muted);
+      font-size: 0.9rem;
+      border-left: 3px solid var(--accent);
+      padding-left: 1rem;
+      margin: 1rem 0;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.5rem;
+      align-items: flex-start;
+      margin: 1rem 0 2rem;
+    }
+    .stage {
+      background: var(--panel);
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      flex: 1;
+      min-width: 280px;
+    }
+    .stage h3 {
+      margin: 0 0 0.75rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+    .pixel-wrap {
+      display: inline-block;
+      padding: 12px;
+      background: #111;
+      border-radius: 8px;
+      box-shadow: inset 0 0 0 1px #333;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(var(--cols), var(--cell));
+      grid-template-rows: repeat(var(--rows), var(--cell));
+      gap: 1px;
+      background: #222;
+      --cell: 14px;
+      --cols: 18;
+      --rows: 22;
+    }
+    .cell {
+      width: var(--cell);
+      height: var(--cell);
+      border-radius: 1px;
+    }
+    /* semantic colours */
+    .c-bg { background: #dcdcdc; }
+    .c-fg { background: var(--letter); }
+    .c-hole { background: var(--hole-black); }
+    .c-filled { background: var(--corner-fill); }
+    .c-checker { background: var(--checker-a); }
+    .c-checker-alt { background: var(--checker-b); }
+    .c-warn { outline: 2px solid var(--warn); outline-offset: -1px; }
+    .c-skip { background: repeating-linear-gradient(
+      45deg,
+      var(--danger),
+      var(--danger) 3px,
+      #a84848 3px,
+      #a84848 6px
+    ); }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }
+    button {
+      background: #384050;
+      border: 1px solid #556;
+      color: var(--text);
+      padding: 0.45rem 0.85rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+    button:hover { background: #455068; }
+    button.primary { background: var(--accent); border-color: #2d9960; color: #042; font-weight: 600; }
+    button.primary:hover { filter: brightness(1.08); }
+    .steps {
+      margin-top: 0.75rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+      min-height: 3em;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 0.2rem 0.45rem;
+      border-radius: 4px;
+      background: #333;
+      color: var(--muted);
+      margin-bottom: 0.5rem;
+    }
+    footer {
+      margin-top: 2rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1.25rem;
+      font-size: 0.8rem;
+      margin: 1rem 0;
+      color: var(--muted);
+    }
+    .legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+    .lg { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+  </style>
+</head>
+<body>
+  <h1>Trapped-hole fill — HTML mockup</h1>
+  <p class="note">
+    This is a <strong>concept simulation</strong> (not Minecraft). It shows why we sometimes fill the middle of a “0”
+    and why we might skip a <strong>huge</strong> trapped dark region so we don’t wreck real artwork.
+  </p>
+
+  <div class="legend">
+    <span><i class="lg" style="background:#dcdcdc;"></i> Outer background (corner flood reaches here)</span>
+    <span><i class="lg" style="background:#f5f5f5;"></i> Your design (digit stroke)</span>
+    <span><i class="lg" style="background:#0f0f0f;"></i> Landlocked hole (black / checker)</span>
+    <span><i class="lg" style="background:#2d8f46;"></i> Colour-tool fill (green)</span>
+    <span><i class="lg" style="background:repeating-linear-gradient(45deg,#e07070,#e07070 3px,#a84848 3px,#a84848 6px);"></i> Skipped — region too large</span>
+  </div>
+
+  <!-- Scenario A: small hole -->
+  <h2>A — Small landlocked hole inside “0”</h2>
+  <div class="row">
+    <div class="stage">
+      <span class="badge">Scenario A</span>
+      <h3>Cross-section of one face (pixels)</h3>
+      <div class="pixel-wrap">
+        <div id="gridA" class="grid" style="--cols:18; --rows:22;"></div>
+      </div>
+      <div class="controls">
+        <button type="button" data-reset="A">1 · Original texture</button>
+        <button type="button" data-step="A" data-n="1">2 · After corner flood</button>
+        <button type="button" data-step="A" data-n="2">3 · Fill small trapped hole</button>
+        <button type="button" class="primary" data-play="A">Play all steps</button>
+      </div>
+      <div id="captionA" class="steps"></div>
+    </div>
+  </div>
+
+  <!-- Scenario B: huge blob -->
+  <h2>B — Huge trapped region (safety skip)</h2>
+  <div class="row">
+    <div class="stage">
+      <span class="badge">Scenario B</span>
+      <h3>Accidentally half the texture is “hole”</h3>
+      <div class="pixel-wrap">
+        <div id="gridB" class="grid" style="--cols:18; --rows:22;"></div>
+      </div>
+      <div class="controls">
+        <button type="button" data-reset="B">1 · Original</button>
+        <button type="button" data-step="B" data-n="1">2 · Corner flood</button>
+        <button type="button" data-step="B" data-n="2">3 · Try landlocked fill</button>
+        <button type="button" class="primary" data-play="B">Play all steps</button>
+      </div>
+      <div id="captionB" class="steps"></div>
+    </div>
+  </div>
+
+  <footer>
+    Open this file in any browser (double-click). No server needed.<br />
+    Path: <code>docs/trapped-hole-fill-mockup.html</code>
+  </footer>
+
+  <script>
+    const COLS = 18;
+    const ROWS = 22;
+
+    /* Tile keys:
+       '.' bg (corner reachable)
+       '#' letter (foreground — blocks flood)
+       'o' small hole (landlocked when surrounded)
+       '@' checker hole (alternate cells)
+       'O' huge hole mass (scenario B)
+    */
+    const RAW_A = [
+      "..................",
+      ".################.",
+      ".#..............#.",
+      ".#.@@@@@@@@@@@@.#.",
+      ".#.@@@@@@@@@@@@.#.",
+      ".#.@@@@@@@@@@@@.#.",
+      ".#.@@@@@@@@@@@@.#.",
+      ".#.@@@@@@@@@@@@.#.",
+      ".#.@@@@@@@@@@@@.#.",
+      ".#.@@@@@@@@@@@@.#.",
+      ".#.@@@@@@@@@@@@.#.",
+      ".#.@@@@@@@@@@@@.#.",
+      ".#.@@@@@@@@@@@@.#.",
+      ".#.@@@@@@@@@@@@.#.",
+      ".#.@@@@@@@@@@@@.#.",
+      ".#.@@@@@@@@@@@@.#.",
+      ".#.@@@@@@@@@@@@.#.",
+      ".#..............#.",
+      ".################.",
+      "..................",
+      "..................",
+      "..................",
+    ];
+
+    const RAW_B = [
+      "..................",
+      ".################.",
+      ".#..............#.",
+      ".#.OOOOOOOOOOOO.#.",
+      ".#.OOOOOOOOOOOO.#.",
+      ".#.OOOOOOOOOOOO.#.",
+      ".#.OOOOOOOOOOOO.#.",
+      ".#.OOOOOOOOOOOO.#.",
+      ".#.OOOOOOOOOOOO.#.",
+      ".#.OOOOOOOOOOOO.#.",
+      ".#.OOOOOOOOOOOO.#.",
+      ".#.OOOOOOOOOOOO.#.",
+      ".#.OOOOOOOOOOOO.#.",
+      ".#.OOOOOOOOOOOO.#.",
+      ".#.OOOOOOOOOOOO.#.",
+      ".#.OOOOOOOOOOOO.#.",
+      ".#.OOOOOOOOOOOO.#.",
+      ".#.OOOOOOOOOOOO.#.",
+      ".#..............#.",
+      ".################.",
+      "..................",
+      "..................",
+    ];
+
+    function parseRaw(raw) {
+      const cells = [];
+      for (let r = 0; r < ROWS; r++) {
+        const row = [];
+        for (let c = 0; c < COLS; c++) {
+          row.push(raw[r][c]);
+        }
+        cells.push(row);
+      }
+      return cells;
+    }
+
+    function renderGrid(el, state, opts = {}) {
+      el.innerHTML = "";
+      const skipMask = opts.skipMask || null;
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const div = document.createElement("div");
+          div.className = "cell";
+          const ch = state[r][c];
+          const key = ch.t;
+
+          if (ch.filled) div.classList.add("c-filled");
+          else if (skipMask && skipMask[r][c]) div.classList.add("c-skip");
+          else if (key === "#") div.classList.add("c-fg");
+          else if (key === "." || key === " ") div.classList.add("c-bg");
+          else if (key === "o") div.classList.add("c-hole");
+          else if (key === "@") div.classList.add((r + c) % 2 ? "c-checker-alt" : "c-checker");
+          else if (key === "O") div.classList.add("c-hole");
+
+          el.appendChild(div);
+        }
+      }
+    }
+
+    function cloneState(src) {
+      return src.map(row => row.map(cell => ({ ...cell })));
+    }
+
+    function buildInitial(raw) {
+      const g = parseRaw(raw);
+      const state = [];
+      for (let r = 0; r < ROWS; r++) {
+        const row = [];
+        for (let c = 0; c < COLS; c++) {
+          row.push({ t: g[r][c], filled: false });
+        }
+        state.push(row);
+      }
+      return state;
+    }
+
+    /** Flood from corners through '.' '@' 'o' 'O' — '#' blocks */
+    function floodCorners(state) {
+      const h = ROWS, w = COLS;
+      const pass = (ch) => ch === "." || ch === "@" || ch === "o" || ch === "O";
+      const vis = Array.from({ length: h }, () => Array(w).fill(false));
+      const q = [];
+      const seeds = [[0, 0], [w - 1, 0], [0, h - 1], [w - 1, h - 1]];
+      for (const [cx, cy] of seeds) {
+        if (pass(state[cy][cx].t)) {
+          vis[cy][cx] = true;
+          q.push([cx, cy]);
+        }
+      }
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      while (q.length) {
+        const [x, y] = q.shift();
+        state[y][x].filled = true;
+        for (const [dx, dy] of dirs) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+          if (vis[ny][nx]) continue;
+          if (!pass(state[ny][nx].t)) continue;
+          vis[ny][nx] = true;
+          q.push([nx, ny]);
+        }
+      }
+    }
+
+    /** Find connected components of cells that are NOT filled and NOT foreground wall */
+    function landlockedComponents(state) {
+      const h = ROWS, w = COLS;
+      const wall = (ch) => ch === "#";
+      const visited = Array.from({ length: h }, () => Array(w).fill(false));
+      const comps = [];
+
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          if (visited[y][x]) continue;
+          if (wall(state[y][x].t)) continue;
+          if (state[y][x].filled) continue;
+
+          const stack = [[x, y]];
+          const cells = [];
+          visited[y][x] = true;
+          while (stack.length) {
+            const [cx, cy] = stack.pop();
+            cells.push([cx, cy]);
+            for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+              const nx = cx + dx, ny = cy + dy;
+              if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+              if (visited[ny][nx]) continue;
+              if (wall(state[ny][nx].t)) continue;
+              if (state[ny][nx].filled) continue;
+              visited[ny][nx] = true;
+              stack.push([nx, ny]);
+            }
+          }
+          comps.push(cells);
+        }
+      }
+      return comps;
+    }
+
+    function fillSmallLandlocked(state, maxFrac) {
+      const total = ROWS * COLS;
+      const comps = landlockedComponents(state);
+      const skipMask = Array.from({ length: ROWS }, () => Array(COLS).fill(false));
+
+      for (const cells of comps) {
+        const frac = cells.length / total;
+        const holeLike = cells.every(([x, y]) => {
+          const t = state[y][x].t;
+          return t === "o" || t === "@" || t === "O";
+        });
+        if (!holeLike) continue;
+
+        if (frac > maxFrac) {
+          /* mark skipped — too big */
+          for (const [x, y] of cells) skipMask[y][x] = true;
+          continue;
+        }
+        for (const [x, y] of cells) state[y][x].filled = true;
+      }
+      return skipMask;
+    }
+
+    const captions = {
+      A: {
+        0: "<strong>Step 1.</strong> Grey = outer background. White ring = your “0”. Black/checker = trapped hole.",
+        1: "<strong>Step 2.</strong> Green = corner flood (same idea as today’s triangle/square — only reaches open background).",
+        2: "<strong>Step 3.</strong> The trapped hole is <em>small</em>, so we also paint it green → looks like your right cube.",
+      },
+      B: {
+        0: "<strong>Step 1.</strong> Same frame, but the inner dark area is <em>huge</em> (bad export or mistake).",
+        1: "<strong>Step 2.</strong> Corner flood still only paints the outer rim.",
+        2: "<strong>Step 3.</strong> Landlocked fill sees this blob is larger than the safety limit → <strong>striped = skipped</strong> so we don’t erase half your texture.",
+      },
+    };
+
+    function setCaption(id, step) {
+      document.getElementById("caption" + id).innerHTML = captions[id][step];
+    }
+
+    function setupScenario(id, raw, maxFrac) {
+      const gridEl = document.getElementById("grid" + id);
+      let base = buildInitial(raw);
+
+      document.querySelectorAll("[data-reset=\"" + id + "\"]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          base = buildInitial(raw);
+          renderGrid(gridEl, base);
+          setCaption(id, 0);
+        });
+      });
+
+      document.querySelectorAll("[data-step=\"" + id + "\"]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const n = +btn.dataset.n;
+          const st = cloneState(buildInitial(raw));
+          if (n >= 1) floodCorners(st);
+          let skip = null;
+          if (n >= 2) skip = fillSmallLandlocked(st, maxFrac);
+          renderGrid(gridEl, st, { skipMask: skip });
+          setCaption(id, n);
+        });
+      });
+
+      document.querySelectorAll("[data-play=\"" + id + "\"]").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const st0 = cloneState(buildInitial(raw));
+          renderGrid(gridEl, st0);
+          setCaption(id, 0);
+          await sleep(650);
+          const st1 = cloneState(buildInitial(raw));
+          floodCorners(st1);
+          renderGrid(gridEl, st1);
+          setCaption(id, 1);
+          await sleep(850);
+          const st2 = cloneState(buildInitial(raw));
+          floodCorners(st2);
+          const skip = fillSmallLandlocked(st2, maxFrac);
+          renderGrid(gridEl, st2, { skipMask: skip });
+          setCaption(id, 2);
+        });
+      });
+
+      renderGrid(gridEl, cloneState(base));
+      setCaption(id, 0);
+    }
+
+    function sleep(ms) {
+      return new Promise(r => setTimeout(r, ms));
+    }
+
+    setupScenario("A", RAW_A, 0.28);
+    setupScenario("B", RAW_B, 0.28);
+  </script>
+</body>
+</html>

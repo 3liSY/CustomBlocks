@@ -107,11 +107,18 @@ public class ColorSquareItem extends Item {
         if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
 
         if (player != null && !player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
-            player.sendMessage(Text.literal("§c[CustomBlocks] You need OP to use colour squares."), true);
+            player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §cYou need OP to use colour squares."), true);
             if (world instanceof ServerWorld sw) {
                 sw.playSound(null, player.getBlockPos(),
                     net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),
                     net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
+            }
+            return ActionResult.FAIL;
+        }
+        if (!CustomBlocksConfig.isColorToolModeConfigured()) {
+            if (player != null) {
+                player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §eColor tools are not configured yet."), true);
+                player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §7Open §f/cb config §7and choose: §fDefault: Fill corner only §7or §fExtra: Fill corners + more§7."), true);
             }
             return ActionResult.FAIL;
         }
@@ -124,7 +131,7 @@ public class ColorSquareItem extends Item {
 
         if (targetId.equals(current.customId)) {
             if (player != null) {
-                player.sendMessage(Text.literal("§7[CustomBlocks] Already §f" + color.label() + "§7."), true);
+                player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §7Already §f" + color.label() + "§7."), true);
                 if (world instanceof ServerWorld sw) {
                     sw.playSound(null, player.getBlockPos(),
                         net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_CHIME.value(),
@@ -138,7 +145,7 @@ public class ColorSquareItem extends Item {
         if (target == null) {
             if (player != null) {
                 player.sendMessage(Text.literal(
-                    "§c[CustomBlocks] §f" + targetId + "§c doesn't exist yet. Create it first with a matching triangle."), true);
+                    "§0§l[§b§lCB§0§l]§r §c§f" + targetId + "§c doesn't exist yet. Create it first with a matching triangle."), true);
             }
             return ActionResult.FAIL;
         }
@@ -148,7 +155,7 @@ public class ColorSquareItem extends Item {
             Block.NOTIFY_LISTENERS | Block.REDRAW_ON_MAIN_THREAD | Block.FORCE_STATE);
 
         if (player != null) {
-            player.sendMessage(Text.literal("§a[CustomBlocks] Swapped to §f" + target.displayName + "§a!"), true);
+            player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §aSwapped to §f" + target.displayName + "§a!"), true);
             if (world instanceof ServerWorld sw) {
                 sw.spawnParticles(net.minecraft.particle.ParticleTypes.END_ROD,
                     pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,

@@ -171,6 +171,87 @@ public class CustomBlockCommand {
                             .executes(ctx -> cmdBlockAdd(ctx.getSource(),
                                 StringArgumentType.getString(ctx, "id"),
                                 StringArgumentType.getString(ctx, "cat"))))))
+                .then(CommandManager.literal("bulkblockadd")
+                    .requires(src -> PermissionHelper.canCategoryAssign(src))
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p == null) {
+                            ChatHelper.error(ctx.getSource(), "This picker can only be opened by a player.");
+                            return 0;
+                        }
+                        GuiManager.openBulkAssignPicker(p, 0);
+                        return 1;
+                    })
+                    .then(CommandManager.argument("cat", StringArgumentType.word())
+                        .suggests(CATEGORY_SUGGESTIONS)
+                        .then(CommandManager.argument("ids", StringArgumentType.greedyString())
+                            .suggests(MULTI_BLOCK_SUGGESTIONS)
+                            .executes(ctx -> cmdBulkBlockAdd(
+                                ctx.getSource(),
+                                StringArgumentType.getString(ctx, "cat"),
+                                StringArgumentType.getString(ctx, "ids"))))))
+                .then(CommandManager.literal("bulkrecolor")
+                    .requires(src -> PermissionHelper.canCategoryAssign(src))
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p == null) {
+                            ChatHelper.error(ctx.getSource(), "This wizard can only be opened by a player.");
+                            return 0;
+                        }
+                        GuiManager.openBulkRecolorWizard(p, 0);
+                        return 1;
+                    })
+                    .then(CommandManager.argument("color", StringArgumentType.word())
+                        .suggests((ctx, b) -> { b.suggest("green"); b.suggest("yellow"); b.suggest("black"); return b.buildFuture(); })
+                        .executes(ctx -> cmdBulkRecolor(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "color"),
+                            "all",
+                            false))
+                        .then(CommandManager.argument("scope", StringArgumentType.greedyString())
+                            .executes(ctx -> {
+                                String scope = StringArgumentType.getString(ctx, "scope");
+                                boolean apply = scope.contains("--apply");
+                                String exclude = "";
+                                java.util.regex.Matcher m = java.util.regex.Pattern.compile("--exclude=([^\\s]+)").matcher(scope);
+                                if (m.find()) exclude = m.group(1);
+                                String clean = scope.replace("--apply", "").replaceAll("--exclude=[^\\s]+", "").trim();
+                                return cmdBulkRecolor(ctx.getSource(),
+                                    StringArgumentType.getString(ctx, "color"),
+                                    clean,
+                                    exclude,
+                                    apply);
+                            }))))
+                .then(CommandManager.literal("bulkcolor")
+                    .requires(src -> PermissionHelper.canCategoryAssign(src))
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p == null) {
+                            ChatHelper.error(ctx.getSource(), "This wizard can only be opened by a player.");
+                            return 0;
+                        }
+                        GuiManager.openBulkRecolorWizard(p, 0);
+                        return 1;
+                    })
+                    .then(CommandManager.argument("color", StringArgumentType.word())
+                        .suggests((ctx, b) -> { b.suggest("green"); b.suggest("yellow"); b.suggest("black"); return b.buildFuture(); })
+                        .executes(ctx -> cmdBulkRecolor(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "color"),
+                            "all",
+                            false))
+                        .then(CommandManager.argument("scope", StringArgumentType.greedyString())
+                            .executes(ctx -> {
+                                String scope = StringArgumentType.getString(ctx, "scope");
+                                boolean apply = scope.contains("--apply");
+                                String exclude = "";
+                                java.util.regex.Matcher m = java.util.regex.Pattern.compile("--exclude=([^\\s]+)").matcher(scope);
+                                if (m.find()) exclude = m.group(1);
+                                String clean = scope.replace("--apply", "").replaceAll("--exclude=[^\\s]+", "").trim();
+                                return cmdBulkRecolor(ctx.getSource(),
+                                    StringArgumentType.getString(ctx, "color"),
+                                    clean,
+                                    exclude,
+                                    apply);
+                            }))))
 
                 // ── givecategory ────────────────────────────────────────────
                 .then(CommandManager.literal("givecategory")
@@ -304,22 +385,32 @@ public class CustomBlockCommand {
                                 EntityArgumentType.getPlayers(ctx, "player"))))))
 
                 // ── setglow ─────────────────────────────────────────────────
+                // Use unbounded integer + greedy fallback so out-of-range values produce
+                // branded `[CB]` errors instead of vanilla red brigadier rejection.
                 .then(CommandManager.literal("setglow")
                     .executes(ctx -> usage(ctx.getSource(), "setglow"))
                     .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
-                        .then(CommandManager.argument("level", IntegerArgumentType.integer(0, 15))
-                            .executes(ctx -> cmdSetGlow(ctx.getSource(),
+                        .then(CommandManager.argument("level", IntegerArgumentType.integer())
+                            .executes(ctx -> cmdSetGlowSafe(ctx.getSource(),
                                 StringArgumentType.getString(ctx, "id"),
-                                IntegerArgumentType.getInteger(ctx, "level"))))))
+                                IntegerArgumentType.getInteger(ctx, "level"))))
+                        .then(CommandManager.argument("level_text", StringArgumentType.greedyString())
+                            .executes(ctx -> cmdSetGlowText(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "id"),
+                                StringArgumentType.getString(ctx, "level_text"))))))
 
                 // ── sethardness ─────────────────────────────────────────────
                 .then(CommandManager.literal("sethardness")
                     .executes(ctx -> usage(ctx.getSource(), "sethardness"))
                     .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
-                        .then(CommandManager.argument("hardness", FloatArgumentType.floatArg(-1f, 50f))
-                            .executes(ctx -> cmdSetHardness(ctx.getSource(),
+                        .then(CommandManager.argument("hardness", FloatArgumentType.floatArg())
+                            .executes(ctx -> cmdSetHardnessSafe(ctx.getSource(),
                                 StringArgumentType.getString(ctx, "id"),
-                                FloatArgumentType.getFloat(ctx, "hardness"))))))
+                                FloatArgumentType.getFloat(ctx, "hardness"))))
+                        .then(CommandManager.argument("hardness_text", StringArgumentType.greedyString())
+                            .executes(ctx -> cmdSetHardnessText(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "id"),
+                                StringArgumentType.getString(ctx, "hardness_text"))))))
 
                 // ── setsound ────────────────────────────────────────────────
                 .then(CommandManager.literal("setsound")
@@ -353,10 +444,14 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("resize")
                     .executes(ctx -> usage(ctx.getSource(), "resize"))
                     .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
-                        .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
-                            .executes(ctx -> cmdResize(ctx.getSource(),
+                        .then(CommandManager.argument("size", IntegerArgumentType.integer())
+                            .executes(ctx -> cmdResizeSafe(ctx.getSource(),
                                 StringArgumentType.getString(ctx, "id"),
-                                IntegerArgumentType.getInteger(ctx, "size"))))))
+                                IntegerArgumentType.getInteger(ctx, "size"))))
+                        .then(CommandManager.argument("size_text", StringArgumentType.greedyString())
+                            .executes(ctx -> cmdResizeText(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "id"),
+                                StringArgumentType.getString(ctx, "size_text"))))))
 
                 // ── undo ────────────────────────────────────────────────────
                 .then(CommandManager.literal("undo")
@@ -645,7 +740,7 @@ public class CustomBlockCommand {
                     
                     if (result.isAnimated()) {
                         SlotManager.setAnimMeta(id, result.mcmeta());
-                        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Animation metadata generated! §7(Syncing...)"));
+                        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Animation metadata generated! §7(Syncing...)"));
                     }
 
                     UndoManager.pushUndoCreate(id, getPlayerUuid(src));
@@ -715,7 +810,7 @@ public class CustomBlockCommand {
         NetworkManager.broadcastUpdate(src.getServer(),
             new SlotUpdatePayload("add", d.index, newId, finalName, texCopy,
                     d.lightLevel, d.hardness, d.soundType, null, null, d.animMeta));
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Duplicated '§f" + sourceId + "§a' → '§f" + newId + "§a' §7(slot " + d.index + ")"));
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Duplicated '§f" + sourceId + "§a' → '§f" + newId + "§a' §7(slot " + d.index + ")"));
         return 1;
     }
 
@@ -748,10 +843,10 @@ public class CustomBlockCommand {
         }
         if (!deleted.isEmpty()) {
             SlotManager.saveAll();
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Deleted: " + String.join(", ", deleted)));
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Deleted: " + String.join(", ", deleted)));
         }
         if (!notFound.isEmpty()) {
-            src.sendError(Text.literal("§0§l[§b§lCB§0§l] Not found: " + String.join(", ", notFound)));
+            src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Not found: " + String.join(", ", notFound)));
         }
         return deleted.isEmpty() ? 0 : 1;
     }
@@ -799,7 +894,7 @@ public class CustomBlockCommand {
                 .styled(s -> s
                     .withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.COPY_TO_CLIPBOARD, code))
                     .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, Text.literal("§eClick to copy"))));
-            net.minecraft.text.MutableText line = Text.literal("§0§l[§b§lCB§0§l] §a[Share] §f'§b" + d.customId + "§f' ready! ")
+            net.minecraft.text.MutableText line = Text.literal("§0§l[§b§lCB§0§l]§r §a[Share] §f'§b" + d.customId + "§f' ready! ")
                 .append(clickable);
             src.sendMessage(line);
             return 1;
@@ -828,7 +923,7 @@ public class CustomBlockCommand {
                     MinecraftServer server = src.getServer();
                     ServerPlayerEntity player = src.getPlayer();
                     if (player != null) {
-                        player.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A77Checking the \u00A7bCloud Vault\u00A77..."), false);
+                        player.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l]\u00A7r \u00A77Checking the \u00A7bCloud Vault\u00A77..."), false);
                     }
                     EXECUTOR.submit(() -> {
                         try {
@@ -836,7 +931,7 @@ public class CustomBlockCommand {
                             if (json == null || json.isBlank()) {
                                 server.execute(() -> {
                                     if (player != null) playCloudImportFailure(player);
-                                    src.sendError(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7cBlock not found locally or in the Cloud Vault \u00A77\u2718"));
+                                    src.sendError(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l]\u00A7r \u00A7cBlock not found locally or in the Cloud Vault \u00A77\u2718"));
                                 });
                                 return;
                             }
@@ -845,7 +940,7 @@ public class CustomBlockCommand {
                         } catch (Exception e) {
                             server.execute(() -> {
                                 if (player != null) playCloudImportFailure(player);
-                                src.sendError(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7cCloud import failed. \u00A77" + e.getMessage()));
+                                src.sendError(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l]\u00A7r \u00A7cCloud import failed. \u00A77" + e.getMessage()));
                             });
                         }
                     });
@@ -937,7 +1032,7 @@ public class CustomBlockCommand {
             ServerPlayerEntity player = src.getPlayer();
             if (fromCloud && player != null) {
                 playCloudImportSuccess(player);
-                player.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7fImported from \u00A7bCloud Vault\u00A7f! \u00A7a\u2714"), false);
+                player.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l]\u00A7r \u00A7fImported from \u00A7bCloud Vault\u00A7f! \u00A7a\u2714"), false);
             }
 
             if (texture != null) ChatHelper.success(src, "Imported '" + id + "' with texture!");
@@ -1080,7 +1175,7 @@ public class CustomBlockCommand {
         SlotManager.saveAll();
         SlotData d = SlotManager.getById(id);
         broadcastShape(src.getServer(), d);
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Shape set to '§f" + shapeArgTrimmed + "§a' on '§f" + id + "§a'."));
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Shape set to '§f" + shapeArgTrimmed + "§a' on '§f" + id + "§a'."));
         return 1;
     }
 
@@ -1101,7 +1196,7 @@ public class CustomBlockCommand {
         SlotManager.saveAll();
         d = SlotManager.getById(id);
         broadcastShape(src.getServer(), d);
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Added box #§f" + (current + 1) + "§a to '§f" + id + "§a'. Total: §f" + d.shapeBoxes.size()));
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Added box #§f" + (current + 1) + "§a to '§f" + id + "§a'. Total: §f" + d.shapeBoxes.size()));
         return 1;
     }
 
@@ -1112,7 +1207,7 @@ public class CustomBlockCommand {
         SlotManager.saveAll();
         SlotData d = SlotManager.getById(id);
         broadcastShape(src.getServer(), d);
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Removed box #§f" + index + "§a from '§f" + id + "§a'."));
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Removed box #§f" + index + "§a from '§f" + id + "§a'."));
         return 1;
     }
 
@@ -1123,7 +1218,7 @@ public class CustomBlockCommand {
         SlotManager.saveAll();
         SlotData d = SlotManager.getById(id);
         broadcastShape(src.getServer(), d);
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Shape reset to full cube on '§f" + id + "§a'."));
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Shape reset to full cube on '§f" + id + "§a'."));
         return 1;
     }
 
@@ -1135,7 +1230,7 @@ public class CustomBlockCommand {
         SlotData d = SlotManager.getById(id);
         NetworkManager.broadcastUpdate(src.getServer(), new SlotUpdatePayload(
                 "setcollision", d.index, id, null, null, 0, 0, "stone", null, on ? "true" : "false"));
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Collision §f" + (on ? "ON" : "OFF") + "§a for '§f" + id + "§a'."));
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Collision §f" + (on ? "ON" : "OFF") + "§a for '§f" + id + "§a'."));
         return 1;
     }
 
@@ -1248,8 +1343,28 @@ public class CustomBlockCommand {
         NetworkManager.broadcastUpdate(src.getServer(),
             new SlotUpdatePayload("setprop", d.index, id, null, null, level, d.hardness, d.soundType));
         triggerGlowUpdate(src.getServer(), d.index);
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] '" + id + "' light level set to " + level + ". §7(0=off, 7=torch, 14=sea lantern, 15=glowstone)"));
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r '" + id + "' light level set to " + level + ". §7(0=off, 7=torch, 14=sea lantern, 15=glowstone)"));
         return 1;
+    }
+
+    /** Wrapper that validates the level range and gives a friendly message. */
+    private static int cmdSetGlowSafe(ServerCommandSource src, String id, int level) {
+        if (level < 0 || level > 15) {
+            ChatHelper.error(src, "Light level must be between 0 and 15. You typed: " + level);
+            return 0;
+        }
+        return cmdSetGlow(src, id, level);
+    }
+
+    /** Fallback when the user types a non-integer like 'bright'. */
+    private static int cmdSetGlowText(ServerCommandSource src, String id, String text) {
+        try {
+            int level = Integer.parseInt(text.trim());
+            return cmdSetGlowSafe(src, id, level);
+        } catch (NumberFormatException ex) {
+            ChatHelper.error(src, "Light level needs a whole number from 0 to 15. You typed: '" + text + "'.");
+            return 0;
+        }
     }
 
     private static int cmdSetHardness(ServerCommandSource src, String id, float val) {
@@ -1261,8 +1376,27 @@ public class CustomBlockCommand {
         String label = val < 0 ? "Unbreakable" : val == 0 ? "Instant break" : String.valueOf(val);
         NetworkManager.broadcastUpdate(src.getServer(),
             new SlotUpdatePayload("setprop", d.index, id, null, null, d.lightLevel, val, d.soundType));
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] '" + id + "' hardness: " + label + "."));
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r '" + id + "' hardness: " + label + "."));
         return 1;
+    }
+
+    /** Wrapper validating hardness range with branded message. */
+    private static int cmdSetHardnessSafe(ServerCommandSource src, String id, float val) {
+        if (val < -1f || val > 50f) {
+            ChatHelper.error(src, "Hardness must be between -1 (unbreakable) and 50. You typed: " + val);
+            return 0;
+        }
+        return cmdSetHardness(src, id, val);
+    }
+
+    private static int cmdSetHardnessText(ServerCommandSource src, String id, String text) {
+        try {
+            float val = Float.parseFloat(text.trim());
+            return cmdSetHardnessSafe(src, id, val);
+        } catch (NumberFormatException ex) {
+            ChatHelper.error(src, "Hardness needs a number from -1 to 50 (use -1 for unbreakable). You typed: '" + text + "'.");
+            return 0;
+        }
     }
 
     private static int cmdSetSound(ServerCommandSource src, String id, String type) {
@@ -1276,12 +1410,12 @@ public class CustomBlockCommand {
         SlotManager.saveAll();
         NetworkManager.broadcastUpdate(src.getServer(),
             new SlotUpdatePayload("setprop", d.index, id, null, null, d.lightLevel, d.hardness, type));
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] '" + id + "' sound: " + type + "."));
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r '" + id + "' sound: " + type + "."));
         return 1;
     }
 
     private static int cmdSetTabIcon(ServerCommandSource src, String url) {
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Downloading tab icon..."));
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Downloading tab icon..."));
         MinecraftServer server = src.getServer();
         thread(() -> {
             try {
@@ -1298,10 +1432,10 @@ public class CustomBlockCommand {
                     // Send tabicon payload — clients receive texture and schedule reload
                     NetworkManager.broadcastUpdate(server,
                         new SlotUpdatePayload("tabicon", -1, null, null, bytes, 0, 0, "stone"));
-                    src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Tab icon updated! §7(Takes a few seconds to appear — resource pack is reloading)"));
+                    src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Tab icon updated! §7(Takes a few seconds to appear — resource pack is reloading)"));
                 });
             } catch (Exception e) {
-                server.execute(() -> src.sendError(Text.literal("§0§l[§b§lCB§0§l] Failed: " + e.getMessage())));
+                server.execute(() -> src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Failed: " + e.getMessage())));
             }
         });
         return 1;
@@ -1313,7 +1447,7 @@ public class CustomBlockCommand {
      */
     private static int cmdSetFace(ServerCommandSource src, String id, String face, String url, int size) {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Downloading " + face + " face... §7(" + size + "px)"));
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Downloading " + face + " face... §7(" + size + "px)"));
         MinecraftServer server = src.getServer();
         thread(() -> {
             try {
@@ -1322,12 +1456,12 @@ public class CustomBlockCommand {
                 // when setting a GIF as a face texture.
                 final ImageProcessor.ProcessResult result = ImageProcessor.downloadAndProcess(url, size);
                 if (result == null || result.bytes() == null || result.bytes().length == 0) {
-                    server.execute(() -> src.sendError(Text.literal("§0§l[§b§lCB§0§l] Downloaded image was empty.")));
+                    server.execute(() -> src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Downloaded image was empty.")));
                     return;
                 }
                 server.execute(() -> {
                     SlotData d = SlotManager.getById(id);
-                    if (d == null) { src.sendError(Text.literal("§0§l[§b§lCB§0§l] '" + id + "' was deleted.")); return; }
+                    if (d == null) { src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r '" + id + "' was deleted.")); return; }
                     UndoManager.pushUndoMutation(id, d, "setface " + face, getPlayerUuid(src));
                     SlotManager.setFaceTexture(id, face, result.bytes());
                     // Propagate animation metadata if the face is an animated image.
@@ -1342,10 +1476,10 @@ public class CustomBlockCommand {
                                 d.lightLevel, d.hardness, d.soundType, face,
                                 null, result.isAnimated() ? result.mcmeta() : null));
                     String suffix = result.isAnimated() ? " §8(animated, " + result.frameCount() + " frames)" : "";
-                    src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] " + face.toUpperCase() + " face set on '" + id + "'." + suffix));
+                    src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r " + face.toUpperCase() + " face set on '" + id + "'." + suffix));
                 });
             } catch (Exception e) {
-                server.execute(() -> src.sendError(Text.literal("§0§l[§b§lCB§0§l] Failed: " + e.getMessage())));
+                server.execute(() -> src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Failed: " + e.getMessage())));
             }
         });
         return 1;
@@ -1363,7 +1497,7 @@ public class CustomBlockCommand {
         NetworkManager.broadcastUpdate(src.getServer(),
             new SlotUpdatePayload("clearface", d.index, id, null, null,
                     d.lightLevel, d.hardness, d.soundType, face));
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] " + face + " face cleared on '" + id + "'."));
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r " + face + " face cleared on '" + id + "'."));
         return 1;
     }
 
@@ -1377,18 +1511,18 @@ public class CustomBlockCommand {
         NetworkManager.broadcastUpdate(src.getServer(),
             new SlotUpdatePayload("clearfaces", d.index, id, null, null,
                     d.lightLevel, d.hardness, d.soundType));
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] All face overrides cleared on '" + id + "'."));
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r All face overrides cleared on '" + id + "'."));
         return 1;
     }
 
     /** Undo the last block modification (retexture, setface, setglow, delete, create, …). */
     private static int cmdUndo(ServerCommandSource src) {
         if (UndoManager.undoSize(getPlayerUuid(src)) == 0) {
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Nothing to undo."));
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Nothing to undo."));
             return 1;
         }
         UndoManager.UndoEntry entry = UndoManager.popUndo(getPlayerUuid(src));
-        if (entry == null) { src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Nothing to undo.")); return 1; }
+        if (entry == null) { src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Nothing to undo.")); return 1; }
 
         MinecraftServer server = src.getServer();
 
@@ -1396,7 +1530,7 @@ public class CustomBlockCommand {
         if (entry.previousState() == null) {
             SlotData d = SlotManager.getById(entry.customId());
             if (d == null) {
-                src.sendError(Text.literal("§0§l[§b§lCB§0§l] Cannot undo create — '" + entry.customId() + "' already gone."));
+                src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Cannot undo create — '" + entry.customId() + "' already gone."));
                 return 0;
             }
             int idx = d.index;
@@ -1407,7 +1541,7 @@ public class CustomBlockCommand {
             SlotManager.saveAll();
             NetworkManager.broadcastUpdate(server,
                 new SlotUpdatePayload("remove", idx, entry.customId(), null, null, 0, 0, "stone"));
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Undid create of §f" + entry.customId()
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Undid create of §f" + entry.customId()
                 + "§a. §7(" + UndoManager.undoSize(getPlayerUuid(src)) + " undo left)"));
             if (UndoManager.undoSize(getPlayerUuid(src)) > 0)
                 src.sendMessage(Text.literal("§8  → Next undo: §7\"" + UndoManager.peekUndoDescription(getPlayerUuid(src)) + "\""));
@@ -1424,7 +1558,7 @@ public class CustomBlockCommand {
         }
         boolean restored = SlotManager.restoreSnapshot(prev, entry.wasDeleted());
         if (!restored) {
-            src.sendError(Text.literal("§0§l[§b§lCB§0§l] Cannot undo — slot for '" + entry.customId() + "' is now occupied by another block."));
+            src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Cannot undo — slot for '" + entry.customId() + "' is now occupied by another block."));
             return 0;
         }
         SlotManager.saveAll();
@@ -1458,7 +1592,7 @@ public class CustomBlockCommand {
                     new SlotUpdatePayload("rename", d.index, d.customId, d.displayName, null, 0, 0, "stone"));
             }
         }
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Undid \"" + entry.description() + "\" on §f"
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Undid \"" + entry.description() + "\" on §f"
             + entry.customId() + "§a. §7(" + UndoManager.undoSize(getPlayerUuid(src)) + " undo left, " + UndoManager.redoSize(getPlayerUuid(src)) + " redo)"));
         if (UndoManager.undoSize(getPlayerUuid(src)) > 0)
             src.sendMessage(Text.literal("§8  → Next undo: §7\"" + UndoManager.peekUndoDescription(getPlayerUuid(src)) + "\""));
@@ -1468,11 +1602,11 @@ public class CustomBlockCommand {
     /** Redo the last undone action. */
     private static int cmdRedo(ServerCommandSource src) {
         if (UndoManager.redoSize(getPlayerUuid(src)) == 0) {
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Nothing to redo."));
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Nothing to redo."));
             return 1;
         }
         UndoManager.UndoEntry entry = UndoManager.popRedo(getPlayerUuid(src));
-        if (entry == null) { src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Nothing to redo.")); return 1; }
+        if (entry == null) { src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Nothing to redo.")); return 1; }
 
         MinecraftServer server = src.getServer();
 
@@ -1487,7 +1621,7 @@ public class CustomBlockCommand {
                 NetworkManager.broadcastUpdate(server,
                     new SlotUpdatePayload("remove", d.index, entry.customId(), null, null, 0, 0, "stone"));
             }
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Redid delete of §f" + entry.customId()
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Redid delete of §f" + entry.customId()
                 + "§a. §7(" + UndoManager.redoSize(getPlayerUuid(src)) + " redo left)"));
             if (UndoManager.redoSize(getPlayerUuid(src)) > 0)
                 src.sendMessage(Text.literal("§8  → Next redo: §7\"" + UndoManager.peekRedoDescription(getPlayerUuid(src)) + "\""));
@@ -1503,7 +1637,7 @@ public class CustomBlockCommand {
 
         boolean restored = SlotManager.restoreSnapshot(prev, entry.wasDeleted());
         if (!restored) {
-            src.sendError(Text.literal("§0§l[§b§lCB§0§l] Cannot redo — slot conflict for '" + entry.customId() + "'."));
+            src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Cannot redo — slot conflict for '" + entry.customId() + "'."));
             return 0;
         }
         SlotManager.saveAll();
@@ -1533,7 +1667,7 @@ public class CustomBlockCommand {
                     new SlotUpdatePayload("rename", d.index, d.customId, d.displayName, null, 0, 0, "stone"));
             }
         }
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Redid \"" + entry.description() + "\" on §f"
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Redid \"" + entry.description() + "\" on §f"
             + entry.customId() + "§a. §7(" + UndoManager.redoSize(getPlayerUuid(src)) + " redo left, " + UndoManager.undoSize(getPlayerUuid(src)) + " undo)"));
         if (UndoManager.redoSize(getPlayerUuid(src)) > 0)
             src.sendMessage(Text.literal("§8  → Next redo: §7\"" + UndoManager.peekRedoDescription(getPlayerUuid(src)) + "\""));
@@ -1549,7 +1683,7 @@ public class CustomBlockCommand {
             if (r == 0) break;
             done++;
         }
-        if (done > 1) src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Undid §f" + done + "§a actions total."));
+        if (done > 1) src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Undid §f" + done + "§a actions total."));
         return done > 0 ? 1 : 0;
     }
 
@@ -1562,7 +1696,7 @@ public class CustomBlockCommand {
             if (r == 0) break;
             done++;
         }
-        if (done > 1) src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Redid §f" + done + "§a actions total."));
+        if (done > 1) src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Redid §f" + done + "§a actions total."));
         return done > 0 ? 1 : 0;
     }
 
@@ -1577,6 +1711,25 @@ public class CustomBlockCommand {
                 d.shapeBoxes != null ? new java.util.ArrayList<>(d.shapeBoxes) : null, d.noCollision);
     }
 
+    /** Wrapper validating size range with branded message. */
+    private static int cmdResizeSafe(ServerCommandSource src, String id, int size) {
+        if (size < 16 || size > 256) {
+            ChatHelper.error(src, "Texture size must be between 16 and 256. You typed: " + size);
+            return 0;
+        }
+        return cmdResize(src, id, size);
+    }
+
+    private static int cmdResizeText(ServerCommandSource src, String id, String text) {
+        try {
+            int size = Integer.parseInt(text.trim());
+            return cmdResizeSafe(src, id, size);
+        } catch (NumberFormatException ex) {
+            ChatHelper.error(src, "Texture size needs a whole number from 16 to 256. You typed: '" + text + "'.");
+            return 0;
+        }
+    }
+
     /** Resize the existing stored texture (and all face overrides) of a block. */
     private static int cmdResize(ServerCommandSource src, String id, int size) {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
@@ -1586,7 +1739,7 @@ public class CustomBlockCommand {
             src.sendError(Text.literal("§c'" + id + "' has no texture to resize.")); return 0;
         }
         UndoManager.pushUndoMutation(id, SlotManager.getById(id), "resize " + size, getPlayerUuid(src));
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Resizing '" + id + "' to " + size + "px..."));
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Resizing '" + id + "' to " + size + "px..."));
         MinecraftServer server = src.getServer();
         thread(() -> {
             try {
@@ -1612,10 +1765,10 @@ public class CustomBlockCommand {
                                 new SlotUpdatePayload("setface", updated.index, id, null, e.getValue(),
                                         updated.lightLevel, updated.hardness, updated.soundType, e.getKey()));
                     }
-                    src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] '" + id + "' resized to " + size + "px."));
+                    src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r '" + id + "' resized to " + size + "px."));
                 });
             } catch (Exception e) {
-                server.execute(() -> src.sendError(Text.literal("§0§l[§b§lCB§0§l] Resize failed: " + e.getMessage())));
+                server.execute(() -> src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Resize failed: " + e.getMessage())));
             }
         });
         return 1;
@@ -1626,7 +1779,7 @@ public class CustomBlockCommand {
         File importDir = new File("config/customblocks/import");
         if (!importDir.exists()) {
             importDir.mkdirs();
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Created: §fconfig/customblocks/import/"));
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Created: §fconfig/customblocks/import/"));
             src.sendMessage(Text.literal("§7Drop images there (PNG, JPG, GIF, BMP, WEBP) then run again."));
             return 1;
         }
@@ -1638,14 +1791,14 @@ public class CustomBlockCommand {
                 || l.endsWith(".tiff") || l.endsWith(".tif");
         });
         if (images == null || images.length == 0) {
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] No supported images found in import folder."));
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r No supported images found in import folder."));
             src.sendMessage(Text.literal("§7Supported: PNG, JPG, GIF, BMP, WEBP, TIFF"));
             return 0;
         }
         java.util.Arrays.sort(images, java.util.Comparator.comparing(File::getName));
         int free = SlotManager.freeSlots();
         if (free == 0) { src.sendError(Text.literal("§cAll slots full!")); return 0; }
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Found " + images.length + " image(s), " + free + " slots free. Importing..."));
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Found " + images.length + " image(s), " + free + " slots free. Importing..."));
         MinecraftServer server = src.getServer();
         thread(() -> {
             java.util.List<String[]> toAdd = new java.util.ArrayList<>();
@@ -1699,7 +1852,7 @@ public class CustomBlockCommand {
                     createdIds.add("§b" + id + "§7(§f" + name + "§7)" + (anim != null ? " §d[GIF]" : ""));
                 }
                 if (created > 0) SlotManager.saveAll();
-                StringBuilder msg = new StringBuilder("§0§l[§b§lCB§0§l] Done! §f" + created + " created");
+                StringBuilder msg = new StringBuilder("§0§l[§b§lCB§0§l]§r Done! §f" + created + " created");
                 if (!skipped.isEmpty()) msg.append("§7, ").append(skipped.size()).append(" skipped (already exist)");
                 if (!failed.isEmpty())  msg.append("§c, ").append(failed.size()).append(" failed");
                 src.sendMessage(Text.literal(msg.toString()));
@@ -1743,7 +1896,7 @@ public class CustomBlockCommand {
             try (java.io.FileWriter fw = new java.io.FileWriter(out, java.nio.charset.StandardCharsets.UTF_8)) {
                 new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(root, fw);
             }
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Exported " + SlotManager.usedSlots() + " blocks → config/customblocks/export.json"));
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Exported " + SlotManager.usedSlots() + " blocks → config/customblocks/export.json"));
         } catch (Exception e) { src.sendError(Text.literal("§cExport failed: " + e.getMessage())); }
         return 1;
     }
@@ -1763,7 +1916,7 @@ public class CustomBlockCommand {
 
         try {
             ServerPlayerEntity p = src.getPlayerOrThrow();
-            p.sendMessage(Text.literal("  §0§l[§b§lCB§0§l] Click here to open the blocks GUI!").styled(s -> s.withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.RUN_COMMAND, "/cb listgui")).withFormatting(net.minecraft.util.Formatting.UNDERLINE)));
+            p.sendMessage(Text.literal("  §0§l[§b§lCB§0§l]§r Click here to open the blocks GUI!").styled(s -> s.withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.RUN_COMMAND, "/cb listgui")).withFormatting(net.minecraft.util.Formatting.UNDERLINE)));
             p.sendMessage(Text.literal("  §7...or see the chat breakdown below:"));
         } catch(Exception ignored) {}
 
@@ -1867,7 +2020,7 @@ public class CustomBlockCommand {
         if (item == null || item == net.minecraft.item.Items.AIR) { src.sendError(Text.literal("§cSquare item not found.")); return 0; }
         try {
             src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(item, 1));
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Given " + Character.toUpperCase(c.charAt(0)) + c.substring(1) + " Square!"));
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Given " + Character.toUpperCase(c.charAt(0)) + c.substring(1) + " Square!"));
         } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); return 0; }
         return 1;
     }
@@ -1882,7 +2035,7 @@ public class CustomBlockCommand {
         if (item == null || item == net.minecraft.item.Items.AIR) { src.sendError(Text.literal("§cTriangle not found.")); return 0; }
         try {
             src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(item, 1));
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Given " + Character.toUpperCase(c.charAt(0)) + c.substring(1) + " Triangle!"));
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Given " + Character.toUpperCase(c.charAt(0)) + c.substring(1) + " Triangle!"));
         } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); return 0; }
         return 1;
     }
@@ -1895,7 +2048,7 @@ public class CustomBlockCommand {
         }
         try {
             src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(rectItem, 1));
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] §eGiven §6Rainbow Rectangle§e! §7Right-click any block face and paste an image URL."));
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §eGiven §6Rainbow Rectangle§e! §7Right-click any block face and paste an image URL."));
         } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); return 0; }
         return 1;
     }
@@ -1906,7 +2059,7 @@ public class CustomBlockCommand {
         if (item == null || item == net.minecraft.item.Items.AIR) { src.sendError(Text.literal("§cGolden Hexagon not found.")); return 0; }
         try {
             src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(item, 1));
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] §eGiven §6Golden Hexagon§e! §7Right-click a face to rotate, sneak+click to flip."));
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §eGiven §6Golden Hexagon§e! §7Right-click a face to rotate, sneak+click to flip."));
         } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); return 0; }
         return 1;
     }
@@ -1917,7 +2070,7 @@ public class CustomBlockCommand {
         if (item == null || item == net.minecraft.item.Items.AIR) { src.sendError(Text.literal("§cLumina Brush not found.")); return 0; }
         try {
             src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(item, 1));
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] §fGiven §bLumina Brush§f! §7Right-click any block to adjust glow & hardness."));
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §fGiven §bLumina Brush§f! §7Right-click any block to adjust glow & hardness."));
         } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); return 0; }
         return 1;
     }
@@ -1928,7 +2081,7 @@ public class CustomBlockCommand {
         if (item == null || item == net.minecraft.item.Items.AIR) { src.sendError(Text.literal("§cAmethyst Chisel not found.")); return 0; }
         try {
             src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(item, 1));
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] §dGiven §5Amethyst Chisel§d! §7Right-click any block to sculpt its shape."));
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §dGiven §5Amethyst Chisel§d! §7Right-click any block to sculpt its shape."));
         } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); return 0; }
         return 1;
     }
@@ -1939,7 +2092,7 @@ public class CustomBlockCommand {
         if (item == null || item == net.minecraft.item.Items.AIR) { src.sendError(Text.literal("§cDiamond Triangle not found.")); return 0; }
         try {
             src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(item, 1));
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] §fGiven §bDiamond Triangle§f! §7Right-click anywhere to open the Background Studio."));
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §fGiven §bDiamond Triangle§f! §7Right-click anywhere to open the Background Studio."));
         } catch (Exception ex) { ex.printStackTrace(); src.sendError(Text.literal("§cError: " + ex.getMessage())); return 0; }
         return 1;
     }
@@ -1960,7 +2113,7 @@ public class CustomBlockCommand {
         try {
             src.getPlayerOrThrow().getInventory().insertStack(
                 com.customblocks.item.ColorTriangleItem.createCustomStack(item, rgb));
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] §fGiven custom Triangle §b#" +
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §fGiven custom Triangle §b#" +
                 String.format(java.util.Locale.ROOT, "%06X", rgb & 0xFFFFFF) + "§f!"));
         } catch (Exception ex) {
             ex.printStackTrace();
@@ -1991,7 +2144,7 @@ public class CustomBlockCommand {
             ServerPlayerEntity player = src.getPlayerOrThrow();
             player.getInventory().insertStack(com.customblocks.item.ColorSquareItem.createCustomStack(squareItem, rgb));
             player.getInventory().insertStack(com.customblocks.item.ColorTriangleItem.createCustomStack(triangleItem, rgb));
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] §fGiven custom Square + Triangle §b#" +
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §fGiven custom Square + Triangle §b#" +
                 String.format(java.util.Locale.ROOT, "%06X", rgb & 0xFFFFFF) + "§f!"));
         } catch (Exception ex) {
             ex.printStackTrace();
@@ -2013,6 +2166,215 @@ public class CustomBlockCommand {
         }
         if (!hex.matches("[0-9a-fA-F]{6}")) return null;
         return Integer.parseInt(hex, 16);
+    }
+
+    public static int cmdBulkRecolorFromGui(ServerPlayerEntity player, String color, String scopeExpr, String excludeExpr, boolean apply) {
+        if (player == null) return 0;
+        return cmdBulkRecolor(player.getCommandSource(), color, scopeExpr, excludeExpr, apply);
+    }
+
+    private static int cmdBulkRecolor(ServerCommandSource src, String colorRaw, String scopeExprRaw, boolean apply) {
+        return cmdBulkRecolor(src, colorRaw, scopeExprRaw, "", apply);
+    }
+
+    private static int cmdBulkRecolor(ServerCommandSource src, String colorRaw, String scopeExprRaw, String excludeExprRaw, boolean apply) {
+        String color = colorRaw == null ? "" : colorRaw.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!color.equals("green") && !color.equals("yellow") && !color.equals("black")) {
+            ChatHelper.error(src, "Unknown color '" + colorRaw + "'. Use: green, yellow, or black.");
+            return 0;
+        }
+        if (!CustomBlocksConfig.isColorToolModeConfigured()) {
+            ChatHelper.error(src, "Color tools are not configured yet. Open /cb config and choose a fill mode first.");
+            return 0;
+        }
+
+        String scopeExpr = (scopeExprRaw == null || scopeExprRaw.isBlank()) ? "all" : scopeExprRaw.trim();
+        ScopeResolution scope = resolveBulkRecolorScope(src, scopeExpr);
+        java.util.LinkedHashSet<String> ids = new java.util.LinkedHashSet<>(scope.matched());
+        if (ids.isEmpty()) {
+            ChatHelper.warn(src, "No blocks matched scope '" + scopeExpr + "'.");
+            if (!scope.invalidTokens().isEmpty()) {
+                ChatHelper.warn(src, "Invalid IDs/tokens: " + String.join(", ", scope.invalidTokens()));
+            }
+            return 0;
+        }
+        ScopeResolution exclude = resolveBulkRecolorScope(src, excludeExprRaw == null ? "" : excludeExprRaw.trim());
+        if (!exclude.matched().isEmpty()) {
+            ids.removeAll(exclude.matched());
+        }
+
+        int[] rgb = switch (color) {
+            case "green" -> CustomBlocksConfig.builtInTriangleRgb("green", 30, 140, 30);
+            case "yellow" -> CustomBlocksConfig.builtInTriangleRgb("yellow", 240, 200, 20);
+            default -> new int[]{20, 20, 20};
+        };
+        String colorLabel = Character.toUpperCase(color.charAt(0)) + color.substring(1);
+
+        if (!apply) {
+            java.util.List<String> sample = ids.stream().limit(8).toList();
+            ChatHelper.warn(src, "Preview only. Matched: " + ids.size() + ", Excluded: " + exclude.matched().size()
+                + ", Invalid tokens: " + (scope.invalidTokens().size() + exclude.invalidTokens().size()) + ".");
+            if (!sample.isEmpty()) {
+                ChatHelper.warn(src, "Sample IDs: " + String.join(", ", sample));
+            }
+            ChatHelper.warn(src, "Add --apply to execute. Example: /cb bulkrecolor " + color + " " + scopeExpr + " --apply");
+            return 1;
+        }
+
+        int created = 0;
+        int existed = 0;
+        int skipped = 0;
+        java.util.List<String> failedIds = new java.util.ArrayList<>();
+
+        for (String id : ids) {
+            com.customblocks.core.SlotData source = SlotManager.getById(id);
+            if (source == null) { skipped++; continue; }
+
+            String newId = com.customblocks.item.ColorTriangleItem.variantIdFor(source.customId, color);
+            if (newId.equals(source.customId)) { skipped++; continue; }
+            if (SlotManager.hasId(newId)) { existed++; continue; }
+
+            byte[] workTexture = source.texture;
+            if ((workTexture == null || workTexture.length == 0) && source.faceTextures != null && !source.faceTextures.isEmpty()) {
+                workTexture = source.faceTextures.get("north");
+                if (workTexture == null) workTexture = source.faceTextures.values().iterator().next();
+            }
+            if (workTexture == null || workTexture.length == 0) {
+                skipped++;
+                failedIds.add(id + " (no texture)");
+                continue;
+            }
+            if (SlotManager.freeSlots() == 0) {
+                failedIds.add(id + " (no free slots)");
+                break;
+            }
+
+            try {
+                byte[] tex = com.customblocks.item.ColorTriangleItem.recolourTexture(
+                    workTexture, rgb[0], rgb[1], rgb[2], CustomBlocksConfig.useTrappedHoleFill());
+                String newName = com.customblocks.item.ColorTriangleItem.variantDisplayNameFor(source.displayName, colorLabel);
+                SlotData createdData = SlotManager.assign(newId, newName, tex);
+                if (createdData == null) {
+                    failedIds.add(id + " (assign failed)");
+                    continue;
+                }
+                SlotManager.setLightLevel(newId, source.lightLevel);
+                SlotManager.setHardness(newId, source.hardness);
+                SlotManager.setSoundType(newId, source.soundType);
+                UndoManager.pushUndoCreate(newId, getPlayerUuid(src));
+                created++;
+            } catch (Exception ex) {
+                failedIds.add(id + " (" + ex.getMessage() + ")");
+            }
+        }
+
+        SlotManager.saveAll();
+        CustomBlocksMod.broadcastFullSync(src.getServer());
+        ChatHelper.success(src, "Bulk recolor complete. Created: " + created + ", already existed: " + existed
+            + ", skipped: " + skipped + ", excluded: " + exclude.matched().size()
+            + ", invalid: " + (scope.invalidTokens().size() + exclude.invalidTokens().size()) + ".");
+        ChatHelper.warn(src, "Use /cb undo to roll back individual created variants from this run.");
+        if (!failedIds.isEmpty()) {
+            int preview = Math.min(5, failedIds.size());
+            ChatHelper.warn(src, "Some entries failed: " + String.join(", ", failedIds.subList(0, preview))
+                + (failedIds.size() > preview ? " ... +" + (failedIds.size() - preview) + " more" : ""));
+        }
+        return created > 0 ? 1 : 0;
+    }
+
+    private record ScopeResolution(java.util.LinkedHashSet<String> matched, java.util.LinkedHashSet<String> invalidTokens) {}
+
+    private static ScopeResolution resolveBulkRecolorScope(ServerCommandSource src, String scopeExpr) {
+        java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
+        java.util.LinkedHashSet<String> invalid = new java.util.LinkedHashSet<>();
+        String s = scopeExpr == null ? "all" : scopeExpr.trim();
+        if (s.isBlank()) return new ScopeResolution(out, invalid);
+        String low = s.toLowerCase(java.util.Locale.ROOT);
+
+        if (low.equals("all") || low.equals("everything")) {
+            for (SlotData d : SlotManager.allSlots()) out.add(d.customId);
+            return new ScopeResolution(out, invalid);
+        }
+        if (low.equals("uncategorized") || low.equals("unsorted")) {
+            for (SlotData d : SlotManager.allSlots()) {
+                if (com.customblocks.core.CategoryManager.getCategoriesForBlock(d.customId).isEmpty()) out.add(d.customId);
+            }
+            return new ScopeResolution(out, invalid);
+        }
+        if (low.equals("selected") || low.equals("currently_selected")) {
+            java.util.UUID uuid = getPlayerUuid(src);
+            if (uuid == null) return new ScopeResolution(out, invalid);
+            out.addAll(GuiManager.getBulkRecolorSelected(uuid));
+            return new ScopeResolution(out, invalid);
+        }
+        if (low.equals("favorites")) {
+            // Reserved scope keyword for future favorite-category metadata.
+            return new ScopeResolution(out, invalid);
+        }
+        if (low.startsWith("category:")) {
+            String key = s.substring("category:".length()).trim();
+            com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(key);
+            if (cat == null) {
+                invalid.add("category:" + key);
+                return new ScopeResolution(out, invalid);
+            }
+            for (SlotData d : com.customblocks.core.CategoryManager.getBlocksInCategory(cat.key())) out.add(d.customId);
+            return new ScopeResolution(out, invalid);
+        }
+        if (low.startsWith("ids:")) {
+            String csv = s.substring("ids:".length());
+            for (String token : csv.split("[,\\s]+")) {
+                String id = token.trim();
+                if (id.isEmpty()) continue;
+                if (SlotManager.hasId(id)) out.add(id);
+                else invalid.add(id);
+            }
+            return new ScopeResolution(out, invalid);
+        }
+        if (low.startsWith("query:")) {
+            String q = s.substring("query:".length()).trim().toLowerCase(java.util.Locale.ROOT);
+            for (SlotData d : SlotManager.allSlots()) {
+                if (d.customId.toLowerCase(java.util.Locale.ROOT).contains(q)
+                    || d.displayNameLower.contains(q)) {
+                    out.add(d.customId);
+                }
+            }
+            return new ScopeResolution(out, invalid);
+        }
+        if (low.startsWith("range:")) {
+            String payload = s.substring("range:".length()).trim();
+            String[] parts = payload.split("-", 2);
+            if (parts.length == 2) {
+                try {
+                    int a = Integer.parseInt(parts[0].trim());
+                    int b = Integer.parseInt(parts[1].trim());
+                    int lo = Math.min(a, b);
+                    int hi = Math.max(a, b);
+                    for (SlotData d : SlotManager.allSlots()) {
+                        if (d.index >= lo && d.index <= hi) out.add(d.customId);
+                    }
+                } catch (NumberFormatException ignored) {
+                    invalid.add("range:" + payload);
+                }
+            }
+            return new ScopeResolution(out, invalid);
+        }
+        if (low.startsWith("recent:")) {
+            int n = 10;
+            try { n = Math.max(1, Integer.parseInt(s.substring("recent:".length()).trim())); }
+            catch (Exception ignored) { invalid.add(s); }
+            java.util.List<SlotData> all = new java.util.ArrayList<>(SlotManager.allSlots());
+            all.sort(java.util.Comparator.comparingInt(d -> -d.index));
+            for (int i = 0; i < Math.min(n, all.size()); i++) out.add(all.get(i).customId);
+            return new ScopeResolution(out, invalid);
+        }
+
+        for (String token : s.split("[,\\s]+")) {
+            if (token.isBlank()) continue;
+            if (SlotManager.hasId(token)) out.add(token);
+            else invalid.add(token);
+        }
+        return new ScopeResolution(out, invalid);
     }
 
     private static int cmdRpPause(ServerCommandSource src, boolean pause) {
@@ -2055,7 +2417,7 @@ public class CustomBlockCommand {
         } catch (Exception ex) { 
             ex.printStackTrace(); 
             com.customblocks.gui.GuiManager.logError();
-            src.sendError(Text.literal("§0§l[§b§lCB§0§l] §cError: " + ex.getMessage())); 
+            src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r §cError: " + ex.getMessage())); 
         }
         return 1;
     }
@@ -2067,7 +2429,7 @@ public class CustomBlockCommand {
         } catch (Exception ex) { 
             ex.printStackTrace(); 
             com.customblocks.gui.GuiManager.logError();
-            src.sendError(Text.literal("§0§l[§b§lCB§0§l] §cError: " + ex.getMessage())); 
+            src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r §cError: " + ex.getMessage())); 
         }
         return 1;
     }
@@ -2080,7 +2442,7 @@ public class CustomBlockCommand {
         } catch (Exception ex) { 
             ex.printStackTrace(); 
             com.customblocks.gui.GuiManager.logError();
-            src.sendError(Text.literal("§0§l[§b§lCB§0§l] §cError: " + ex.getMessage())); 
+            src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r §cError: " + ex.getMessage())); 
         }
         return 1;
     }
@@ -2090,7 +2452,7 @@ public class CustomBlockCommand {
         String catKey = sanitize(rawCat);
         com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(catKey);
         if (cat == null) {
-            src.sendError(Text.literal("§0§l[§b§lCB§0§l] Category '" + catKey + "' not found."));
+            src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Category '" + catKey + "' not found."));
             return 0;
         }
 
@@ -2109,7 +2471,7 @@ public class CustomBlockCommand {
                 }
             }
             if (count > 0) com.customblocks.core.UndoManager.pushCategoryUndo(snap);
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Added §f" + count + "§a blocks to category §f" + cat.displayName() + "§a!"));
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Added §f" + count + "§a blocks to category §f" + cat.displayName() + "§a!"));
             return 1;
         } else {
             String id = sanitize(rawId);
@@ -2118,31 +2480,85 @@ public class CustomBlockCommand {
                 return 0;
             }
             if (com.customblocks.core.CategoryManager.getCategoriesForBlock(id).contains(catKey)) {
-                src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] '" + id + "' is already in '" + cat.displayName() + "'."));
+                src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r '" + id + "' is already in '" + cat.displayName() + "'."));
                 return 1;
             }
             com.customblocks.core.CategoryManager.assignBlock(id, catKey);
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Added '§f" + id + "§a' to category §f" + cat.displayName() + "§a!"));
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Added '§f" + id + "§a' to category §f" + cat.displayName() + "§a!"));
             return 1;
         }
+    }
+
+    private static int cmdBulkBlockAdd(ServerCommandSource src, String rawCat, String rawIds) {
+        String catKey = sanitize(rawCat);
+        com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(catKey);
+        if (cat == null) {
+            ChatHelper.error(src, "Category '" + catKey + "' was not found.");
+            return 0;
+        }
+
+        java.util.LinkedHashSet<String> tokens = new java.util.LinkedHashSet<>();
+        for (String token : (rawIds == null ? "" : rawIds).split("[,\\s]+")) {
+            if (!token.isBlank()) tokens.add(sanitize(token));
+        }
+        if (tokens.isEmpty()) {
+            ChatHelper.warn(src, "No block IDs were provided. Example: /cb bulkblockadd " + catKey + " id1 id2 id3");
+            return 0;
+        }
+
+        java.util.UUID uuid = src.getPlayer() != null ? src.getPlayer().getUuid() : null;
+        com.customblocks.core.UndoManager.CategoryUndoEntry snap =
+            com.customblocks.core.UndoManager.captureCategorySnapshot(
+                "bulkblockadd " + tokens.size() + " -> " + cat.displayName(), uuid);
+
+        java.util.List<String> invalid = new java.util.ArrayList<>();
+        java.util.List<String> already = new java.util.ArrayList<>();
+        int added = 0;
+        for (String id : tokens) {
+            if (!SlotManager.hasId(id)) {
+                invalid.add(id);
+                continue;
+            }
+            if (com.customblocks.core.CategoryManager.getCategoriesForBlock(id).contains(cat.key())) {
+                already.add(id);
+                continue;
+            }
+            com.customblocks.core.CategoryManager.assignBlock(id, cat.key());
+            added++;
+        }
+        if (added > 0) com.customblocks.core.UndoManager.pushCategoryUndo(snap);
+
+        ChatHelper.success(src, "Bulk assign complete. Added: " + added + ", already in category: "
+            + already.size() + ", invalid IDs: " + invalid.size() + ".");
+        if (!already.isEmpty()) {
+            int n = Math.min(6, already.size());
+            ChatHelper.warn(src, "Already in '" + cat.displayName() + "': " + String.join(", ", already.subList(0, n))
+                + (already.size() > n ? " ... +" + (already.size() - n) + " more" : ""));
+        }
+        if (!invalid.isEmpty()) {
+            int n = Math.min(6, invalid.size());
+            ChatHelper.warn(src, "Unknown IDs skipped: " + String.join(", ", invalid.subList(0, n))
+                + (invalid.size() > n ? " ... +" + (invalid.size() - n) + " more" : ""));
+        }
+        return added > 0 ? 1 : 0;
     }
 
     private static int cmdGiveDisplayBlock(ServerCommandSource src, String rawCat) {
         String catKey = sanitize(rawCat);
         com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(catKey);
         if (cat == null) {
-            src.sendError(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7cCategory '" + catKey + "' not found."));
+            src.sendError(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l]\u00A7r \u00A7cCategory '" + catKey + "' not found."));
             return 0;
         }
         ServerPlayerEntity p = src.getPlayer();
         if (p == null) { src.sendError(Text.literal("Player only.")); return 0; }
         if (!cat.displayBlockEnabled()) {
-            src.sendError(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7cDisplay block is disabled for this category."));
+            src.sendError(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l]\u00A7r \u00A7cDisplay block is disabled for this category."));
             return 0;
         }
         ItemStack stack = com.customblocks.core.CategoryDisplayBlockManager.createDisplayBlockStack(cat);
         if (!p.getInventory().insertStack(stack)) p.dropItem(stack, false);
-        src.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7aGave display block for \u00A7f" + cat.displayName() + "\u00A7a."));
+        src.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l]\u00A7r \u00A7aGave display block for \u00A7f" + cat.displayName() + "\u00A7a."));
         return 1;
     }
 
@@ -2150,7 +2566,7 @@ public class CustomBlockCommand {
         String catKey = sanitize(rawCat);
         com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(catKey);
         if (cat == null) {
-            src.sendError(Text.literal("§0§l[§b§lCB§0§l] Category '" + catKey + "' not found."));
+            src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Category '" + catKey + "' not found."));
             return 0;
         }
         ServerPlayerEntity p = src.getPlayer();
@@ -2160,7 +2576,7 @@ public class CustomBlockCommand {
         }
         java.util.List<SlotData> blocks = com.customblocks.core.CategoryManager.getBlocksInCategory(catKey);
         if (blocks.isEmpty()) {
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Category '" + cat.displayName() + "' is empty."));
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Category '" + cat.displayName() + "' is empty."));
             return 1;
         }
         int given = 0;
@@ -2171,7 +2587,7 @@ public class CustomBlockCommand {
                 given++;
             }
         }
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Given §f" + given + "§a blocks from §f" + cat.displayName() + "§a!"));
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Given §f" + given + "§a blocks from §f" + cat.displayName() + "§a!"));
         return 1;
     }
 
@@ -2179,7 +2595,7 @@ public class CustomBlockCommand {
         String catKey = sanitize(rawCat);
         com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(catKey);
         if (cat == null) {
-            src.sendError(Text.literal("§0§l[§b§lCB§0§l] Category '" + catKey + "' not found."));
+            src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Category '" + catKey + "' not found."));
             return 0;
         }
         File dir = new File("config/customblocks"); dir.mkdirs();
@@ -2227,9 +2643,9 @@ public class CustomBlockCommand {
             try (java.io.FileWriter fw = new java.io.FileWriter(out, java.nio.charset.StandardCharsets.UTF_8)) {
                 new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(root, fw);
             }
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Exported category '§f" + cat.displayName() + "§a' with §f" + blocks.size() + "§a blocks to config/customblocks/" + out.getName()));
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Exported category '§f" + cat.displayName() + "§a' with §f" + blocks.size() + "§a blocks to config/customblocks/" + out.getName()));
         } catch (Exception e) {
-            src.sendError(Text.literal("§0§l[§b§lCB§0§l] Export failed: " + e.getMessage()));
+            src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Export failed: " + e.getMessage()));
         }
         return 1;
     }
@@ -2269,9 +2685,9 @@ public class CustomBlockCommand {
             try (java.io.FileWriter fw = new java.io.FileWriter(out, java.nio.charset.StandardCharsets.UTF_8)) {
                 new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(root, fw);
             }
-            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Exported all categories to config/customblocks/" + out.getName()));
+            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Exported all categories to config/customblocks/" + out.getName()));
         } catch (Exception e) {
-            src.sendError(Text.literal("§0§l[§b§lCB§0§l] Export failed: " + e.getMessage()));
+            src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Export failed: " + e.getMessage()));
         }
         return 1;
     }
@@ -2280,16 +2696,16 @@ public class CustomBlockCommand {
         String catKey = sanitize(rawCat);
         com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(catKey);
         if (cat == null) {
-            src.sendError(Text.literal("§0§l[§b§lCB§0§l] Category '" + catKey + "' not found."));
+            src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Category '" + catKey + "' not found."));
             return 0;
         }
         
         if (!com.customblocks.CustomBlocksConfig.isCloudShareEnabled()) {
-            src.sendError(Text.literal("§0§l[§b§lCB§0§l] Cloud sharing is disabled in config."));
+            src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Cloud sharing is disabled in config."));
             return 0;
         }
         
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Preparing category data for upload..."));
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Preparing category data for upload..."));
         
         try {
             com.google.gson.JsonObject root = new com.google.gson.JsonObject();
@@ -2348,32 +2764,32 @@ public class CustomBlockCommand {
                         com.google.gson.JsonObject res = com.google.gson.JsonParser.parseString(resp.body()).getAsJsonObject();
                         String code = res.has("code") ? res.get("code").getAsString() : "BC#???";
                         src.getServer().execute(() -> {
-                            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Successfully shared! Code: §f" + code).styled(s -> s.withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.COPY_TO_CLIPBOARD, code)).withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, Text.literal("Click to copy")))));
+                            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Successfully shared! Code: §f" + code).styled(s -> s.withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.COPY_TO_CLIPBOARD, code)).withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, Text.literal("Click to copy")))));
                         });
                     } else {
                         src.getServer().execute(() -> {
-                            src.sendError(Text.literal("§0§l[§b§lCB§0§l] Failed to upload. Server returned: " + resp.statusCode()));
+                            src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Failed to upload. Server returned: " + resp.statusCode()));
                         });
                     }
                 } catch (Exception e) {
                     src.getServer().execute(() -> {
-                        src.sendError(Text.literal("§0§l[§b§lCB§0§l] Cloud error: " + e.getMessage()));
+                        src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Cloud error: " + e.getMessage()));
                     });
                 }
             });
         } catch (Exception e) {
-            src.sendError(Text.literal("§0§l[§b§lCB§0§l] Export failed: " + e.getMessage()));
+            src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Export failed: " + e.getMessage()));
         }
         return 1;
     }
 
     private static int cmdImportCategory(ServerCommandSource src, String code) {
         if (!com.customblocks.CustomBlocksConfig.isCloudShareEnabled()) {
-            src.sendError(Text.literal("§0§l[§b§lCB§0§l] Cloud sharing is disabled in config."));
+            src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Cloud sharing is disabled in config."));
             return 0;
         }
         
-        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Downloading category data for code: " + code + "..."));
+        src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Downloading category data for code: " + code + "..."));
         
         thread(() -> {
             try {
@@ -2388,7 +2804,7 @@ public class CustomBlockCommand {
                     src.getServer().execute(() -> {
                         try {
                             if (!root.has("category")) {
-                                src.sendError(Text.literal("§0§l[§b§lCB§0§l] Invalid format received from cloud."));
+                                src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Invalid format received from cloud."));
                                 return;
                             }
                             com.google.gson.JsonObject catObj = root.getAsJsonObject("category");
@@ -2398,7 +2814,7 @@ public class CustomBlockCommand {
                             // Check if category already exists
                             com.customblocks.core.Category existingCat = com.customblocks.core.CategoryManager.getCategory(catKey);
                             if (existingCat != null) {
-                                src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Category '" + catKey + "' already exists. Resolving conflicts..."));
+                                src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Category '" + catKey + "' already exists. Resolving conflicts..."));
                                 ServerPlayerEntity player = src.getPlayer();
                                 if (player != null) {
                                     com.customblocks.gui.GuiManager.PENDING_IMPORTS.put(player.getUuid(), root);
@@ -2431,19 +2847,19 @@ public class CustomBlockCommand {
                                     }
                                 }
                             }
-                            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l] Successfully imported category '§f" + displayName + "§a' with §f" + imported + "§a block assignments."));
+                            src.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r Successfully imported category '§f" + displayName + "§a' with §f" + imported + "§a block assignments."));
                         } catch (Exception ex) {
-                            src.sendError(Text.literal("§0§l[§b§lCB§0§l] Parse error: " + ex.getMessage()));
+                            src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Parse error: " + ex.getMessage()));
                         }
                     });
                 } else {
                     src.getServer().execute(() -> {
-                        src.sendError(Text.literal("§0§l[§b§lCB§0§l] Failed to download. Server returned: " + resp.statusCode()));
+                        src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r Failed to download. Server returned: " + resp.statusCode()));
                     });
                 }
             } catch (Exception e) {
                 src.getServer().execute(() -> {
-                    src.sendError(Text.literal("§0§l[§b§lCB§0§l] §cCloud service unavailable. Try again later."));
+                    src.sendError(Text.literal("§0§l[§b§lCB§0§l]§r §cCloud service unavailable. Try again later."));
                     ServerPlayerEntity p = src.getPlayer();
                     if (p != null) {
                         p.playSound(net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), 1.0f, 1.0f);
@@ -2485,6 +2901,8 @@ public class CustomBlockCommand {
             case "square"       -> "square <black|yellow|green>";
             case "triangle"     -> "triangle <black|yellow|green>";
             case "customtriangle" -> "customtriangle <#RRGGBB>  — gives matching custom square + triangle";
+            case "bulkrecolor" -> "bulkrecolor <green|yellow|black> [scope] [--exclude=...] [--apply]  — no args opens wizard";
+            case "bulkblockadd" -> "bulkblockadd <category> <id1> <id2> ...  — no args opens picker";
             default -> "help";
         };
         ChatHelper.warn(src, "Usage: /cb " + msg);
@@ -2492,7 +2910,7 @@ public class CustomBlockCommand {
     }
 
     private static Text notFound(String id) {
-        return Text.literal("§0§l[§b§lCB§0§l] §c'" + id + "' not found. §8✖");
+        return Text.literal("§0§l[§b§lCB§0§l]§r §c'" + id + "' not found. §8✖");
     }
 
     private static String sanitize(String id) {

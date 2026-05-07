@@ -29,6 +29,7 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Queue;
@@ -60,6 +61,8 @@ public class ColorTriangleItem extends Item {
 
     /** Per-channel tolerance for background detection. */
     private static final int TOLERANCE = 35;
+    /** Mode B safety: skip trapped regions larger than this fraction of texture pixels. */
+    private static final double MAX_TRAPPED_HOLE_FRACTION = 0.28d;
 
     public ColorTriangleItem(int r, int g, int b, String colorName, Settings settings) {
         super(settings);
@@ -123,8 +126,15 @@ public class ColorTriangleItem extends Item {
 
         if (player != null && !player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
             player.sendMessage(
-                Text.literal("§c[CustomBlocks] You need OP to use colour triangles."), true);
+                Text.literal("§0§l[§b§lCB§0§l]§r §cYou need OP to use colour triangles."), true);
             if (world instanceof ServerWorld sw) sw.playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
+            return ActionResult.FAIL;
+        }
+        if (!CustomBlocksConfig.isColorToolModeConfigured()) {
+            if (player != null) {
+                player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §eColor tools are not configured yet."), true);
+                player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §7Open §f/cb config §7and choose: §fDefault: Fill corner only §7or §fExtra: Fill corners + more§7."), true);
+            }
             return ActionResult.FAIL;
         }
 
@@ -144,7 +154,7 @@ public class ColorTriangleItem extends Item {
         if (workTexture == null || workTexture.length == 0) {
             if (player != null) {
                 player.sendMessage(
-                    Text.literal("§0§l[§b§lCB§0§l] §cThis block has no texture data to recolour."), true);
+                    Text.literal("§0§l[§b§lCB§0§l]§r §cThis block has no texture data to recolour."), true);
                 if (world instanceof ServerWorld sw) sw.playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
             }
             return ActionResult.FAIL;
@@ -161,7 +171,7 @@ public class ColorTriangleItem extends Item {
         if (newId.equals(source.customId)) {
             if (player != null)
                 player.sendMessage(
-                    Text.literal("§7[CustomBlocks] This block is already §f" + color.label() + "§7."), true);
+                    Text.literal("§0§l[§b§lCB§0§l]§r §7This block is already §f" + color.label() + "§7."), true);
             return ActionResult.SUCCESS;
         }
 
@@ -172,7 +182,7 @@ public class ColorTriangleItem extends Item {
                 player.getInventory().insertStack(
                     new ItemStack(CustomBlocksMod.SLOT_ITEMS[existing.index]));
                 player.sendMessage(
-                    Text.literal("§a[CustomBlocks] Given §f" + existing.displayName
+                    Text.literal("§0§l[§b§lCB§0§l]§r §aGiven §f" + existing.displayName
                         + "§a (variant already existed)."), true);
                 if (world instanceof ServerWorld sw) {
                     sw.spawnParticles(net.minecraft.particle.ParticleTypes.GLOW, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 5, 0.2, 0.2, 0.2, 0.05);
@@ -186,7 +196,7 @@ public class ColorTriangleItem extends Item {
         if (SlotManager.freeSlots() == 0) {
             if (player != null)
                 player.sendMessage(
-                    Text.literal("§c[CustomBlocks] No free block slots! Delete some blocks first."), true);
+                    Text.literal("§0§l[§b§lCB§0§l]§r §cNo free block slots! Delete some blocks first."), true);
             return ActionResult.FAIL;
         }
 
@@ -199,18 +209,18 @@ public class ColorTriangleItem extends Item {
         Thread t = new Thread(() -> {
             try {
                 System.setProperty("java.awt.headless", "true");
-                byte[] newTexture = recolourBackground(finalTex, fR, fG, fB);
+                byte[] newTexture = recolourBackground(finalTex, fR, fG, fB, CustomBlocksConfig.useTrappedHoleFill());
 
                 server.execute(() -> {
                     if (SlotManager.freeSlots() == 0) {
                         if (fp != null)
-                            fp.sendMessage(Text.literal("§c[CustomBlocks] No free slots!"), true);
+                            fp.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §cNo free slots!"), true);
                         return;
                     }
                     SlotData newD = SlotManager.assign(newId, newName, newTexture);
                     if (newD == null) {
                         if (fp != null)
-                            fp.sendMessage(Text.literal("§c[CustomBlocks] Failed to allocate slot."), true);
+                            fp.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §cFailed to allocate slot."), true);
                         return;
                     }
                     // Copy properties from the source block
@@ -230,7 +240,7 @@ public class ColorTriangleItem extends Item {
                         fp.getInventory().insertStack(
                             new ItemStack(CustomBlocksMod.SLOT_ITEMS[newD.index]));
                         fp.sendMessage(
-                            Text.literal("§a[CustomBlocks] Created §f" + newName
+                            Text.literal("§0§l[§b§lCB§0§l]§r §aCreated §f" + newName
                                 + " §aand added it to your inventory!"), true);
                         
                         ServerWorld sw = (ServerWorld) world;
@@ -242,7 +252,7 @@ public class ColorTriangleItem extends Item {
                 server.execute(() -> {
                     if (fp != null)
                         fp.sendMessage(
-                            Text.literal("§c[CustomBlocks] Recolour failed: " + e.getMessage()), true);
+                            Text.literal("§0§l[§b§lCB§0§l]§r §cRecolour failed: " + e.getMessage()), true);
                 });
             }
         }, "CB-Recolour");
@@ -260,7 +270,7 @@ public class ColorTriangleItem extends Item {
      * regions reachable from the image border are changed — interior details
      * with a similar colour are never touched.
      */
-    private static byte[] recolourBackground(byte[] src, int newR, int newG, int newB)
+    private static byte[] recolourBackground(byte[] src, int newR, int newG, int newB, boolean fillTrapped)
             throws Exception {
         BufferedImage img = ImageIO.read(new ByteArrayInputStream(src));
         if (img == null) throw new Exception("Could not decode image");
@@ -304,10 +314,87 @@ public class ColorTriangleItem extends Item {
                 }
             }
         }
+        if (fillTrapped) {
+            fillTrappedBackgroundRegions(img, visited, newArgb);
+        }
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         ImageIO.write(img, "PNG", baos);
         return baos.toByteArray();
+    }
+
+    public static byte[] recolourTexture(byte[] src, int newR, int newG, int newB, boolean fillTrapped) throws Exception {
+        return recolourBackground(src, newR, newG, newB, fillTrapped);
+    }
+
+    private static void fillTrappedBackgroundRegions(BufferedImage img, boolean[][] visited, int newArgb) {
+        int w = img.getWidth();
+        int h = img.getHeight();
+        boolean[][] scanned = new boolean[w][h];
+        int totalPixels = w * h;
+        int maxPixels = (int) Math.floor(totalPixels * MAX_TRAPPED_HOLE_FRACTION);
+        int[][] dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+
+        for (int x = 0; x < w; x++) {
+            for (int y = 0; y < h; y++) {
+                if (visited[x][y] || scanned[x][y]) continue;
+                if (!isHoleCandidate(img, x, y)) {
+                    scanned[x][y] = true;
+                    continue;
+                }
+
+                List<int[]> component = new ArrayList<>();
+                Queue<int[]> q = new ArrayDeque<>();
+                q.add(new int[]{x, y});
+                scanned[x][y] = true;
+                boolean touchesEdge = false;
+                boolean hasNonCandidate = false;
+
+                while (!q.isEmpty()) {
+                    int[] p = q.poll();
+                    int cx = p[0], cy = p[1];
+                    component.add(p);
+                    if (cx == 0 || cy == 0 || cx == w - 1 || cy == h - 1) touchesEdge = true;
+
+                    for (int[] d : dirs) {
+                        int nx = cx + d[0], ny = cy + d[1];
+                        if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+                        if (visited[nx][ny]) continue;
+                        if (scanned[nx][ny]) continue;
+                        scanned[nx][ny] = true;
+                        if (isHoleCandidate(img, nx, ny)) q.add(new int[]{nx, ny});
+                        else hasNonCandidate = true;
+                    }
+                }
+
+                if (touchesEdge) continue;
+                if (hasNonCandidate) continue;
+                if (component.size() > maxPixels) continue;
+                for (int[] p : component) {
+                    img.setRGB(p[0], p[1], newArgb);
+                    visited[p[0]][p[1]] = true;
+                }
+            }
+        }
+    }
+
+    private static boolean isHoleCandidate(BufferedImage img, int x, int y) {
+        int px = img.getRGB(x, y);
+        int a = (px >> 24) & 0xFF;
+        if (a < 50) return true;
+        int r = (px >> 16) & 0xFF;
+        int g = (px >> 8) & 0xFF;
+        int b = px & 0xFF;
+
+        // Solid/near-black pockets
+        int max = Math.max(r, Math.max(g, b));
+        if (max <= 36) return true;
+
+        // Checker/flat placeholder-like greys (neutral tone, not bright white)
+        int min = Math.min(r, Math.min(g, b));
+        int spread = max - min;
+        int avg = (r + g + b) / 3;
+        return spread <= 18 && avg >= 70 && avg <= 220;
     }
 
     private static boolean isBackground(BufferedImage img, int x, int y,
@@ -356,6 +443,10 @@ public class ColorTriangleItem extends Item {
         return id; // no colour found — caller will append new colour
     }
 
+    public static String variantIdFor(String sourceId, String colorKey) {
+        return stripColorSuffix(sourceId) + "_" + colorKey.toLowerCase(Locale.ROOT);
+    }
+
     /** Replaces a known colour word in the display name, or appends the new colour. */
     private static String deriveDisplayName(String original, String newColorName) {
         for (String c : COLOR_NAMES) {
@@ -364,6 +455,10 @@ public class ColorTriangleItem extends Item {
             if (original.contains(c))   return original.replace(c,   newColorName.toLowerCase());
         }
         return original + " " + newColorName;
+    }
+
+    public static String variantDisplayNameFor(String sourceName, String colorLabel) {
+        return deriveDisplayName(sourceName, colorLabel);
     }
 
     private TriangleColor resolveColor(ItemStack stack) {
@@ -381,7 +476,9 @@ public class ColorTriangleItem extends Item {
                 }
             }
         }
-        return new TriangleColor(targetR, targetG, targetB, colorName, colorName.toLowerCase(Locale.ROOT));
+        String key = colorName.toLowerCase(Locale.ROOT);
+        int[] rgb = CustomBlocksConfig.builtInTriangleRgb(key, targetR, targetG, targetB);
+        return new TriangleColor(rgb[0], rgb[1], rgb[2], colorName, key);
     }
 
     private static boolean isCustomTriangle(ItemStack stack) {

@@ -82,7 +82,7 @@ public class GoldenHexagonItem extends Item {
 
         if (player != null && !player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
             player.sendMessage(
-                Text.literal("§c[CustomBlocks] You need OP to use the Golden Hexagon."), true);
+                Text.literal("§0§l[§b§lCB§0§l]§r §cYou need OP to use the Golden Hexagon."), true);
             if (world instanceof ServerWorld sw)
                 sw.playSound(null, player.getBlockPos(),
                     net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),
@@ -112,7 +112,7 @@ public class GoldenHexagonItem extends Item {
         if (faceBytes == null || faceBytes.length == 0) {
             if (player != null) {
                 player.sendMessage(
-                    Text.literal("§0§l[§b§lCB§0§l] §cThis face has no texture data to manipulate."), true);
+                    Text.literal("§0§l[§b§lCB§0§l]§r §cThis face has no texture data to manipulate."), true);
                 if (world instanceof ServerWorld sw)
                     sw.playSound(null, player.getBlockPos(),
                         net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),
@@ -139,7 +139,7 @@ public class GoldenHexagonItem extends Item {
                 BufferedImage img = ImageIO.read(new ByteArrayInputStream(sourceBytes));
                 if (img == null) {
                     server.execute(() -> player.sendMessage(
-                        Text.literal("§c[CustomBlocks] Failed to decode face texture."), true));
+                        Text.literal("§0§l[§b§lCB§0§l]§r §cFailed to decode face texture."), true));
                     return;
                 }
 
@@ -188,7 +188,7 @@ public class GoldenHexagonItem extends Item {
                     NetworkManager.broadcastUpdate(server, pkt);
 
                     player.sendMessage(Text.literal(
-                        "§0§l[§b§lCB§0§l] §a" + actionLabel + " §a✔"), true);
+                        "§0§l[§b§lCB§0§l]§r §a" + actionLabel + " §a✔"), true);
 
                     if (world instanceof ServerWorld sw) {
                         sw.spawnParticles(net.minecraft.particle.ParticleTypes.END_ROD,
@@ -202,7 +202,7 @@ public class GoldenHexagonItem extends Item {
             } catch (Exception e) {
                 CustomBlocksMod.LOGGER.error("[CustomBlocks] Golden Hexagon transform error", e);
                 server.execute(() -> player.sendMessage(
-                    Text.literal("§c[CustomBlocks] Image transform failed: " + e.getMessage()), true));
+                    Text.literal("§0§l[§b§lCB§0§l]§r §cImage transform failed: " + e.getMessage()), true));
             }
         }, "CB-GoldenHexagon");
         t.setDaemon(true);

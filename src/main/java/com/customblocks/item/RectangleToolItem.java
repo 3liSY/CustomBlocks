@@ -81,7 +81,7 @@ public class RectangleToolItem extends Item {
         if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
 
         if (player != null && !player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
-            player.sendMessage(Text.literal("§c[CustomBlocks] You need OP to use the Rainbow Rectangle."), true);
+            player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §cYou need OP to use the Rainbow Rectangle."), true);
             return ActionResult.FAIL;
         }
 
@@ -106,7 +106,7 @@ public class RectangleToolItem extends Item {
         SESSION_TIMESTAMPS.put(uuid, System.currentTimeMillis());
 
         player.sendMessage(Text.literal(
-            "§6[CustomBlocks] §eClicked §f" + face.toUpperCase() + " §eof §f" + data.displayName + "§e."), false);
+            "§0§l[§b§lCB§0§l]§r §eClicked §f" + face.toUpperCase() + " §eof §f" + data.displayName + "§e."), false);
         player.sendMessage(Text.literal(
             "§ePaste image URL (PNG/JPG/GIF/WebP…) — will create a new variant:"), false);
         player.sendMessage(Text.literal(
@@ -132,14 +132,14 @@ public class RectangleToolItem extends Item {
         String trimmed = message.trim();
 
         if (trimmed.equalsIgnoreCase("cancel")) {
-            player.sendMessage(Text.literal("§7[CustomBlocks] Face-paint cancelled."), false);
+            player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §7Face-paint cancelled."), false);
             player.getServerWorld().playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
             return true;
         }
 
         if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
             player.sendMessage(Text.literal(
-                "§c[CustomBlocks] Needs a URL starting with http:// or https://"), false);
+                "§0§l[§b§lCB§0§l]§r §cNeeds a URL starting with http:// or https://"), false);
             return true;
         }
 
@@ -151,7 +151,7 @@ public class RectangleToolItem extends Item {
         if (server == null) return true;
 
         player.sendMessage(Text.literal(
-            "§e[CustomBlocks] Downloading " + face.toUpperCase() + " face at §f" + size + "px§e…"), false);
+            "§0§l[§b§lCB§0§l]§r §eDownloading " + face.toUpperCase() + " face at §f" + size + "px§e..."), false);
 
         Thread t = new Thread(() -> {
             try {
@@ -166,7 +166,7 @@ public class RectangleToolItem extends Item {
                     faceBytes = anim.bytes();
                     faceAnim  = anim.mcmeta();
                     server.execute(() -> player.sendMessage(Text.literal(
-                        "§b[CustomBlocks] Animated Image — " + anim.frameCount() + " frames!"), false));
+                        "§0§l[§b§lCB§0§l]§r §bAnimated Image — " + anim.frameCount() + " frames!"), false));
                 } else {
                     faceBytes = ImageProcessor.toPng(raw);
                     faceBytes = ImageProcessor.padToSquare(faceBytes);
@@ -181,12 +181,12 @@ public class RectangleToolItem extends Item {
                     SlotData original = SlotManager.getById(baseId);
                     if (original == null) {
                         player.sendMessage(Text.literal(
-                            "§c[CustomBlocks] Block '" + baseId + "' was deleted."), false);
+                            "§0§l[§b§lCB§0§l]§r §cBlock '" + baseId + "' was deleted."), false);
                         return;
                     }
                     if (SlotManager.freeSlots() == 0) {
                         player.sendMessage(Text.literal(
-                            "§c[CustomBlocks] No free slots! Delete a block first."), false);
+                            "§0§l[§b§lCB§0§l]§r §cNo free slots! Delete a block first."), false);
                         return;
                     }
 
@@ -196,7 +196,7 @@ public class RectangleToolItem extends Item {
                     byte[] texCopy = original.texture != null ? original.texture.clone() : null;
                     SlotData newBlock = SlotManager.assign(variantId, variantName, texCopy);
                     if (newBlock == null) {
-                        player.sendMessage(Text.literal("§c[CustomBlocks] Could not create variant — no free slots."), false);
+                        player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §cCould not create variant — no free slots."), false);
                         return;
                     }
 
@@ -237,7 +237,7 @@ public class RectangleToolItem extends Item {
                     }
 
                     player.sendMessage(Text.literal(
-                        "§a[CustomBlocks] Created variant §f'" + variantId + "'§a! " +
+                        "§0§l[§b§lCB§0§l]§r §aCreated variant §f'" + variantId + "'§a! " +
                         "§7(slot #" + newBlock.index + ") — original untouched."), false);
                     
                     world.spawnParticles(net.minecraft.particle.ParticleTypes.END_ROD, session.pos().getX() + 0.5, session.pos().getY() + 0.5, session.pos().getZ() + 0.5, 20, 0.3, 0.3, 0.3, 0.1);
@@ -246,7 +246,7 @@ public class RectangleToolItem extends Item {
 
             } catch (Exception e) {
                 server.execute(() -> player.sendMessage(
-                    Text.literal("§c[CustomBlocks] Failed: " + e.getMessage()), false));
+                    Text.literal("§0§l[§b§lCB§0§l]§r §cFailed: " + e.getMessage()), false));
             }
         }, "PB-RectDownload");
         t.setDaemon(true);

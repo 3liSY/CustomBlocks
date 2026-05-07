@@ -61,7 +61,7 @@ public class AmethystChiselItem extends Item {
 
         if (player != null && !player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
             player.sendMessage(
-                Text.literal("§c[CustomBlocks] You need OP to use the Amethyst Chisel."), true);
+                Text.literal("§0§l[§b§lCB§0§l]§r §cYou need OP to use the Amethyst Chisel."), true);
             if (world instanceof ServerWorld sw)
                 sw.playSound(null, player.getBlockPos(),
                     net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),

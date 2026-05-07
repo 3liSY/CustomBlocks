@@ -592,14 +592,14 @@ public class CustomBlocksMod implements ModInitializer {
                     }
                     com.customblocks.core.CategoryDisplayBlockManager.unregister(dimId, hitPos);
                     sp.getServerWorld().breakBlock(hitPos, false, sp);
-                    sp.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A77Picked up display block."), true);
+                    sp.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l]\u00A7r \u00A77Picked up display block."), true);
                     return net.minecraft.util.ActionResult.SUCCESS;
                 } else {
                     com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(existingCat);
                     if (cat != null) {
                         GuiManager.openCategoryDetail(sp, existingCat, 0);
                     } else {
-                        sp.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l] \u00A7cThis category no longer exists."), false);
+                        sp.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l]\u00A7r \u00A7cThis category no longer exists."), false);
                     }
                     return net.minecraft.util.ActionResult.SUCCESS;
                 }

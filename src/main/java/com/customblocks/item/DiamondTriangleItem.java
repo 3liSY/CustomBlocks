@@ -55,7 +55,7 @@ public class DiamondTriangleItem extends Item {
         if (world.isClient) return TypedActionResult.pass(player.getStackInHand(hand));
         if (player instanceof ServerPlayerEntity sp) {
             if (!sp.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
-                sp.sendMessage(Text.literal("§c[CustomBlocks] You need OP to use the Diamond Triangle."), true);
+                sp.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §cYou need OP to use the Diamond Triangle."), true);
                 if (world instanceof ServerWorld sw)
                     sw.playSound(null, sp.getBlockPos(),
                         net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),
@@ -82,7 +82,7 @@ public class DiamondTriangleItem extends Item {
         if (world.isClient) return ActionResult.PASS;
         if (!(player instanceof ServerPlayerEntity sp)) return ActionResult.PASS;
         if (!sp.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
-            sp.sendMessage(Text.literal("§c[CustomBlocks] You need OP to use the Diamond Triangle."), true);
+            sp.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §cYou need OP to use the Diamond Triangle."), true);
             return ActionResult.FAIL;
         }
         BlockState state = world.getBlockState(ctx.getBlockPos());

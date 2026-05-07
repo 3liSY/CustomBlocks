@@ -58,6 +58,12 @@ public final class CustomBlocksConfig {
     public static volatile boolean hideCustomBlockText = false;
     /** Whether to hide category badges from item lore entirely. */
     public static volatile boolean hideCategoryBadge = false;
+    /** Colour tool mode: "unset", "corners_only", "corners_and_trapped". */
+    public static volatile String colorToolBackgroundMode = "unset";
+    /** Editable built-in shade for green recolor tools. */
+    public static volatile String triangleGreenHex = "#1E8C1E";
+    /** Editable built-in shade for yellow recolor tools. */
+    public static volatile String triangleYellowHex = "#F0C814";
 
     // ── Network ──────────────────────────────────────────────────────────────
     /** Number of texture payloads to drip-feed per server tick. */
@@ -138,6 +144,9 @@ public final class CustomBlocksConfig {
             aiHologram            = getBool(root, "aiHologram", getBool(root, "helperHologram", aiHologram));
             hideCustomBlockText   = getBool(root, "hideCustomBlockText", hideCustomBlockText);
             hideCategoryBadge     = getBool(root, "hideCategoryBadge", hideCategoryBadge);
+            colorToolBackgroundMode = getString(root, "colorToolBackgroundMode", colorToolBackgroundMode);
+            triangleGreenHex      = normalizeHexColor(getString(root, "triangleGreenHex", triangleGreenHex), triangleGreenHex);
+            triangleYellowHex     = normalizeHexColor(getString(root, "triangleYellowHex", triangleYellowHex), triangleYellowHex);
 
             // Clamp values
             int clampedMaxSlots = Math.max(1, Math.min(8192, maxSlots));
@@ -179,6 +188,13 @@ public final class CustomBlocksConfig {
             if (!undoMode.equals("global") && !undoMode.equals("per_player") && !undoMode.equals("both")) {
                 LOGGER.warn("[CustomBlocks] Invalid undoMode '{}', defaulting to 'both'", undoMode);
                 undoMode = "both";
+                shouldRewrite = true;
+            }
+            if (!colorToolBackgroundMode.equals("unset")
+                    && !colorToolBackgroundMode.equals("corners_only")
+                    && !colorToolBackgroundMode.equals("corners_and_trapped")) {
+                LOGGER.warn("[CustomBlocks] Invalid colorToolBackgroundMode '{}', defaulting to 'unset'", colorToolBackgroundMode);
+                colorToolBackgroundMode = "unset";
                 shouldRewrite = true;
             }
 
@@ -228,6 +244,9 @@ public final class CustomBlocksConfig {
             root.addProperty("aiHologram", aiHologram);
             root.addProperty("hideCustomBlockText", hideCustomBlockText);
             root.addProperty("hideCategoryBadge", hideCategoryBadge);
+            root.addProperty("colorToolBackgroundMode", colorToolBackgroundMode);
+            root.addProperty("triangleGreenHex", normalizeHexColor(triangleGreenHex, "#1E8C1E"));
+            root.addProperty("triangleYellowHex", normalizeHexColor(triangleYellowHex, "#F0C814"));
             Path tempFile = dir.resolve(CONFIG_FILE + ".tmp");
             Files.writeString(tempFile, GSON.toJson(root), StandardCharsets.UTF_8);
             java.nio.file.Files.move(tempFile, file,
@@ -279,7 +298,51 @@ public final class CustomBlocksConfig {
             || !root.has("aiHologram")
             || !root.has("hideCustomBlockText")
             || !root.has("hideCategoryBadge")
+            || !root.has("colorToolBackgroundMode")
+            || !root.has("triangleGreenHex")
+            || !root.has("triangleYellowHex")
 ;
+    }
+
+    /** Returns true when player has chosen a color tool mode in /cb config. */
+    public static boolean isColorToolModeConfigured() {
+        return !"unset".equals(colorToolBackgroundMode);
+    }
+
+    /** Mode B: corner fill + trapped-hole fill. */
+    public static boolean useTrappedHoleFill() {
+        return "corners_and_trapped".equals(colorToolBackgroundMode);
+    }
+
+    /** Resolve built-in triangle colour, allowing config-tuned shades. */
+    public static int[] builtInTriangleRgb(String colorKey, int fallbackR, int fallbackG, int fallbackB) {
+        String key = colorKey == null ? "" : colorKey.toLowerCase().trim();
+        String hex = switch (key) {
+            case "green" -> triangleGreenHex;
+            case "yellow" -> triangleYellowHex;
+            default -> null;
+        };
+        if (hex == null) return new int[]{fallbackR, fallbackG, fallbackB};
+        int rgb = parseHexColor(hex, (fallbackR << 16) | (fallbackG << 8) | fallbackB);
+        return new int[]{(rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF};
+    }
+
+    private static String normalizeHexColor(String raw, String fallback) {
+        if (raw == null) return fallback;
+        String s = raw.trim();
+        if (!s.startsWith("#")) s = "#" + s;
+        if (!s.matches("(?i)^#[0-9a-f]{6}$")) return fallback;
+        return s.toUpperCase();
+    }
+
+    private static int parseHexColor(String raw, int fallback) {
+        String normalized = normalizeHexColor(raw, null);
+        if (normalized == null) return fallback;
+        try {
+            return Integer.parseInt(normalized.substring(1), 16);
+        } catch (Exception ignored) {
+            return fallback;
+        }
     }
 
     private CustomBlocksConfig() {} // static-only
