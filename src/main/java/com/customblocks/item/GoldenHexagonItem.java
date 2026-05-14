@@ -1,7 +1,8 @@
 package com.customblocks.item;
 
 import com.customblocks.CustomBlocksMod;
-import com.customblocks.CustomBlocksConfig;
+import com.customblocks.command.PermissionHelper;
+import com.customblocks.gui.ChatHelper;
 import com.customblocks.ImageProcessor;
 import com.customblocks.core.SlotData;
 import com.customblocks.core.SlotManager;
@@ -19,8 +20,6 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
-import net.minecraft.util.Hand;
-import net.minecraft.util.TypedActionResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
@@ -30,9 +29,8 @@ import java.awt.image.AffineTransformOp;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.util.Map;
+import java.util.Locale;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Golden Hexagon — UV face manipulation wand.
@@ -44,9 +42,6 @@ import java.util.concurrent.ConcurrentHashMap;
  * clicked face). Creates a face override automatically if one doesn't exist.
  */
 public class GoldenHexagonItem extends Item {
-
-    // Track rotation state per player per block-face
-    private static final Map<String, Integer> ROTATION_STATE = new ConcurrentHashMap<>();
 
     public GoldenHexagonItem(Settings settings) { super(settings); }
 
@@ -80,9 +75,8 @@ public class GoldenHexagonItem extends Item {
         BlockState state = world.getBlockState(pos);
         if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
 
-        if (player != null && !player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
-            player.sendMessage(
-                Text.literal("§0§l[§b§lCB§0§l]§r §cYou need OP to use the Golden Hexagon."), true);
+        if (player != null && !PermissionHelper.canUseTool(player)) {
+            player.sendMessage(PermissionHelper.toolPermissionDeniedMessage(), true);
             if (world instanceof ServerWorld sw)
                 sw.playSound(null, player.getBlockPos(),
                     net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),
@@ -111,8 +105,7 @@ public class GoldenHexagonItem extends Item {
 
         if (faceBytes == null || faceBytes.length == 0) {
             if (player != null) {
-                player.sendMessage(
-                    Text.literal("§0§l[§b§lCB§0§l]§r §cThis face has no texture data to manipulate."), true);
+                player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_hex_no_face_texture")), true);
                 if (world instanceof ServerWorld sw)
                     sw.playSound(null, player.getBlockPos(),
                         net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),
@@ -133,18 +126,18 @@ public class GoldenHexagonItem extends Item {
         // Process the image transformation in a thread to avoid blocking
         final byte[] sourceBytes = faceBytes;
         final boolean flip = isSneaking;
+        final String faceU = face.toUpperCase(Locale.ROOT);
 
         Thread t = new Thread(() -> {
             try {
                 BufferedImage img = ImageIO.read(new ByteArrayInputStream(sourceBytes));
                 if (img == null) {
                     server.execute(() -> player.sendMessage(
-                        Text.literal("§0§l[§b§lCB§0§l]§r §cFailed to decode face texture."), true));
+                        Text.literal(ChatHelper.formattedKey("cmd.tool_hex_decode_failed")), true));
                     return;
                 }
 
                 BufferedImage result;
-                String actionLabel;
 
                 if (flip) {
                     // Horizontal flip
@@ -152,7 +145,6 @@ public class GoldenHexagonItem extends Item {
                     tx.translate(-img.getWidth(), 0);
                     AffineTransformOp op = new AffineTransformOp(tx, AffineTransformOp.TYPE_NEAREST_NEIGHBOR);
                     result = op.filter(img, null);
-                    actionLabel = "§dFlipped §f" + face.toUpperCase() + " §dhorizontally";
                 } else {
                     // Rotate 90° clockwise
                     int w = img.getWidth();
@@ -164,7 +156,6 @@ public class GoldenHexagonItem extends Item {
                         }
                     }
                     result = rotated;
-                    actionLabel = "§eRotated §f" + face.toUpperCase() + " §e90° clockwise";
                 }
 
                 // Encode back to PNG
@@ -187,8 +178,9 @@ public class GoldenHexagonItem extends Item {
                         face, null, null);
                     NetworkManager.broadcastUpdate(server, pkt);
 
-                    player.sendMessage(Text.literal(
-                        "§0§l[§b§lCB§0§l]§r §a" + actionLabel + " §a✔"), true);
+                    player.sendMessage(Text.literal(flip
+                        ? ChatHelper.formattedKey("cmd.tool_hex_done_flip", faceU)
+                        : ChatHelper.formattedKey("cmd.tool_hex_done_rotate", faceU)), true);
 
                     if (world instanceof ServerWorld sw) {
                         sw.spawnParticles(net.minecraft.particle.ParticleTypes.END_ROD,
@@ -202,7 +194,7 @@ public class GoldenHexagonItem extends Item {
             } catch (Exception e) {
                 CustomBlocksMod.LOGGER.error("[CustomBlocks] Golden Hexagon transform error", e);
                 server.execute(() -> player.sendMessage(
-                    Text.literal("§0§l[§b§lCB§0§l]§r §cImage transform failed: " + e.getMessage()), true));
+                    Text.literal(ChatHelper.formattedKey("cmd.tool_hex_transform_failed", e.getMessage())), true));
             }
         }, "CB-GoldenHexagon");
         t.setDaemon(true);

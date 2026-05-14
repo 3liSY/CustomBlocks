@@ -1,5 +1,6 @@
 package com.customblocks;
 
+import com.customblocks.core.VoiceCatalog;
 import com.google.gson.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -8,6 +9,10 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Centralised configuration for CustomBlocks.
@@ -44,14 +49,39 @@ public final class CustomBlocksConfig {
     // ── Undo System ──────────────────────────────────────────────────────────
     /** Undo mode: "global" = single shared stack, "per_player" = one stack per player, "both" = both available. */
     public static volatile String undoMode = "both";
-    /** Maximum undo depth (per stack). */
-    public static volatile int maxUndoDepth = 20;
+    /** Maximum undo depth (per stack). Expanded to 10000 in v2 for "unlimited undo" experience. */
+    public static volatile int maxUndoDepth = 10000;
+    /** Minimum selection size that requires a second click to confirm bulk deletion (H2). */
+    public static volatile int bulkConfirmThreshold = 10;
 
     // ── Permissions ──────────────────────────────────────────────────────────
-    /** Default OP level required for admin commands (create/delete/edit). */
-    public static volatile int permissionLevelAdmin = 2;
+    /** Default OP level required for admin commands (create/delete/edit). Hardened in v2 per A6. */
+    public static volatile int permissionLevelAdmin = 4;
     /** Default OP level required for use commands (give/gui). */
     public static volatile int permissionLevelUse = 0;
+    /**
+     * When {@code true}, a saved {@link #permissionLevelAdmin} value of {@code 2} is kept on load (v1-era opt-out).
+     * When {@code false} (default), loading {@code permissionLevelAdmin: 2} from disk is migrated to {@code 4} (X1 / A6).
+     */
+    public static volatile boolean permissionLevelAdminUser = false;
+
+    /**
+     * Per-node vanilla OP fallbacks when Fabric Permissions API is absent (A6).
+     * Each value is clamped to 0–4; LuckPerms still overrides when installed.
+     */
+    public static volatile int permissionFallbackUse = 0;
+    public static volatile int permissionFallbackEdit = 0;
+    public static volatile int permissionFallbackCreate = 4;
+    public static volatile int permissionFallbackDelete = 4;
+    public static volatile int permissionFallbackBulk = 4;
+    public static volatile int permissionFallbackFavorites = 4;
+    public static volatile int permissionFallbackConfig = 4;
+    public static volatile int permissionFallbackAdmin = 4;
+    public static volatile int permissionFallbackPanic = 4;
+    public static volatile int permissionFallbackUndo = 4;
+    public static volatile int permissionFallbackMarketplacePublish = 2;
+    public static volatile int permissionFallbackAi = 4;
+    public static volatile int permissionFallbackDevConsole = 4;
 
     // ── Item Lore & UI ───────────────────────────────────────────────────────
     /** Whether to hide the "Custom Blocks" creative tab text from item lore. */
@@ -85,12 +115,60 @@ public final class CustomBlocksConfig {
     public static volatile boolean aiEnabled = false;
     /** The assistant AI display name. */
     public static volatile String aiName = "CustomBlocks AI";
-    /** The assistant AI visual style. */
-    public static volatile String aiStyle = "Echo";
+    /** Branded chat voice (Phase B2 phrases); migrated from legacy {@code aiStyle}. */
+    public static volatile String voiceMode = "friendly";
+
+    public static final Set<String> VOICE_MODES =
+        Set.of("friendly", "professional", "royal", "minimal", "arabic", "silly");
     /** Whether the live status hologram is visible. */
     public static volatile boolean aiHologram = true;
 
-    // ── Public API ───────────────────────────────────────────────────────────
+    /**
+     * Phase B4 did-you-mean for unknown first argument: {@code off}, {@code strict} (distance ≤1),
+     * {@code smart} (≤3), {@code genius} (smart + block-id gift + light memory).
+     */
+    public static volatile String didYouMeanMode = "smart";
+
+    // ── Safety Nets (Phase Q) ────────────────────────────────────────────────
+    /** Minutes between auto-snapshots (0 = disabled). Default 30. */
+    public static volatile int autoSnapshotMinutes = 30;
+
+    // ── Performance (Phase D) ────────────────────────────────────────────────
+    /** Instant-click aggressiveness in ms (0 = max RAM/instant, 10000 = lazy). Default 300. */
+    @Deprecated // TODO: wire into instant-click system or remove
+    public static volatile int instantClickAggressivenessMs = 300;
+
+    // ── Feedback Layers (Phase F) ────────────────────────────────────────────
+    /** Master toggle for feedback sounds. */
+    public static volatile boolean soundsEnabled = true;
+    /** Master toggle for feedback particles. */
+    public static volatile boolean particlesEnabled = true;
+    /** Per-category sound toggles (Phase F4). */
+    public static final Map<String, Boolean> soundCategories = new LinkedHashMap<>();
+    /** Per-category particle toggles (Phase F5). */
+    public static final Map<String, Boolean> particleCategories = new LinkedHashMap<>();
+
+    static {
+        resetFeedbackCategoryDefaults(soundCategories);
+        resetFeedbackCategoryDefaults(particleCategories);
+    }
+
+    // ── Marketplace (Phase L) ────────────────────────────────────────────────
+    /** Enable the in-game marketplace UI (separate from cloudShareEnabled). */
+    @Deprecated // TODO: wire into marketplace UI or remove
+    public static volatile boolean marketplaceEnabled = true;
+
+    // ── Holograms (Phase I) ──────────────────────────────────────────────────
+    /** Whether floating name holograms appear above placed custom blocks. */
+    public static volatile boolean hologramEnabled = false;
+    /** Height in blocks above the block's base at which the hologram marker floats. */
+    public static volatile float hologramHeight = 1.5f;
+    /** MC formatting-code prefix applied to all hologram labels (e.g. "§e§l"). */
+    public static volatile String hologramColor = "§e§l";
+
+    // ── Notifications (Phase M) ──────────────────────────────────────────────
+    /** Discord webhook URL for block create/delete/panic events. Empty = disabled. */
+    public static volatile String discordWebhookUrl = "";
 
     public static void setResourcePackPort(int port) {
         resourcePackPort = port;
@@ -105,6 +183,29 @@ public final class CustomBlocksConfig {
         String url = cloudShareUrl == null ? "" : cloudShareUrl.trim();
         while (url.endsWith("/")) url = url.substring(0, url.length() - 1);
         return url;
+    }
+
+    public static String normalizeVoiceMode(String raw) {
+        if (raw == null) return "friendly";
+        String v = raw.toLowerCase(Locale.ROOT).trim();
+        return VOICE_MODES.contains(v) ? v : "friendly";
+    }
+
+    public static String normalizeDidYouMeanMode(String raw) {
+        if (raw == null) return "smart";
+        String s = raw.toLowerCase(Locale.ROOT).trim();
+        return switch (s) {
+            case "off", "strict", "smart", "genius" -> s;
+            default -> "smart";
+        };
+    }
+
+    private static String mapLegacyAiStyleToVoiceMode(String legacy) {
+        if (legacy == null) return "friendly";
+        String s = legacy.trim().toLowerCase(Locale.ROOT);
+        if ("echo".equals(s)) return "friendly";
+        if ("pro".equals(s)) return "professional";
+        return normalizeVoiceMode(s);
     }
 
     /** Load configuration from disk, creating defaults if missing. */
@@ -130,8 +231,50 @@ public final class CustomBlocksConfig {
             sessionTimeoutSeconds = getInt(root, "sessionTimeoutSeconds", sessionTimeoutSeconds);
             undoMode              = getString(root, "undoMode", undoMode);
             maxUndoDepth          = getInt(root, "maxUndoDepth", maxUndoDepth);
-            permissionLevelAdmin  = getInt(root, "permissionLevelAdmin", permissionLevelAdmin);
+            bulkConfirmThreshold  = getInt(root, "bulkConfirmThreshold", bulkConfirmThreshold);
+            permissionLevelAdminUser = getBool(root, "permissionLevelAdminUser", permissionLevelAdminUser);
+            int rawPermissionLevelAdmin = root.has("permissionLevelAdmin")
+                ? root.get("permissionLevelAdmin").getAsInt()
+                : permissionLevelAdmin;
+            permissionLevelAdmin = rawPermissionLevelAdmin;
+            if (rawPermissionLevelAdmin == 2 && !permissionLevelAdminUser) {
+                permissionLevelAdmin = 4;
+                shouldRewrite = true;
+                LOGGER.warn("[CustomBlocks] Hardened permissionLevelAdmin from 2 to 4 (v2 default). "
+                    + "To keep OP level 2, set \"permissionLevelAdminUser\": true and \"permissionLevelAdmin\": 2 in config.json.");
+            }
             permissionLevelUse    = getInt(root, "permissionLevelUse", permissionLevelUse);
+
+            if (!root.has("permissionFallbackUse")) {
+                permissionFallbackUse = permissionLevelUse;
+                permissionFallbackEdit = permissionLevelUse;
+                permissionFallbackCreate = permissionLevelAdmin;
+                permissionFallbackDelete = permissionLevelAdmin;
+                permissionFallbackBulk = permissionLevelAdmin;
+                permissionFallbackFavorites = permissionLevelAdmin;
+                permissionFallbackConfig = permissionLevelAdmin;
+                permissionFallbackAdmin = permissionLevelAdmin;
+                permissionFallbackPanic = permissionLevelAdmin;
+                permissionFallbackUndo = permissionLevelAdmin;
+                permissionFallbackMarketplacePublish = 2;
+                permissionFallbackAi = permissionLevelAdmin;
+                permissionFallbackDevConsole = permissionLevelAdmin;
+                shouldRewrite = true;
+            } else {
+                permissionFallbackUse = getInt(root, "permissionFallbackUse", permissionFallbackUse);
+                permissionFallbackEdit = getInt(root, "permissionFallbackEdit", permissionFallbackEdit);
+                permissionFallbackCreate = getInt(root, "permissionFallbackCreate", permissionFallbackCreate);
+                permissionFallbackDelete = getInt(root, "permissionFallbackDelete", permissionFallbackDelete);
+                permissionFallbackBulk = getInt(root, "permissionFallbackBulk", permissionFallbackBulk);
+                permissionFallbackFavorites = getInt(root, "permissionFallbackFavorites", permissionFallbackFavorites);
+                permissionFallbackConfig = getInt(root, "permissionFallbackConfig", permissionFallbackConfig);
+                permissionFallbackAdmin = getInt(root, "permissionFallbackAdmin", permissionFallbackAdmin);
+                permissionFallbackPanic = getInt(root, "permissionFallbackPanic", permissionFallbackPanic);
+                permissionFallbackUndo = getInt(root, "permissionFallbackUndo", permissionFallbackUndo);
+                permissionFallbackMarketplacePublish = getInt(root, "permissionFallbackMarketplacePublish", permissionFallbackMarketplacePublish);
+                permissionFallbackAi = getInt(root, "permissionFallbackAi", permissionFallbackAi);
+                permissionFallbackDevConsole = getInt(root, "permissionFallbackDevConsole", permissionFallbackDevConsole);
+            }
             texturePayloadsPerTick= getInt(root, "texturePayloadsPerTick", texturePayloadsPerTick);
             resourcePackPort      = getInt(root, "resourcePackPort", resourcePackPort);
             reloadDebounceMs      = getLong(root, "reloadDebounceMs", reloadDebounceMs);
@@ -140,8 +283,28 @@ public final class CustomBlocksConfig {
             cloudShareEnabled     = getBool(root, "cloudShareEnabled", cloudShareEnabled);
             aiEnabled             = getBool(root, "aiEnabled", getBool(root, "helperEnabled", aiEnabled));
             aiName                = getString(root, "aiName", getString(root, "helperName", aiName));
-            aiStyle               = getString(root, "aiStyle", getString(root, "helperSkin", aiStyle));
+            if (root.has("voiceMode")) {
+                voiceMode = normalizeVoiceMode(getString(root, "voiceMode", voiceMode));
+            } else if (root.has("aiStyle")) {
+                voiceMode = mapLegacyAiStyleToVoiceMode(getString(root, "aiStyle", getString(root, "helperSkin", "Echo")));
+                shouldRewrite = true;
+            } else {
+                voiceMode = normalizeVoiceMode(voiceMode);
+            }
             aiHologram            = getBool(root, "aiHologram", getBool(root, "helperHologram", aiHologram));
+            didYouMeanMode         = normalizeDidYouMeanMode(getString(root, "didYouMeanMode", didYouMeanMode));
+            autoSnapshotMinutes    = Math.max(0, Math.min(1440, getInt(root, "autoSnapshotMinutes", autoSnapshotMinutes)));
+            instantClickAggressivenessMs = Math.max(0, Math.min(10000, getInt(root, "instantClickAggressivenessMs", instantClickAggressivenessMs)));
+            soundsEnabled          = getBool(root, "soundsEnabled", soundsEnabled);
+            particlesEnabled       = getBool(root, "particlesEnabled", particlesEnabled);
+            loadFeedbackCategories(root, "soundCategories", soundCategories);
+            loadFeedbackCategories(root, "particleCategories", particleCategories);
+            marketplaceEnabled     = getBool(root, "marketplaceEnabled", marketplaceEnabled);
+            discordWebhookUrl     = getString(root, "discordWebhookUrl", discordWebhookUrl);
+            hologramEnabled       = getBool(root, "hologramEnabled", hologramEnabled);
+            hologramHeight        = root.has("hologramHeight") ? root.get("hologramHeight").getAsFloat() : hologramHeight;
+            hologramHeight        = Math.max(0.5f, Math.min(5.0f, hologramHeight));
+            hologramColor         = getString(root, "hologramColor", hologramColor);
             hideCustomBlockText   = getBool(root, "hideCustomBlockText", hideCustomBlockText);
             hideCategoryBadge     = getBool(root, "hideCategoryBadge", hideCategoryBadge);
             colorToolBackgroundMode = getString(root, "colorToolBackgroundMode", colorToolBackgroundMode);
@@ -154,9 +317,23 @@ public final class CustomBlocksConfig {
             int clampedBgRemovalTolerance = Math.max(0, Math.min(100, bgRemovalTolerance));
             int clampedDownloadTimeoutSeconds = Math.max(1, Math.min(120, downloadTimeoutSeconds));
             int clampedSessionTimeoutSeconds = Math.max(0, Math.min(3600, sessionTimeoutSeconds));
-            int clampedMaxUndoDepth = Math.max(1, Math.min(100, maxUndoDepth));
+            int clampedMaxUndoDepth = Math.max(1, Math.min(100_000, maxUndoDepth));
+            int clampedBulkConfirmThreshold = Math.max(1, Math.min(1000, bulkConfirmThreshold));
             int clampedPermissionLevelAdmin = Math.max(0, Math.min(4, permissionLevelAdmin));
             int clampedPermissionLevelUse = Math.max(0, Math.min(4, permissionLevelUse));
+            int cU = Math.max(0, Math.min(4, permissionFallbackUse));
+            int cE = Math.max(0, Math.min(4, permissionFallbackEdit));
+            int cC = Math.max(0, Math.min(4, permissionFallbackCreate));
+            int cD = Math.max(0, Math.min(4, permissionFallbackDelete));
+            int cB = Math.max(0, Math.min(4, permissionFallbackBulk));
+            int cF = Math.max(0, Math.min(4, permissionFallbackFavorites));
+            int cCfg = Math.max(0, Math.min(4, permissionFallbackConfig));
+            int cAd = Math.max(0, Math.min(4, permissionFallbackAdmin));
+            int cPn = Math.max(0, Math.min(4, permissionFallbackPanic));
+            int cUn = Math.max(0, Math.min(4, permissionFallbackUndo));
+            int cMp = Math.max(0, Math.min(4, permissionFallbackMarketplacePublish));
+            int cAi = Math.max(0, Math.min(4, permissionFallbackAi));
+            int cDc = Math.max(0, Math.min(4, permissionFallbackDevConsole));
             int clampedTexturePayloadsPerTick = Math.max(1, Math.min(50, texturePayloadsPerTick));
 
             shouldRewrite |= clampedMaxSlots != maxSlots;
@@ -165,8 +342,22 @@ public final class CustomBlocksConfig {
             shouldRewrite |= clampedDownloadTimeoutSeconds != downloadTimeoutSeconds;
             shouldRewrite |= clampedSessionTimeoutSeconds != sessionTimeoutSeconds;
             shouldRewrite |= clampedMaxUndoDepth != maxUndoDepth;
+            shouldRewrite |= clampedBulkConfirmThreshold != bulkConfirmThreshold;
             shouldRewrite |= clampedPermissionLevelAdmin != permissionLevelAdmin;
             shouldRewrite |= clampedPermissionLevelUse != permissionLevelUse;
+            shouldRewrite |= cU != permissionFallbackUse;
+            shouldRewrite |= cE != permissionFallbackEdit;
+            shouldRewrite |= cC != permissionFallbackCreate;
+            shouldRewrite |= cD != permissionFallbackDelete;
+            shouldRewrite |= cB != permissionFallbackBulk;
+            shouldRewrite |= cF != permissionFallbackFavorites;
+            shouldRewrite |= cCfg != permissionFallbackConfig;
+            shouldRewrite |= cAd != permissionFallbackAdmin;
+            shouldRewrite |= cPn != permissionFallbackPanic;
+            shouldRewrite |= cUn != permissionFallbackUndo;
+            shouldRewrite |= cMp != permissionFallbackMarketplacePublish;
+            shouldRewrite |= cAi != permissionFallbackAi;
+            shouldRewrite |= cDc != permissionFallbackDevConsole;
             shouldRewrite |= clampedTexturePayloadsPerTick != texturePayloadsPerTick;
 
             maxSlots              = clampedMaxSlots;
@@ -175,8 +366,22 @@ public final class CustomBlocksConfig {
             downloadTimeoutSeconds= clampedDownloadTimeoutSeconds;
             sessionTimeoutSeconds = clampedSessionTimeoutSeconds;
             maxUndoDepth          = clampedMaxUndoDepth;
+            bulkConfirmThreshold  = clampedBulkConfirmThreshold;
             permissionLevelAdmin  = clampedPermissionLevelAdmin;
             permissionLevelUse    = clampedPermissionLevelUse;
+            permissionFallbackUse = cU;
+            permissionFallbackEdit = cE;
+            permissionFallbackCreate = cC;
+            permissionFallbackDelete = cD;
+            permissionFallbackBulk = cB;
+            permissionFallbackFavorites = cF;
+            permissionFallbackConfig = cCfg;
+            permissionFallbackAdmin = cAd;
+            permissionFallbackPanic = cPn;
+            permissionFallbackUndo = cUn;
+            permissionFallbackMarketplacePublish = cMp;
+            permissionFallbackAi = cAi;
+            permissionFallbackDevConsole = cDc;
             texturePayloadsPerTick= clampedTexturePayloadsPerTick;
 
             String normalizedCloudUrl = normalizedCloudShareUrl();
@@ -210,6 +415,7 @@ public final class CustomBlocksConfig {
             } else {
                 LOGGER.info("[CustomBlocks] Cloud Vault: DISABLED -> local-only share codes");
             }
+            VoiceCatalog.invalidate();
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] Failed to load config, using defaults", e);
         }
@@ -230,8 +436,23 @@ public final class CustomBlocksConfig {
             root.addProperty("sessionTimeoutSeconds", sessionTimeoutSeconds);
             root.addProperty("undoMode", undoMode);
             root.addProperty("maxUndoDepth", maxUndoDepth);
+            root.addProperty("bulkConfirmThreshold", bulkConfirmThreshold);
             root.addProperty("permissionLevelAdmin", permissionLevelAdmin);
+            root.addProperty("permissionLevelAdminUser", permissionLevelAdminUser);
             root.addProperty("permissionLevelUse", permissionLevelUse);
+            root.addProperty("permissionFallbackUse", permissionFallbackUse);
+            root.addProperty("permissionFallbackEdit", permissionFallbackEdit);
+            root.addProperty("permissionFallbackCreate", permissionFallbackCreate);
+            root.addProperty("permissionFallbackDelete", permissionFallbackDelete);
+            root.addProperty("permissionFallbackBulk", permissionFallbackBulk);
+            root.addProperty("permissionFallbackFavorites", permissionFallbackFavorites);
+            root.addProperty("permissionFallbackConfig", permissionFallbackConfig);
+            root.addProperty("permissionFallbackAdmin", permissionFallbackAdmin);
+            root.addProperty("permissionFallbackPanic", permissionFallbackPanic);
+            root.addProperty("permissionFallbackUndo", permissionFallbackUndo);
+            root.addProperty("permissionFallbackMarketplacePublish", permissionFallbackMarketplacePublish);
+            root.addProperty("permissionFallbackAi", permissionFallbackAi);
+            root.addProperty("permissionFallbackDevConsole", permissionFallbackDevConsole);
             root.addProperty("texturePayloadsPerTick", texturePayloadsPerTick);
             root.addProperty("resourcePackPort", resourcePackPort);
             root.addProperty("reloadDebounceMs", reloadDebounceMs);
@@ -240,18 +461,31 @@ public final class CustomBlocksConfig {
             root.addProperty("cloudShareEnabled", cloudShareEnabled);
             root.addProperty("aiEnabled", aiEnabled);
             root.addProperty("aiName", aiName);
-            root.addProperty("aiStyle", aiStyle);
+            root.addProperty("voiceMode", voiceMode);
+            root.addProperty("didYouMeanMode", didYouMeanMode);
             root.addProperty("aiHologram", aiHologram);
             root.addProperty("hideCustomBlockText", hideCustomBlockText);
             root.addProperty("hideCategoryBadge", hideCategoryBadge);
             root.addProperty("colorToolBackgroundMode", colorToolBackgroundMode);
             root.addProperty("triangleGreenHex", normalizeHexColor(triangleGreenHex, "#1E8C1E"));
             root.addProperty("triangleYellowHex", normalizeHexColor(triangleYellowHex, "#F0C814"));
+            root.addProperty("autoSnapshotMinutes", autoSnapshotMinutes);
+            root.addProperty("instantClickAggressivenessMs", instantClickAggressivenessMs);
+            root.addProperty("soundsEnabled", soundsEnabled);
+            root.addProperty("particlesEnabled", particlesEnabled);
+            root.add("soundCategories", writeFeedbackCategories(soundCategories));
+            root.add("particleCategories", writeFeedbackCategories(particleCategories));
+            root.addProperty("marketplaceEnabled", marketplaceEnabled);
+            root.addProperty("discordWebhookUrl", discordWebhookUrl);
+            root.addProperty("hologramEnabled", hologramEnabled);
+            root.addProperty("hologramHeight", hologramHeight);
+            root.addProperty("hologramColor", hologramColor);
             Path tempFile = dir.resolve(CONFIG_FILE + ".tmp");
             Files.writeString(tempFile, GSON.toJson(root), StandardCharsets.UTF_8);
             java.nio.file.Files.move(tempFile, file,
                 java.nio.file.StandardCopyOption.ATOMIC_MOVE,
                 java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            VoiceCatalog.invalidate();
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] Failed to save config", e);
         }
@@ -284,8 +518,10 @@ public final class CustomBlocksConfig {
             || !root.has("sessionTimeoutSeconds")
             || !root.has("undoMode")
             || !root.has("maxUndoDepth")
+            || !root.has("bulkConfirmThreshold")
             || !root.has("permissionLevelAdmin")
             || !root.has("permissionLevelUse")
+            || !root.has("permissionFallbackUse")
             || !root.has("texturePayloadsPerTick")
             || !root.has("resourcePackPort")
             || !root.has("reloadDebounceMs")
@@ -294,14 +530,21 @@ public final class CustomBlocksConfig {
             || !root.has("cloudShareEnabled")
             || !root.has("aiEnabled")
             || !root.has("aiName")
-            || !root.has("aiStyle")
+            || !root.has("voiceMode")
+            || !root.has("didYouMeanMode")
             || !root.has("aiHologram")
             || !root.has("hideCustomBlockText")
             || !root.has("hideCategoryBadge")
             || !root.has("colorToolBackgroundMode")
             || !root.has("triangleGreenHex")
             || !root.has("triangleYellowHex")
-;
+            || !root.has("autoSnapshotMinutes")
+            || !root.has("instantClickAggressivenessMs")
+            || !root.has("soundsEnabled")
+            || !root.has("particlesEnabled")
+            || !root.has("soundCategories")
+            || !root.has("particleCategories")
+            || !root.has("marketplaceEnabled");
     }
 
     /** Returns true when player has chosen a color tool mode in /cb config. */
@@ -343,6 +586,52 @@ public final class CustomBlocksConfig {
         } catch (Exception ignored) {
             return fallback;
         }
+    }
+
+    private static void resetFeedbackCategoryDefaults(Map<String, Boolean> out) {
+        out.clear();
+        out.put("success", true);
+        out.put("error", true);
+        out.put("gui", true);
+        out.put("selection", true);
+        out.put("bulk_complete", true);
+        out.put("rp_regenerate", true);
+        out.put("achievement", true);
+    }
+
+    private static void loadFeedbackCategories(JsonObject root, String key, Map<String, Boolean> target) {
+        Map<String, Boolean> defaults = new LinkedHashMap<>();
+        resetFeedbackCategoryDefaults(defaults);
+        target.clear();
+        target.putAll(defaults);
+        if (!root.has(key) || !root.get(key).isJsonObject()) return;
+        JsonObject obj = root.getAsJsonObject(key);
+        for (Map.Entry<String, JsonElement> e : obj.entrySet()) {
+            String k = e.getKey() == null ? "" : e.getKey().trim().toLowerCase(Locale.ROOT);
+            if (!target.containsKey(k)) continue;
+            try {
+                target.put(k, e.getValue().getAsBoolean());
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private static JsonObject writeFeedbackCategories(Map<String, Boolean> src) {
+        JsonObject out = new JsonObject();
+        Map<String, Boolean> defaults = new LinkedHashMap<>();
+        resetFeedbackCategoryDefaults(defaults);
+        for (String key : defaults.keySet()) {
+            out.addProperty(key, src.getOrDefault(key, true));
+        }
+        return out;
+    }
+
+    public static boolean isSoundCategoryEnabled(String key) {
+        return soundsEnabled && soundCategories.getOrDefault(key, true);
+    }
+
+    public static boolean isParticleCategoryEnabled(String key) {
+        return particlesEnabled && particleCategories.getOrDefault(key, true);
     }
 
     private CustomBlocksConfig() {} // static-only

@@ -38,8 +38,12 @@ public class CbScreenHandler extends GenericContainerScreenHandler {
      * This avoids reopening the screen (which resets the mouse cursor position).
      */
     public void refreshWith(SimpleInventory newInv) {
-        for (int i = 0; i < Math.min(54, newInv.size()); i++) {
-            inventory.setStack(i, newInv.getStack(i));
+        int count = Math.min(54, newInv.size());
+        for (int i = 0; i < count; i++) {
+            ItemStack newStack = newInv.getStack(i);
+            if (!ItemStack.areEqual(inventory.getStack(i), newStack)) {
+                inventory.setStack(i, newStack);
+            }
         }
         this.syncState();
     }

@@ -1,9 +1,11 @@
 package com.customblocks.item;
 
 import com.customblocks.CustomBlocksConfig;
+import com.customblocks.command.PermissionHelper;
 import com.customblocks.core.SlotData;
 import com.customblocks.core.SlotManager;
 import com.customblocks.block.SlotBlock;
+import com.customblocks.gui.ChatHelper;
 import com.customblocks.gui.GuiManager;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.player.PlayerEntity;
@@ -54,8 +56,8 @@ public class DiamondTriangleItem extends Item {
     public TypedActionResult<ItemStack> use(World world, PlayerEntity player, Hand hand) {
         if (world.isClient) return TypedActionResult.pass(player.getStackInHand(hand));
         if (player instanceof ServerPlayerEntity sp) {
-            if (!sp.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
-                sp.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §cYou need OP to use the Diamond Triangle."), true);
+            if (!PermissionHelper.canUseTool(sp)) {
+                sp.sendMessage(PermissionHelper.toolPermissionDeniedMessage(), true);
                 if (world instanceof ServerWorld sw)
                     sw.playSound(null, sp.getBlockPos(),
                         net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),
@@ -81,17 +83,16 @@ public class DiamondTriangleItem extends Item {
         PlayerEntity player = ctx.getPlayer();
         if (world.isClient) return ActionResult.PASS;
         if (!(player instanceof ServerPlayerEntity sp)) return ActionResult.PASS;
-        if (!sp.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
-            sp.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §cYou need OP to use the Diamond Triangle."), true);
+        if (!PermissionHelper.canUseTool(sp)) {
+            sp.sendMessage(PermissionHelper.toolPermissionDeniedMessage(), true);
             return ActionResult.FAIL;
         }
         BlockState state = world.getBlockState(ctx.getBlockPos());
         if (state.getBlock() instanceof SlotBlock sb) {
             SlotData d = SlotManager.getBySlot(sb.getSlotKey());
             if (d != null) {
-                sp.sendMessage(Text.literal(
-                    "§b[Diamond Triangle] §fBlock context: §e" + d.displayName +
-                    " §7• Tolerance: §e" + CustomBlocksConfig.bgRemovalTolerance), false);
+                sp.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_diamond_block_context",
+                    d.displayName, CustomBlocksConfig.bgRemovalTolerance)), false);
             }
         }
         GuiManager.openBgStudio(sp);

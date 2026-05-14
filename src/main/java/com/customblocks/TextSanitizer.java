@@ -1,0 +1,86 @@
+package com.customblocks;
+
+public final class TextSanitizer {
+    private TextSanitizer() {}
+
+    public static String fix(String text) {
+        if (text == null) return "";
+        String fixed = text
+            .replace("ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€š§", "\u00A7")
+            .replace("Ãƒâ€šÃ‚Â§", "\u00A7")
+            .replace("Ãƒâ€š§", "\u00A7")
+            .replace("Ã‚Â§", "\u00A7")
+            .replace("Â§", "\u00A7")
+            .replace("Ã¢Å“Â¦", "✦")
+            .replace("Ã¢Â¬Â¡", "⬡")
+            .replace("ÃƒÂ¢Ã‚Â¬Ã‚Â¡", "⬡")
+            .replace("Ã¢â€\u009Dâ‚¬", "─")
+            .replace("Ã¢â€\u009DÅ“", "├")
+            .replace("Ã¢â€\u009Dâ€”", "└")
+            .replace("Ã¢â€\u009Dâ€š", "│")
+            .replace("Ã¢â€“Â¶", "▶")
+            .replace("Ã¢Å“Å½", "✎")
+            .replace("Ã°Å¸Å½Â¨", "🎨")
+            .replace("Ã°Å¸â€\u009DÂ\u008D", "🔍")
+            .replace("Ã¢â‚¬â€\u009D", "—")
+            .replace("Ã¢Å“â€\u009D", "✔")
+            .replace("Ã¢Å“â€“", "✖")
+            .replace("Ã¢Â\u008FÂ¸", "⏸")
+            .replace("Ã¢â€”â‚¬", "◀")
+            .replace("Ã¢Å¡â„¢", "⚙")
+            .replace("Ã¢â„¢Â«", "♫")
+            .replace("Ã¢â‚¬Â¦", "…")
+            .replace("Ã¢â€ â€™", "→")
+            .replace("â”‚", "│")
+            .replace("â–¶", "▶")
+            .replace("âœ¦", "✦")
+            .replace("âœ–", "✖")
+            .replace("â—€", "◀")
+            .replace("â¸", "⏸")
+            .replace("â†", "←")
+            .replace("”¢", "•")
+            .replace("Â°", "°")
+            .replace("Â·", "·")
+            .replace("”“", "–")
+            .replace("â€”", "—")
+            .replace("âœ”", "✔")
+            .replace("â†’", "→")
+            .replace("âœ˜", "✘")
+            .replace("â€¦", "…")
+            .replace("â€œ", "“")
+            .replace("â€\u009D", "”")
+            .replace("â€˜", "‘")
+            .replace("â€™", "’");
+
+        fixed = fixed.replaceAll("\\?([0-9A-FK-ORa-fk-or])", "§$1");
+
+        return fixed
+            .replace("Search closed ? nothing was searched.", "Search closed — nothing was searched.")
+            .replace("Bulk apply complete ? ", "Bulk apply complete — ")
+            .replace("Reload complete ? synced to all players.", "Reload complete — synced to all players.")
+            .replace("Resource pack reloads §aRESUMED§a ? clients will reload now.", "Resource pack reloads §aRESUMED§a — clients will reload now.")
+            .replace("Origin block §f{0} §7was deleted during create ? category saved without assignment.", "Origin block §f{0} §7was deleted during create — category saved without assignment.")
+            .replace("§e[Shape] '\u007b0\u007d' already exists ? opening it.", "§e[Shape] '\u007b0\u007d' already exists — opening it.")
+            .replace("Could not create variant ? no free slots.", "Could not create variant — no free slots.")
+            .replace("§8? §7", "§8│ §7")
+            .replace("§8?  §7", "§8│  §7")
+            .replace("§8? ", "§8│ ")
+            .replace(" §a?", " §a✔")
+            .replace(" §7?", " §7✘")
+            .replace("§a? Running", "§a✔ Running")
+            .replace("§c? Stopped", "§c✖ Stopped")
+            .replace("§6§l? Pause Reloads", "§6§l⏸ Pause Reloads")
+            .replace("§a§l? Resume Reloads", "§a§l▶ Resume Reloads")
+            .replace("§c? Back", "§c◀ Back")
+            .replace("§b§l? §r§f{0} §7(Display)", "§b§l▶ §r§f{0} §7(Display)")
+            .replace("Right-click ? §fopen this category", "Right-click → §fopen this category")
+            .replace("Sneak + right-click ? §fpick up", "Sneak + right-click → §fpick up")
+            .replace("Re-ID'd §f'\u007b0\u007d' §a? §f'\u007b1\u007d'§a.", "Re-ID'd §f'\u007b0\u007d' §a→ §f'\u007b1\u007d'§a.")
+            .replace("§fBlock shared! §7Code below §a? ", "§fBlock shared! §7Code below §a✔ ")
+            .replace("§a? Click the code in chat to copy!", "§a✔ Click the code in chat to copy!")
+            .replace("§7? copied from", "§7← copied from")
+            .replace("§8? §7Folder:", "§8• §7Folder:")
+            .replace("§8?", "§8│")
+            .replace("90? clockwise", "90° clockwise");
+    }
+}

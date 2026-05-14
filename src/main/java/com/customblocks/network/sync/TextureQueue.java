@@ -3,8 +3,6 @@ package com.customblocks.network.sync;
 import com.customblocks.network.ChunkedTexturePayload;
 import com.customblocks.network.SlotUpdatePayload;
 import net.minecraft.network.packet.CustomPayload;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
@@ -17,8 +15,6 @@ import java.util.concurrent.ConcurrentLinkedDeque;
  * rapid edits.
  */
 public final class TextureQueue {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger("CustomBlocks");
 
     /** Ordered queue of payloads waiting to be sent (SlotUpdatePayload or ChunkedTexturePayload). */
     private final ConcurrentLinkedDeque<CustomPayload> queue = new ConcurrentLinkedDeque<>();

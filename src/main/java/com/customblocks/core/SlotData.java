@@ -24,6 +24,10 @@ public final class SlotData {
     public final String animMeta;         // null if not animated
     public final List<ShapeBox> shapeBoxes;           // null = full cube
     public final boolean noCollision;
+    /** H4 — additional texture variants for random blockstate selection. Never null; may be empty. */
+    public final List<byte[]> variantTextures;
+    /** I2 — per-block hologram label override. null = use displayName. Empty = no hologram for this block. */
+    public final String hologramText;
     public final transient boolean isBroken;
     public final transient String displayNameLower;
 
@@ -57,7 +61,7 @@ public final class SlotData {
     // ── Face keys constant ───────────────────────────────────────────────────
     public static final Set<String> FACE_KEYS = Set.of("top", "bottom", "north", "south", "east", "west");
 
-    // ── Constructor ──────────────────────────────────────────────────────────
+    // ── Constructors ─────────────────────────────────────────────────────────
 
     public SlotData(int index, String customId, String displayName, byte[] texture,
                     int lightLevel, float hardness, String soundType,
@@ -65,14 +69,15 @@ public final class SlotData {
                     List<ShapeBox> shapeBoxes, boolean noCollision) {
         this(index, customId, displayName, texture, lightLevel, hardness, soundType,
                 faceTextures, animMeta, shapeBoxes, noCollision,
-                texture != null && com.customblocks.ImageProcessor.isBrokenTexture(texture));
+                texture != null && com.customblocks.ImageProcessor.isBrokenTexture(texture), null, null);
     }
 
-    /** Internal constructor — accepts precomputed isBroken to avoid redundant PNG decoding. */
+    /** Internal constructor — accepts precomputed isBroken, optional variantTextures, and optional hologramText. */
     SlotData(int index, String customId, String displayName, byte[] texture,
              int lightLevel, float hardness, String soundType,
              Map<String, byte[]> faceTextures, String animMeta,
-             List<ShapeBox> shapeBoxes, boolean noCollision, boolean precomputedBroken) {
+             List<ShapeBox> shapeBoxes, boolean noCollision, boolean precomputedBroken,
+             List<byte[]> variantTextures, String hologramText) {
         this.index        = index;
         this.customId     = customId;
         this.displayName  = displayName;
@@ -82,6 +87,7 @@ public final class SlotData {
         this.soundType    = soundType != null ? soundType : "stone";
         this.animMeta     = animMeta;
         this.noCollision  = noCollision;
+        this.hologramText = hologramText;
 
         // Deep-copy face textures
         if (faceTextures != null && !faceTextures.isEmpty()) {
@@ -94,6 +100,15 @@ public final class SlotData {
 
         // Deep-copy shape boxes
         this.shapeBoxes = shapeBoxes != null ? List.copyOf(shapeBoxes) : null;
+
+        // Deep-copy variant textures (H4)
+        if (variantTextures != null && !variantTextures.isEmpty()) {
+            List<byte[]> copy = new ArrayList<>(variantTextures.size());
+            for (byte[] v : variantTextures) copy.add(v != null ? v.clone() : new byte[0]);
+            this.variantTextures = Collections.unmodifiableList(copy);
+        } else {
+            this.variantTextures = List.of();
+        }
 
         this.isBroken = precomputedBroken;
         this.displayNameLower = this.displayName != null ? this.displayName.toLowerCase() : "";
@@ -109,7 +124,7 @@ public final class SlotData {
      *  where texture bytes come from trusted storage, not user upload. */
     static SlotData createTrusted(int index, String customId, String displayName, byte[] texture) {
         return new SlotData(index, customId, displayName, texture, 0, 1.5f, "stone",
-                null, null, null, false, false);
+                null, null, null, false, false, null, null);
     }
 
     /** Trusted factory — full fields, skips isBrokenTexture(). For deserialization from JSON. */
@@ -118,7 +133,27 @@ public final class SlotData {
                                       Map<String, byte[]> faceTextures, String animMeta,
                                       List<ShapeBox> shapeBoxes, boolean noCollision) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness, soundType,
-                faceTextures, animMeta, shapeBoxes, noCollision, false);
+                faceTextures, animMeta, shapeBoxes, noCollision, false, null, null);
+    }
+
+    /** Trusted factory — full fields + variant textures, skips isBrokenTexture(). */
+    static SlotData createTrustedFull(int index, String customId, String displayName, byte[] texture,
+                                      int lightLevel, float hardness, String soundType,
+                                      Map<String, byte[]> faceTextures, String animMeta,
+                                      List<ShapeBox> shapeBoxes, boolean noCollision,
+                                      List<byte[]> variantTextures) {
+        return new SlotData(index, customId, displayName, texture, lightLevel, hardness, soundType,
+                faceTextures, animMeta, shapeBoxes, noCollision, false, variantTextures, null);
+    }
+
+    /** Trusted factory — full fields + variant textures + hologramText. */
+    static SlotData createTrustedFull(int index, String customId, String displayName, byte[] texture,
+                                      int lightLevel, float hardness, String soundType,
+                                      Map<String, byte[]> faceTextures, String animMeta,
+                                      List<ShapeBox> shapeBoxes, boolean noCollision,
+                                      List<byte[]> variantTextures, String hologramText) {
+        return new SlotData(index, customId, displayName, texture, lightLevel, hardness, soundType,
+                faceTextures, animMeta, shapeBoxes, noCollision, false, variantTextures, hologramText);
     }
 
     // ── Query helpers ────────────────────────────────────────────────────────
@@ -126,6 +161,12 @@ public final class SlotData {
     public boolean isAnimated() { return animMeta != null && !animMeta.isEmpty(); }
     public boolean hasFaces()   { return !faceTextures.isEmpty(); }
     public boolean isShaped()   { return shapeBoxes != null && !shapeBoxes.isEmpty(); }
+    /** H4 — true when 1+ extra variant textures exist. */
+    public boolean hasVariants()  { return !variantTextures.isEmpty(); }
+    /** H4 — total number of visual variants (main + extras). */
+    public int variantCount()     { return 1 + variantTextures.size(); }
+    /** I2 — true when a custom hologram override is set for this block. */
+    public boolean hasHologramText() { return hologramText != null && !hologramText.isBlank(); }
 
     public String shapeLabel() {
         if (shapeBoxes == null || shapeBoxes.isEmpty()) return "Full Cube";
@@ -138,87 +179,100 @@ public final class SlotData {
 
     public SlotData withDisplayName(String name) {
         return new SlotData(index, customId, name, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken);
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken, this.variantTextures, this.hologramText);
     }
 
     public SlotData withCustomId(String newId) {
         return new SlotData(index, newId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken);
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken, this.variantTextures, this.hologramText);
     }
 
     public SlotData withTexture(byte[] tex) {
+        boolean broken = tex != null && com.customblocks.ImageProcessor.isBrokenTexture(tex);
         return new SlotData(index, customId, displayName, tex, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision);
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, broken, this.variantTextures, this.hologramText);
     }
 
     public SlotData withLightLevel(int level) {
         return new SlotData(index, customId, displayName, texture, level, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken);
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken, this.variantTextures, this.hologramText);
     }
 
     public SlotData withHardness(float h) {
         return new SlotData(index, customId, displayName, texture, lightLevel, h,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken);
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken, this.variantTextures, this.hologramText);
     }
 
     public SlotData withSoundType(String sound) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                sound, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken);
+                sound, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken, this.variantTextures, this.hologramText);
     }
 
     public SlotData withAnimMeta(String meta) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, meta, shapeBoxes, noCollision, this.isBroken);
+                soundType, faceTextures, meta, shapeBoxes, noCollision, this.isBroken, this.variantTextures, this.hologramText);
     }
 
     public SlotData withShapeBoxes(List<ShapeBox> boxes) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, boxes, noCollision, this.isBroken);
+                soundType, faceTextures, animMeta, boxes, noCollision, this.isBroken, this.variantTextures, this.hologramText);
     }
 
     public SlotData withNoCollision(boolean nc) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, nc, this.isBroken);
+                soundType, faceTextures, animMeta, shapeBoxes, nc, this.isBroken, this.variantTextures, this.hologramText);
     }
 
     public SlotData withFaceTexture(String face, byte[] tex) {
-        // Null safety: if face name or texture is null/empty, return unchanged
-        // Prevents NullPointerException crashes on tex.clone() when GIF processing fails
         if (face == null || face.isEmpty() || tex == null || tex.length == 0) {
             return this;
         }
         Map<String, byte[]> newFaces = new ConcurrentHashMap<>(faceTextures);
         newFaces.put(face, tex.clone());
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, newFaces, animMeta, shapeBoxes, noCollision, this.isBroken);
+                soundType, newFaces, animMeta, shapeBoxes, noCollision, this.isBroken, this.variantTextures, this.hologramText);
     }
 
     public SlotData withoutFaceTexture(String face) {
         Map<String, byte[]> newFaces = new ConcurrentHashMap<>(faceTextures);
         newFaces.remove(face);
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, newFaces, animMeta, shapeBoxes, noCollision, this.isBroken);
+                soundType, newFaces, animMeta, shapeBoxes, noCollision, this.isBroken, this.variantTextures, this.hologramText);
     }
 
     public SlotData withClearedFaces() {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, Collections.emptyMap(), animMeta, shapeBoxes, noCollision, this.isBroken);
+                soundType, Collections.emptyMap(), animMeta, shapeBoxes, noCollision, this.isBroken, this.variantTextures, this.hologramText);
     }
 
     public SlotData withIndex(int newIndex) {
         return new SlotData(newIndex, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken);
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken, this.variantTextures, this.hologramText);
     }
 
     public SlotData withProperties(int light, float hard, String sound) {
         return new SlotData(index, customId, displayName, texture, light, hard,
-                sound, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken);
+                sound, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken, this.variantTextures, this.hologramText);
+    }
+
+    /** H4 — replace the variant texture list (0–7 extra variants). */
+    public SlotData withVariantTextures(List<byte[]> variants) {
+        return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken,
+                variants == null ? List.of() : variants, this.hologramText);
+    }
+
+    /** I2 — set or clear the per-block hologram text override. null/blank = use displayName. */
+    public SlotData withHologramText(String text) {
+        return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken,
+                this.variantTextures, (text != null && !text.isBlank()) ? text : null);
     }
 
     /** Full deep copy — same as constructing from all fields. */
     public SlotData deepCopy() {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken);
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken, this.variantTextures, this.hologramText);
     }
 
     @Override

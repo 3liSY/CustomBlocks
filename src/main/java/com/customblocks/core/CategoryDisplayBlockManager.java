@@ -157,14 +157,14 @@ public final class CategoryDisplayBlockManager {
                 net.minecraft.component.type.NbtComponent.of(tag));
 
         stack.set(net.minecraft.component.DataComponentTypes.CUSTOM_NAME,
-                Text.literal("§b§l▶ §r§f" + category.displayName() + " §7(Display)"));
+                Text.literal(VoiceCatalog.format("cmd.display_block_item_name", category.displayName())));
 
         net.minecraft.component.type.LoreComponent lore = new net.minecraft.component.type.LoreComponent(java.util.List.of(
-                Text.literal("§7Place this block in the world."),
-                Text.literal("§7Right-click → §fopen this category"),
-                Text.literal("§7Sneak + right-click → §fpick up"),
+                Text.literal(VoiceCatalog.format("cmd.display_block_lore_place")),
+                Text.literal(VoiceCatalog.format("cmd.display_block_lore_right_click")),
+                Text.literal(VoiceCatalog.format("cmd.display_block_lore_sneak_pickup")),
                 Text.literal(""),
-                Text.literal("§8Category: §7" + category.key())
+                Text.literal(VoiceCatalog.format("cmd.display_block_lore_category_id", category.key()))
         ));
         stack.set(net.minecraft.component.DataComponentTypes.LORE, lore);
 

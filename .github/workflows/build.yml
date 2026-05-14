@@ -3,6 +3,8 @@ name: Build Mod JAR
 on:
   push:
     branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -24,6 +26,25 @@ jobs:
 
       - name: Build
         run: gradle clean build --no-build-cache --rerun-tasks
+
+      - name: Mojibake scan
+        run: |
+          echo "Scanning for mojibake sequences in source files..."
+          if grep -rn --include="*.java" $'Ã\u00a2\|Ã‚\|â€\|Ã£\|Ã¥\|Ã«\|Ã¯' src/; then
+            echo "ERROR: Mojibake sequences found in source. Fix encoding before merging."
+            exit 1
+          fi
+          echo "Mojibake scan passed."
+
+      - name: Sound annotation check
+        run: |
+          echo "Checking SoundEvents.BLOCK_NOTE_BLOCK_* usage..."
+          if grep -rn --include="*.java" 'SoundEvents\.BLOCK_NOTE_BLOCK_[A-Z_]*[^.]' src/ \
+              | grep -v '\.value()' | grep 'playSound\|playNote'; then
+            echo "ERROR: SoundEvents.BLOCK_NOTE_BLOCK_* used without .value() in a playSound call."
+            exit 1
+          fi
+          echo "Sound annotation check passed."
 
       - name: List build outputs
         run: ls -la build/libs/

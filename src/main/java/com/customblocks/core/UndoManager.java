@@ -304,56 +304,6 @@ public final class UndoManager {
         }
     }
 
-    public static synchronized CategoryUndoEntry popCategoryUndo(UUID playerUuid) {
-        String mode = CustomBlocksConfig.undoMode;
-        if ("per_player".equals(mode)) {
-            Deque<CategoryUndoEntry> s = CATEGORY_PLAYER_UNDO.get(playerUuid);
-            return s != null ? s.pollFirst() : null;
-        } else if ("global".equals(mode)) {
-            return CATEGORY_UNDO.pollFirst();
-        } else {
-            Deque<CategoryUndoEntry> s = CATEGORY_PLAYER_UNDO.get(playerUuid);
-            CategoryUndoEntry e = s != null ? s.pollFirst() : null;
-            if (e != null) {
-                CATEGORY_UNDO.removeFirstOccurrence(e);
-                return e;
-            }
-            return CATEGORY_UNDO.pollFirst();
-        }
-    }
-
-    public static synchronized void pushCategoryRedo(CategoryUndoEntry entry) {
-        int maxDepth = CustomBlocksConfig.maxUndoDepth;
-        String mode = CustomBlocksConfig.undoMode;
-        if ("global".equals(mode) || "both".equals(mode)) {
-            CATEGORY_REDO.addFirst(entry);
-            while (CATEGORY_REDO.size() > maxDepth) CATEGORY_REDO.removeLast();
-        }
-        if (("per_player".equals(mode) || "both".equals(mode)) && entry.playerUuid() != null) {
-            Deque<CategoryUndoEntry> stack = CATEGORY_PLAYER_REDO.computeIfAbsent(entry.playerUuid(), k -> new ArrayDeque<>());
-            stack.addFirst(entry);
-            while (stack.size() > maxDepth) stack.removeLast();
-        }
-    }
-
-    public static synchronized CategoryUndoEntry popCategoryRedo(UUID playerUuid) {
-        String mode = CustomBlocksConfig.undoMode;
-        if ("per_player".equals(mode)) {
-            Deque<CategoryUndoEntry> s = CATEGORY_PLAYER_REDO.get(playerUuid);
-            return s != null ? s.pollFirst() : null;
-        } else if ("global".equals(mode)) {
-            return CATEGORY_REDO.pollFirst();
-        } else {
-            Deque<CategoryUndoEntry> s = CATEGORY_PLAYER_REDO.get(playerUuid);
-            CategoryUndoEntry e = s != null ? s.pollFirst() : null;
-            if (e != null) {
-                CATEGORY_REDO.removeFirstOccurrence(e);
-                return e;
-            }
-            return CATEGORY_REDO.pollFirst();
-        }
-    }
-
     /** Clear all stacks (used on reload). */
     public static synchronized void clearAll() {
         GLOBAL_UNDO.clear();
@@ -389,6 +339,27 @@ public final class UndoManager {
     }
 
     public static synchronized List<UndoEntry> getRedoEntries(UUID playerUuid, int max) {
+        return getRedoEntries(playerUuid, 0, max);
+    }
+
+    public static synchronized List<UndoEntry> getUndoEntries(UUID playerUuid, int offset, int max) {
+        String mode = CustomBlocksConfig.undoMode;
+        Deque<UndoEntry> stack;
+        if ("per_player".equals(mode)) stack = PLAYER_UNDO.get(playerUuid);
+        else if ("global".equals(mode)) stack = GLOBAL_UNDO;
+        else { stack = PLAYER_UNDO.get(playerUuid); if (stack == null || stack.isEmpty()) stack = GLOBAL_UNDO; }
+        if (stack == null) return List.of();
+        List<UndoEntry> result = new ArrayList<>();
+        int skipped = 0;
+        for (UndoEntry e : stack) {
+            if (skipped++ < offset) continue;
+            result.add(e);
+            if (result.size() >= max) break;
+        }
+        return result;
+    }
+
+    public static synchronized List<UndoEntry> getRedoEntries(UUID playerUuid, int offset, int max) {
         String mode = CustomBlocksConfig.undoMode;
         Deque<UndoEntry> stack;
         if ("per_player".equals(mode)) stack = PLAYER_REDO.get(playerUuid);
@@ -396,7 +367,12 @@ public final class UndoManager {
         else { stack = PLAYER_REDO.get(playerUuid); if (stack == null || stack.isEmpty()) stack = GLOBAL_REDO; }
         if (stack == null) return List.of();
         List<UndoEntry> result = new ArrayList<>();
-        for (UndoEntry e : stack) { result.add(e); if (result.size() >= max) break; }
+        int skipped = 0;
+        for (UndoEntry e : stack) {
+            if (skipped++ < offset) continue;
+            result.add(e);
+            if (result.size() >= max) break;
+        }
         return result;
     }
 

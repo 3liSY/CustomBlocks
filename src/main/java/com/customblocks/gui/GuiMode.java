@@ -14,6 +14,7 @@ public enum GuiMode {
     SHAPE_EDITOR,
     MAINTENANCE_MENU,
     HELP_MENU,
+    WELCOME_MENU,
     TOOLS_GUI,
     PROPERTIES_MENU,
     SOUND_MENU,
@@ -49,7 +50,24 @@ public enum GuiMode {
     CATEGORY_ICON_PICKER,
     BULK_RECOLOR_WIZARD,
     BULK_RECOLOR_CONFIRM,
-    COLOR_FILL_MODE
+    COLOR_FILL_MODE,
+    RECOVER_GUI,
+    FEATURE_MENU,
+    /** Read-only LuckPerms node list (Phase A6). */
+    PERMISSIONS_SUMMARY,
+    COLOR_PICKER,
+    /** K2 — usage dashboard (top placements, activity). */
+    STATS_GUI,
+    /** H4 — variant texture manager for a single block. */
+    VARIANT_GUI,
+    /** G1 — color studio: tint/brightness/grayscale/invert/mirror/rotate on main texture. */
+    COLOR_STUDIO,
+    /** G2 — color palette generator: 16-color tint set from base texture. */
+    PALETTE_GENERATOR,
+    /** J2 — AI smart suggest: 18 curated one-click texture presets. */
+    AI_SUGGEST_GUI,
+    /** L3 — Cloud Vault market browser: browse + import shared blocks. */
+    MARKET_GUI
 }
 
 

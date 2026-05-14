@@ -53,8 +53,12 @@ public final class SlotManager {
     private static final java.util.concurrent.ExecutorService IO_EXECUTOR = java.util.concurrent.Executors.newSingleThreadExecutor(r -> new Thread(r, "CustomBlocks-IO"));
 
     // ── Debounced save ────────────────────────────────────────────────────────
-    private static volatile long lastDirtyTime = 0;
+    private static final java.util.concurrent.atomic.AtomicLong DIRTY_AT = new java.util.concurrent.atomic.AtomicLong(0);
     private static volatile boolean dirty = false;
+    private static final int STARTUP_LOAD_BATCH_SIZE = 200;
+    private static volatile List<JsonObject> startupLoadQueue = List.of();
+    private static final java.util.concurrent.atomic.AtomicInteger startupLoadCursor = new java.util.concurrent.atomic.AtomicInteger(0);
+    private static volatile boolean startupLoadInProgress = false;
     private static final java.util.concurrent.ScheduledExecutorService SAVE_SCHEDULER =
         java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "CustomBlocks-SaveScheduler");
@@ -64,7 +68,8 @@ public final class SlotManager {
 
     private static final String DATA_DIR  = "config/customblocks";
 
-    private static final String DATA_FILE = "slots.json";
+    private static final String DATA_FILE = "slots.json.gz";
+    private static final String LEGACY_DATA_FILE = "slots.json";
 
     private static final String TEXTURES_DIR = DATA_DIR + "/textures";
 
@@ -83,6 +88,13 @@ public final class SlotManager {
 
     /** Cached sorted slot list — invalidated on put()/remove(). */
     private static volatile List<SlotData> cachedSortedSlots = null;
+
+    /**
+     * O7 — flat luminance cache.  Sized by {@link #initLightCache(int)} at startup;
+     * updated by every {@link #put} / {@link #remove} call so the per-tick
+     * {@code luminance} lambda avoids ConcurrentHashMap lookups entirely.
+     */
+    private static volatile int[] LIGHT_CACHE = new int[0];
 
     private static volatile byte[] tabIconTexture = null;
 
@@ -133,6 +145,41 @@ public final class SlotManager {
 
 
     public static int maxSlots() { return CustomBlocksConfig.maxSlots; }
+
+    /**
+     * N3 — compute a per-slot CRC32 hash map: {@code slotIndex → hex(crc32(textureBytes))}.
+     * Used by the server to diff against client-reported hashes and send only changed slots.
+     */
+    public static java.util.Map<Integer, String> computeSlotHashMap() {
+        java.util.Map<Integer, String> result = new java.util.HashMap<>();
+        java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+        for (SlotData d : byId.values()) {
+            if (d.texture != null && d.texture.length > 0) {
+                crc.reset();
+                crc.update(d.texture);
+                result.put(d.index, Long.toHexString(crc.getValue()));
+            }
+        }
+        return result;
+    }
+
+    /**
+     * O7 — initialise the light cache to {@code maxSize} slots, pre-populating
+     * from any blocks already loaded.  Call once after config + slots are loaded.
+     */
+    public static synchronized void initLightCache(int maxSize) {
+        int[] arr = new int[maxSize];
+        for (SlotData d : byId.values()) {
+            if (d.index < maxSize) arr[d.index] = d.lightLevel;
+        }
+        LIGHT_CACHE = arr;
+    }
+
+    /** O7 — O(1) luminance lookup used by the per-tick {@code luminance} block-settings lambda. */
+    public static int getLightCached(int idx) {
+        int[] arr = LIGHT_CACHE;
+        return idx >= 0 && idx < arr.length ? arr[idx] : 0;
+    }
 
     public static int usedSlots() { return byId.size(); }
 
@@ -348,6 +395,20 @@ public final class SlotManager {
                 IO_EXECUTOR.submit(() -> writeFaceTextureFile(slotIdx, faceName, faceCopy));
             }
         }
+        // H4 — persist any changed variant textures
+        if (!old.variantTextures.equals(updated.variantTextures)) {
+            List<byte[]> newVariants = updated.variantTextures;
+            for (int i = 0; i < newVariants.size(); i++) {
+                final int vi = i;
+                final byte[] copy = newVariants.get(i).clone();
+                IO_EXECUTOR.submit(() -> writeVariantTextureFile(updated.index, vi, copy));
+            }
+            // Remove any files beyond the new variant count
+            for (int i = newVariants.size(); i < old.variantTextures.size(); i++) {
+                final int vi = i;
+                IO_EXECUTOR.submit(() -> writeVariantTextureFile(updated.index, vi, null));
+            }
+        }
     }
 
 
@@ -384,10 +445,16 @@ public final class SlotManager {
             bySlot.remove("slot_" + data.index);
             if (data.index < maxSlots()) freeSlotIndices.add(data.index);
             cachedSortedSlots = null;
+            // O7 — clear light cache for freed slot
+            int[] arr = LIGHT_CACHE;
+            if (data.index >= 0 && data.index < arr.length) arr[data.index] = 0;
             // Phase 1: clean up texture files
             final int slotIdx = data.index;
             IO_EXECUTOR.submit(() -> deleteTextureFiles(slotIdx));
             CategoryManager.clearAssignments(customId);
+            LockManager.onBlockDeleted(customId);
+            BlockNotesManager.onBlockDeleted(customId);
+            SearchIndex.invalidate();
         }
 
         return data;
@@ -403,6 +470,8 @@ public final class SlotManager {
         byId.clear();
 
         bySlot.clear();
+
+        SearchIndex.invalidate();
 
     }
 
@@ -578,11 +647,24 @@ public final class SlotManager {
      */
     public static void rotateBackups(Path file) {
         try {
-            String base = file.getFileName().toString().replace(".json", "");
+            String name = file.getFileName().toString();
+            String base;
+            String ext;
+            if (name.endsWith(".json.gz")) {
+                base = name.substring(0, name.length() - ".json.gz".length());
+                ext = ".json.gz";
+            } else if (name.endsWith(".json")) {
+                base = name.substring(0, name.length() - ".json".length());
+                ext = ".json";
+            } else {
+                int dot = name.lastIndexOf('.');
+                base = dot > 0 ? name.substring(0, dot) : name;
+                ext = dot > 0 ? name.substring(dot) : "";
+            }
             Path dir = file.getParent();
-            Path bak3 = dir.resolve(base + ".bak3.json");
-            Path bak2 = dir.resolve(base + ".bak2.json");
-            Path bak1 = dir.resolve(base + ".bak1.json");
+            Path bak3 = dir.resolve(base + ".bak3" + ext);
+            Path bak2 = dir.resolve(base + ".bak2" + ext);
+            Path bak1 = dir.resolve(base + ".bak1" + ext);
 
             if (Files.exists(bak2)) Files.move(bak2, bak3, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             if (Files.exists(bak1)) Files.move(bak1, bak2, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
@@ -593,17 +675,47 @@ public final class SlotManager {
         }
     }
 
+    private static String readCompressedJson(Path file) throws IOException {
+        try (java.util.zip.GZIPInputStream gz = new java.util.zip.GZIPInputStream(Files.newInputStream(file));
+             InputStreamReader isr = new InputStreamReader(gz, StandardCharsets.UTF_8);
+             BufferedReader br = new BufferedReader(isr)) {
+            StringBuilder sb = new StringBuilder();
+            char[] buf = new char[4096];
+            int n;
+            while ((n = br.read(buf)) >= 0) sb.append(buf, 0, n);
+            return sb.toString();
+        }
+    }
+
+    private static void writeCompressedJsonAtomic(Path file, String json) throws IOException {
+        Path tempFile = file.getParent().resolve(file.getFileName().toString() + ".tmp");
+        try (java.util.zip.GZIPOutputStream gz = new java.util.zip.GZIPOutputStream(Files.newOutputStream(tempFile));
+             OutputStreamWriter osw = new OutputStreamWriter(gz, StandardCharsets.UTF_8);
+             BufferedWriter bw = new BufferedWriter(osw)) {
+            bw.write(json);
+        }
+        Files.move(tempFile, file,
+            java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+    }
+
     public static void loadAll() {
         Path dir = Path.of(DATA_DIR);
         Path file = dir.resolve(DATA_FILE);
-        Path bak1 = dir.resolve("slots.bak1.json");
+        Path legacyFile = dir.resolve(LEGACY_DATA_FILE);
+        Path bak1 = dir.resolve("slots.bak1.json.gz");
 
         try {
             Files.createDirectories(dir);
 
             if (!Files.exists(file)) {
-                if (Files.exists(bak1)) {
-                    LOGGER.warn("[CustomBlocks] Primary file slots.json missing! Auto-restoring from backup.");
+                if (Files.exists(legacyFile)) {
+                    LOGGER.info("[CustomBlocks] Found legacy slots.json — migrating to slots.json.gz");
+                    String legacyJson = Files.readString(legacyFile, StandardCharsets.UTF_8);
+                    writeCompressedJsonAtomic(file, legacyJson);
+                    Files.copy(legacyFile, dir.resolve("slots.json.bak"), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                } else if (Files.exists(bak1)) {
+                    LOGGER.warn("[CustomBlocks] Primary file slots.json.gz missing! Auto-restoring from backup.");
                     Files.copy(bak1, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
                 } else {
                     LOGGER.info("[CustomBlocks] No slot data file found, starting fresh.");
@@ -615,9 +727,7 @@ public final class SlotManager {
                     }
                     // Layer 2: Global Directory & File Auto-Generation (Atomic Operations)
                     try {
-                        Path tmpSlots = dir.resolve("slots.json.tmp");
-                        Files.writeString(tmpSlots, "{ \"slots\": [] }", StandardCharsets.UTF_8);
-                        Files.move(tmpSlots, file, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                        writeCompressedJsonAtomic(file, "{ \"slots\": [] }");
 
                         Path catFile = dir.resolve("categories.json");
                         if (!Files.exists(catFile)) {
@@ -635,17 +745,17 @@ public final class SlotManager {
             // ── Load & Parse with Layer 3 Backup Fallback ─────────────────────
             JsonObject root = null;
             try {
-                String json = Files.readString(file, StandardCharsets.UTF_8);
+                String json = readCompressedJson(file);
                 root = JsonParser.parseString(json).getAsJsonObject();
             } catch (Exception parseEx) {
-                LOGGER.error("[CustomBlocks] slots.json is corrupted! Attempting auto-restore from .bak1...", parseEx);
+                LOGGER.error("[CustomBlocks] slots.json.gz is corrupted! Attempting auto-restore from .bak1...", parseEx);
                 if (Files.exists(bak1)) {
                     Files.copy(bak1, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                    String json = Files.readString(file, StandardCharsets.UTF_8);
+                    String json = readCompressedJson(file);
                     root = JsonParser.parseString(json).getAsJsonObject();
                     LOGGER.info("[CustomBlocks] Successfully restored and parsed from .bak1!");
                 } else {
-                    throw new RuntimeException("Corrupted slots.json and no backup available!");
+                    throw new RuntimeException("Corrupted slots.json.gz and no backup available!");
                 }
             }
 
@@ -665,130 +775,41 @@ public final class SlotManager {
 
 
 
-            // Slots
-
-            if (root.has("slots")) {
-
-                JsonArray arr = root.getAsJsonArray("slots");
-
-                synchronized (SlotManager.class) {
-
-                    byId.clear();
-
-                    bySlot.clear();
-
-                    for (JsonElement el : arr) {
-
-                        try {
-
-                            SlotData data = deserializeSlot(el.getAsJsonObject());
-
-                            put(data);
-
-                        } catch (Exception e) {
-
-                            LOGGER.warn("[CustomBlocks] Failed to load slot entry: {}", e.getMessage());
-
-                        }
-
-                    }
-
-                    // ── Duplicate slot index repair ─────────────────────
-                    {
-                        // indexToKeeper: slot index → first customId that claimed it
-                        Map<Integer, String> indexToKeeper = new HashMap<>();
-                        // Each entry: [0]=duplicate ID to reassign, [1]=keeper ID that stays
-                        List<String[]> toReassign = new ArrayList<>();
-                        for (SlotData d : new ArrayList<>(byId.values())) {
-                            String existing = indexToKeeper.putIfAbsent(d.index, d.customId);
-                            if (existing != null) {
-                                LOGGER.warn("[CustomBlocks] Duplicate slot index {} claimed by '{}' and '{}'. Will reassign '{}'.",
-                                        d.index, existing, d.customId, d.customId);
-                                toReassign.add(new String[]{d.customId, existing});
-                            }
-                        }
-                        for (String[] pair : toReassign) {
-                            SlotData d = byId.get(pair[0]);
-                            if (d == null) continue;
-                            int oldIdx = d.index;
-                            // Remove the duplicate from both maps
-                            byId.remove(pair[0]);
-                            bySlot.remove("slot_" + oldIdx);
-                            // Restore the keeper's bySlot entry so findFreeSlot() won't reuse it
-                            SlotData keeper = byId.get(pair[1]);
-                            if (keeper != null) bySlot.put("slot_" + oldIdx, keeper);
-                            int newIdx = findFreeSlot();
-                            if (newIdx >= 0) {
-                                put(d.withIndex(newIdx));
-                                LOGGER.info("[CustomBlocks] Reassigned '{}' from slot {} → slot {}", pair[0], oldIdx, newIdx);
-                            } else {
-                                LOGGER.error("[CustomBlocks] No free slot for '{}' — block dropped!", pair[0]);
-                            }
-                        }
-                        if (!toReassign.isEmpty()) {
-                            LOGGER.info("[CustomBlocks] {} duplicate(s) repaired. Saving corrected data.", toReassign.size());
-                            saveAll();  // trigger debounced save to persist the fix
-                        }
-                    }
-
-                    // Phase 1: load textures from individual .dat files
-                    Path texDir = Path.of(TEXTURES_DIR);
-                    if (Files.exists(texDir)) {
-                        int texLoaded = 0, faceLoaded = 0;
-                        for (SlotData d : new ArrayList<>(byId.values())) {
-                            // Load main texture from file if not already present from legacy Base64
-                            if (d.texture == null || d.texture.length == 0) {
-                                byte[] tex = readTextureFile(d.index);
-                                if (tex != null) {
-                                    put(d.withTexture(tex));
-                                    texLoaded++;
-                                    d = byId.get(d.customId); // re-fetch after put
-                                }
-                            }
-                            // Load face textures from files
-                            for (String face : SlotData.FACE_KEYS) {
-                                if (!d.faceTextures.containsKey(face)) {
-                                    byte[] faceTex = readFaceTextureFile(d.index, face);
-                                    if (faceTex != null) {
-                                        put(d.withFaceTexture(face, faceTex));
-                                        faceLoaded++;
-                                        d = byId.get(d.customId); // re-fetch after put
-                                    }
-                                }
-                            }
-                        }
-                        if (texLoaded > 0 || faceLoaded > 0) {
-                            LOGGER.info("[CustomBlocks] Loaded {} textures and {} face textures from files.", texLoaded, faceLoaded);
-                        }
-                    }
-
-                    // Phase 1: one-time migration — if textures dir doesn't exist but slots have textures,
-                    // write all textures to individual files
-                    if (!Files.exists(texDir)) {
-                        int migrated = 0;
-                        for (SlotData d : byId.values()) {
-                            if (d.texture != null && d.texture.length > 0) {
-                                writeTextureFile(d.index, d.texture);
-                                migrated++;
-                            }
-                            for (var face : d.faceTextures.entrySet()) {
-                                writeFaceTextureFile(d.index, face.getKey(), face.getValue());
-                            }
-                        }
-                        if (migrated > 0) {
-                            LOGGER.info("[CustomBlocks] Migration complete: wrote {} texture files to {}.", migrated, texDir);
-                        }
-                    }
-
-                    rebuildFreeSlotSet();
-
-                }
-
+            // Slots: parse once, then load in batches via tick loop (Phase D10).
+            synchronized (SlotManager.class) {
+                byId.clear();
+                bySlot.clear();
+                rebuildFreeSlotSet();
+                startupLoadQueue = List.of();
+                startupLoadCursor.set(0);
+                startupLoadInProgress = false;
             }
 
-
-
-            LOGGER.info("[CustomBlocks] Loaded {} slots ({} free).", byId.size(), freeSlotIndices.size());
+            if (root.has("slots")) {
+                JsonArray arr = root.getAsJsonArray("slots");
+                List<JsonObject> queue = new ArrayList<>(arr.size());
+                for (JsonElement el : arr) {
+                    try {
+                        queue.add(el.getAsJsonObject());
+                    } catch (Exception malformed) {
+                        LOGGER.warn("[CustomBlocks] Skipping malformed slot entry during startup parse: {}", malformed.getMessage());
+                    }
+                }
+                synchronized (SlotManager.class) {
+                    startupLoadQueue = Collections.unmodifiableList(queue);
+                    startupLoadCursor.set(0);
+                    startupLoadInProgress = !queue.isEmpty();
+                }
+                if (queue.isEmpty()) {
+                    postProcessLoadedSlots();
+                    LOGGER.info("[CustomBlocks] Loaded {} slots ({} free).", byId.size(), freeSlotIndices.size());
+                } else {
+                    LOGGER.info("[CustomBlocks] Queued {} slots for chunked startup load (batch={}).", queue.size(), STARTUP_LOAD_BATCH_SIZE);
+                }
+            } else {
+                postProcessLoadedSlots();
+                LOGGER.info("[CustomBlocks] Loaded {} slots ({} free).", byId.size(), freeSlotIndices.size());
+            }
 
         } catch (Exception e) {
 
@@ -800,6 +821,136 @@ public final class SlotManager {
 
     }
 
+    /** Phase D10: drain startup load queue in fixed-size batches each server tick. */
+    public static void tickStartupLoad() {
+        if (!startupLoadInProgress) return;
+
+        int loadedThisTick = 0;
+        boolean finished;
+        synchronized (SlotManager.class) {
+            List<JsonObject> queue = startupLoadQueue;
+            int cursor = startupLoadCursor.get();
+            while (cursor < queue.size() && loadedThisTick < STARTUP_LOAD_BATCH_SIZE) {
+                JsonObject obj = queue.get(cursor++);
+                try {
+                    SlotData data = deserializeSlot(obj);
+                    put(data);
+                } catch (Exception entryEx) {
+                    LOGGER.warn("[CustomBlocks] Failed to load slot entry: {}", entryEx.getMessage());
+                }
+                loadedThisTick++;
+            }
+            startupLoadCursor.set(cursor);
+            finished = cursor >= queue.size();
+            if (finished) {
+                startupLoadInProgress = false;
+                startupLoadQueue = List.of();
+            }
+        }
+
+        if (!finished) return;
+
+        try {
+            postProcessLoadedSlots();
+            LOGGER.info("[CustomBlocks] Startup load complete: {} slots loaded in 200-entry batches.", byId.size());
+            ResourcePackServer.updatePack();
+        } catch (Exception postEx) {
+            LOGGER.error("[CustomBlocks] Failed to finalize chunked startup load", postEx);
+            com.customblocks.gui.GuiManager.logError();
+        }
+    }
+
+    private static void postProcessLoadedSlots() throws IOException {
+        synchronized (SlotManager.class) {
+            // ── Duplicate slot index repair ─────────────────────
+            {
+                Map<Integer, String> indexToKeeper = new HashMap<>();
+                List<String[]> toReassign = new ArrayList<>();
+                for (SlotData d : new ArrayList<>(byId.values())) {
+                    String existing = indexToKeeper.putIfAbsent(d.index, d.customId);
+                    if (existing != null) {
+                        LOGGER.warn("[CustomBlocks] Duplicate slot index {} claimed by '{}' and '{}'. Will reassign '{}'.",
+                                d.index, existing, d.customId, d.customId);
+                        toReassign.add(new String[]{d.customId, existing});
+                    }
+                }
+                for (String[] pair : toReassign) {
+                    SlotData d = byId.get(pair[0]);
+                    if (d == null) continue;
+                    int oldIdx = d.index;
+                    byId.remove(pair[0]);
+                    bySlot.remove("slot_" + oldIdx);
+                    SlotData keeper = byId.get(pair[1]);
+                    if (keeper != null) bySlot.put("slot_" + oldIdx, keeper);
+                    int newIdx = findFreeSlot();
+                    if (newIdx >= 0) {
+                        put(d.withIndex(newIdx));
+                        LOGGER.info("[CustomBlocks] Reassigned '{}' from slot {} → slot {}", pair[0], oldIdx, newIdx);
+                    } else {
+                        LOGGER.error("[CustomBlocks] No free slot for '{}' — block dropped!", pair[0]);
+                    }
+                }
+                if (!toReassign.isEmpty()) {
+                    LOGGER.info("[CustomBlocks] {} duplicate(s) repaired. Saving corrected data.", toReassign.size());
+                    saveAll();
+                }
+            }
+
+            Path texDir = Path.of(TEXTURES_DIR);
+            if (Files.exists(texDir)) {
+                int texLoaded = 0, faceLoaded = 0;
+                for (SlotData d : new ArrayList<>(byId.values())) {
+                    if (d.texture == null || d.texture.length == 0) {
+                        byte[] tex = readTextureFile(d.index);
+                        if (tex != null) {
+                            put(d.withTexture(tex));
+                            texLoaded++;
+                            d = byId.get(d.customId);
+                        }
+                    }
+                    for (String face : SlotData.FACE_KEYS) {
+                        if (!d.faceTextures.containsKey(face)) {
+                            byte[] faceTex = readFaceTextureFile(d.index, face);
+                            if (faceTex != null) {
+                                put(d.withFaceTexture(face, faceTex));
+                                faceLoaded++;
+                                d = byId.get(d.customId);
+                            }
+                        }
+                    }
+                    // H4 — load variant textures from disk
+                    if (d.variantTextures.isEmpty()) {
+                        List<byte[]> variants = readVariantTextureFiles(d.index);
+                        if (!variants.isEmpty()) {
+                            put(d.withVariantTextures(variants));
+                        }
+                    }
+                }
+                if (texLoaded > 0 || faceLoaded > 0) {
+                    LOGGER.info("[CustomBlocks] Loaded {} textures and {} face textures from files.", texLoaded, faceLoaded);
+                }
+            }
+
+            if (!Files.exists(texDir)) {
+                int migrated = 0;
+                for (SlotData d : byId.values()) {
+                    if (d.texture != null && d.texture.length > 0) {
+                        writeTextureFile(d.index, d.texture);
+                        migrated++;
+                    }
+                    for (var face : d.faceTextures.entrySet()) {
+                        writeFaceTextureFile(d.index, face.getKey(), face.getValue());
+                    }
+                }
+                if (migrated > 0) {
+                    LOGGER.info("[CustomBlocks] Migration complete: wrote {} texture files to {}.", migrated, texDir);
+                }
+            }
+
+            rebuildFreeSlotSet();
+        }
+    }
+
 
 
     public static void saveAll() {
@@ -809,10 +960,10 @@ public final class SlotManager {
     /** Marks data as dirty. Actual save is debounced to avoid thrashing. */
     private static void markDirty() {
         dirty = true;
-        lastDirtyTime = System.currentTimeMillis();
+        DIRTY_AT.set(System.currentTimeMillis());
         long debounce = CustomBlocksConfig.reloadDebounceMs;
         SAVE_SCHEDULER.schedule(() -> {
-            if (dirty && (System.currentTimeMillis() - lastDirtyTime) >= (debounce - 200)) {
+            if (dirty && (System.currentTimeMillis() - DIRTY_AT.get()) >= (debounce - 200)) {
                 dirty = false;
                 saveAllAsync();
             }
@@ -890,9 +1041,9 @@ public final class SlotManager {
                 // each slot directly to disk. Peak memory: ~3MB vs 200-400MB.
                 Path tempFile = dir.resolve(DATA_FILE + ".tmp");
 
-                try (com.google.gson.stream.JsonWriter writer = new com.google.gson.stream.JsonWriter(
-                        new BufferedWriter(new OutputStreamWriter(
-                                new FileOutputStream(tempFile.toFile()), StandardCharsets.UTF_8)))) {
+                try (java.util.zip.GZIPOutputStream gz = new java.util.zip.GZIPOutputStream(new FileOutputStream(tempFile.toFile()));
+                     com.google.gson.stream.JsonWriter writer = new com.google.gson.stream.JsonWriter(
+                        new BufferedWriter(new OutputStreamWriter(gz, StandardCharsets.UTF_8)))) {
                     writer.setIndent("  ");
                     writer.beginObject();
 
@@ -939,105 +1090,112 @@ public final class SlotManager {
 
     /** Client-side: save to the .minecraft directory. */
 
+    /**
+     * D4 — Client-side: save slot metadata + textures as separate .dat files.
+     * Mirrors the server's Phase 1 design: slots.json holds only metadata,
+     * textures live in customblocks_data/textures/slot_N.dat.
+     * This reduces slots.json from ~10 MB to ~500 KB.
+     */
     public static void saveToClientDir(File mcDir) {
-
-        Path dir = mcDir.toPath().resolve("customblocks_data");
-
-        Path file = dir.resolve(DATA_FILE);
-
+        Path dir     = mcDir.toPath().resolve("customblocks_data");
+        Path texDir  = dir.resolve("textures");
+        Path file    = dir.resolve(LEGACY_DATA_FILE);
         try {
+            Files.createDirectories(texDir);
 
-            Files.createDirectories(dir);
-
-            Path tmpFile = dir.resolve(DATA_FILE + ".tmp");
-            // Streaming JSON writer — same as saveAllAsync(), avoids 200MB+ memory spike
+            // Write metadata-only JSON (no inline textures)
+            Path tmpFile = dir.resolve(LEGACY_DATA_FILE + ".tmp");
             try (com.google.gson.stream.JsonWriter writer = new com.google.gson.stream.JsonWriter(
                     new BufferedWriter(new OutputStreamWriter(
                             new FileOutputStream(tmpFile.toFile()), StandardCharsets.UTF_8)))) {
                 writer.setIndent("  ");
                 writer.beginObject();
-
                 if (tabIconTexture != null) {
                     writer.name("tabIconTexture").value(
                             Base64.getEncoder().encodeToString(tabIconTexture));
                 }
-
+                writer.name("d4").value(true); // marker: textures are stored as .dat files
                 writer.name("slots");
                 writer.beginArray();
                 for (SlotData data : byId.values()) {
-                    GSON.toJson(serializeSlotWithTextures(data), writer);
+                    GSON.toJson(serializeSlot(data), writer); // metadata only
                 }
                 writer.endArray();
-
                 writer.endObject();
             }
-            // Layered Defense: Atomic rename prevents corrupted slots.json if crash occurs mid-write
             Files.move(tmpFile, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
 
+            // Write textures as .dat files
+            for (SlotData data : byId.values()) {
+                if (data.texture != null && data.texture.length > 0)
+                    Files.write(texDir.resolve("slot_" + data.index + ".dat"), data.texture);
+                for (var face : data.faceTextures.entrySet())
+                    Files.write(texDir.resolve("slot_" + data.index + "_" + face.getKey() + ".dat"), face.getValue());
+                for (int vi = 0; vi < data.variantTextures.size(); vi++)
+                    Files.write(texDir.resolve("slot_" + data.index + "_var" + vi + ".dat"), data.variantTextures.get(vi));
+            }
+            LOGGER.info("[CustomBlocks] D4: client data saved ({} slots, textures in {}/)", byId.size(), texDir.getFileName());
         } catch (Exception e) {
-
             LOGGER.error("[CustomBlocks] Failed to save client data", e);
-
         }
-
     }
 
-
-
-    /** Client-side: load from .minecraft directory. */
-
+    /** D4 — Client-side: load slot metadata then textures from .dat files. */
     public static void loadFromClientDir(File mcDir) {
-
-        Path dir = mcDir.toPath().resolve("customblocks_data");
-
-        Path file = dir.resolve(DATA_FILE);
-
+        Path dir    = mcDir.toPath().resolve("customblocks_data");
+        Path texDir = dir.resolve("textures");
+        Path file   = dir.resolve(LEGACY_DATA_FILE);
         try {
-
             if (!Files.exists(file)) return;
 
             String json = Files.readString(file, StandardCharsets.UTF_8);
-
             JsonObject root = JsonParser.parseString(json).getAsJsonObject();
 
             if (root.has("tabIconTexture")) {
-
                 String b64 = root.get("tabIconTexture").getAsString();
-
                 if (!b64.isEmpty()) tabIconTexture = Base64.getDecoder().decode(b64);
-
             }
+
+            boolean d4 = root.has("d4") && root.get("d4").getAsBoolean();
 
             if (root.has("slots")) {
-
                 synchronized (SlotManager.class) {
-
                     byId.clear();
-
                     bySlot.clear();
-
                     for (JsonElement el : root.getAsJsonArray("slots")) {
-
                         try {
-
                             SlotData data = deserializeSlot(el.getAsJsonObject());
-
+                            // D4: load textures from .dat files if present
+                            if (d4 && Files.exists(texDir)) {
+                                Path tFile = texDir.resolve("slot_" + data.index + ".dat");
+                                if (data.texture == null && Files.exists(tFile))
+                                    data = data.withTexture(Files.readAllBytes(tFile));
+                                for (String face : SlotData.FACE_KEYS) {
+                                    if (!data.faceTextures.containsKey(face)) {
+                                        Path fFile = texDir.resolve("slot_" + data.index + "_" + face + ".dat");
+                                        if (Files.exists(fFile))
+                                            data = data.withFaceTexture(face, Files.readAllBytes(fFile));
+                                    }
+                                }
+                                // H4 variants
+                                if (data.variantTextures.isEmpty()) {
+                                    List<byte[]> variants = new ArrayList<>();
+                                    for (int vi = 0; vi < 8; vi++) {
+                                        Path vFile = texDir.resolve("slot_" + data.index + "_var" + vi + ".dat");
+                                        if (!Files.exists(vFile)) break;
+                                        variants.add(Files.readAllBytes(vFile));
+                                    }
+                                    if (!variants.isEmpty()) data = data.withVariantTextures(variants);
+                                }
+                            }
                             put(data);
-
                         } catch (Exception e) {
-
                             LOGGER.warn("[CustomBlocks] Client: failed to load slot: {}", e.getMessage());
-
                         }
-
                     }
-
                 }
-
             }
-
         } catch (Exception e) {
-
             LOGGER.error("[CustomBlocks] Failed to load client data", e);
 
         }
@@ -1083,6 +1241,16 @@ public final class SlotManager {
             JsonArray faceKeys = new JsonArray();
             d.faceTextures.keySet().forEach(faceKeys::add);
             obj.add("faceKeys", faceKeys);
+        }
+
+        // H4 — record variant count so loadAll() knows how many variant files to read
+        if (d.hasVariants()) {
+            obj.addProperty("variantCount", d.variantTextures.size());
+        }
+
+        // I2 — per-block hologram text override
+        if (d.hasHologramText()) {
+            obj.addProperty("hologramText", d.hologramText);
         }
 
 
@@ -1200,9 +1368,11 @@ public final class SlotManager {
 
 
 
-        return SlotData.createTrustedFull(index, customId, displayName, texture,
+        String hologramText = obj.has("hologramText") ? obj.get("hologramText").getAsString() : null;
 
-                lightLevel, hardness, soundType, faceTextures, animMeta, shapeBoxes, noCol);
+        return SlotData.createTrustedFull(index, customId, displayName, texture,
+                lightLevel, hardness, soundType, faceTextures, animMeta, shapeBoxes, noCol,
+                null, hologramText);
 
     }
 
@@ -1282,7 +1452,7 @@ public final class SlotManager {
         }
     }
 
-    /** Delete all texture files for a slot. */
+    /** Delete all texture files for a slot (main + face overrides + H4 variants). */
     private static void deleteTextureFiles(int slotIndex) {
         try {
             Path dir = Path.of(TEXTURES_DIR);
@@ -1293,6 +1463,7 @@ public final class SlotManager {
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] Failed to delete textures for slot_{}", slotIndex, e);
         }
+        deleteVariantTextureFiles(slotIndex);
     }
 
     /** Read a texture file from disk. Returns null if not found. */
@@ -1317,6 +1488,74 @@ public final class SlotManager {
         }
     }
 
+    // ── H4: Variant texture file I/O ─────────────────────────────────────────
+
+    /** H4 — write a variant texture for a given slot (variantIdx 0-based). */
+    private static void writeVariantTextureFile(int slotIndex, int variantIdx, byte[] data) {
+        try {
+            Path dir = Path.of(TEXTURES_DIR);
+            Files.createDirectories(dir);
+            String name = "slot_" + slotIndex + "_var" + variantIdx + ".dat";
+            if (data != null && data.length > 0) {
+                Files.write(dir.resolve(name), data);
+            } else {
+                Files.deleteIfExists(dir.resolve(name));
+            }
+        } catch (Exception e) {
+            LOGGER.error("[CustomBlocks] Failed to write variant {} for slot_{}", variantIdx, slotIndex, e);
+        }
+    }
+
+    /** H4 — read all variant textures for a slot (var0, var1, …) until a file is missing. */
+    private static List<byte[]> readVariantTextureFiles(int slotIndex) {
+        List<byte[]> result = new ArrayList<>();
+        for (int i = 0; i < 8; i++) {
+            Path file = Path.of(TEXTURES_DIR, "slot_" + slotIndex + "_var" + i + ".dat");
+            if (!Files.exists(file)) break;
+            try {
+                result.add(Files.readAllBytes(file));
+            } catch (Exception e) {
+                LOGGER.error("[CustomBlocks] Failed to read variant {} for slot_{}", i, slotIndex, e);
+                break;
+            }
+        }
+        return result;
+    }
+
+    /** H4 — delete all variant texture files for a slot. */
+    private static void deleteVariantTextureFiles(int slotIndex) {
+        try {
+            for (int i = 0; i < 8; i++) {
+                Files.deleteIfExists(Path.of(TEXTURES_DIR, "slot_" + slotIndex + "_var" + i + ".dat"));
+            }
+        } catch (Exception e) {
+            LOGGER.error("[CustomBlocks] Failed to delete variants for slot_{}", slotIndex, e);
+        }
+    }
+
+    /** H4 — set variant textures for a block. Max 7 (total 8 including main). */
+    public static void setVariantTextures(String id, List<byte[]> variants) {
+        SlotData old = byId.get(id);
+        update(id, d -> d.withVariantTextures(
+                variants == null ? List.of() : variants.subList(0, Math.min(variants.size(), 7))));
+        SlotData updated = byId.get(id);
+        if (updated == null) return;
+        // Write new variant files
+        List<byte[]> newVariants = updated.variantTextures;
+        for (int i = 0; i < newVariants.size(); i++) {
+            final int idx = i;
+            final byte[] copy = newVariants.get(i).clone();
+            IO_EXECUTOR.submit(() -> writeVariantTextureFile(updated.index, idx, copy));
+        }
+        // Delete any old files that are now beyond the new count
+        if (old != null) {
+            for (int i = newVariants.size(); i < old.variantTextures.size(); i++) {
+                final int idx = i;
+                IO_EXECUTOR.submit(() -> writeVariantTextureFile(updated.index, idx, null));
+            }
+        }
+    }
+
     // ── Internal ─────────────────────────────────────────────────────────────
 
 
@@ -1333,6 +1572,12 @@ public final class SlotManager {
 
         invalidateHash();
 
+        SearchIndex.invalidate();
+
+        // O7 — keep light cache in sync
+        int[] arr = LIGHT_CACHE;
+        if (data.index >= 0 && data.index < arr.length) arr[data.index] = data.lightLevel;
+
     }
 
 
@@ -1343,6 +1588,52 @@ public final class SlotManager {
 
         return first != null ? first : -1;
 
+    }
+
+    // ── Snapshot export / import (Phase Q) ────────────────────────────────────
+
+    /** Serialises the current DB (with embedded textures) to a JsonObject for snapshot export. */
+    public static JsonObject serializeSnapshotToJson() {
+        Snapshot snap = getSnapshot();
+        JsonObject root = new JsonObject();
+        if (snap.tabIcon() != null) {
+            root.addProperty("tabIconTexture", Base64.getEncoder().encodeToString(snap.tabIcon()));
+        }
+        JsonArray slots = new JsonArray();
+        for (SlotData d : snap.slots()) {
+            if ("tab_icon".equals(d.customId)) continue;
+            slots.add(serializeSlotWithTextures(d));
+        }
+        root.add("slots", slots);
+        return root;
+    }
+
+    /** Clears all slots and restores from a snapshot JsonObject. Triggers save + RP rebuild. */
+    public static synchronized void restoreFromSnapshotJson(JsonObject root) {
+        byId.clear();
+        bySlot.clear();
+        cachedSortedSlots = null;
+
+        if (root.has("tabIconTexture")) {
+            String b64 = root.get("tabIconTexture").getAsString();
+            if (!b64.isEmpty()) tabIconTexture = Base64.getDecoder().decode(b64);
+        }
+
+        if (root.has("slots")) {
+            JsonArray arr = root.getAsJsonArray("slots");
+            for (JsonElement el : arr) {
+                try {
+                    SlotData data = deserializeSlot(el.getAsJsonObject());
+                    put(data);
+                } catch (Exception e) {
+                    LOGGER.warn("[CustomBlocks] Failed to restore slot: {}", e.getMessage());
+                }
+            }
+        }
+        rebuildFreeSlotSet();
+        cachedSortedSlots = null;
+        saveAll();
+        LOGGER.info("[CustomBlocks] Snapshot restored — {} slots loaded.", byId.size());
     }
 
     /** Rebuild the freeSlotIndices set from scratch (called after loadAll clears maps). */

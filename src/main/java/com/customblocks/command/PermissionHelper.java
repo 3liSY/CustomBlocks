@@ -1,107 +1,141 @@
 package com.customblocks.command;
 
 import com.customblocks.CustomBlocksConfig;
+import com.customblocks.core.VoiceCatalog;
+import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.server.command.ServerCommandSource;
+import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.text.Text;
 
 /**
- * Granular permission checks.
- * <p>
- * Permission nodes:
- * <ul>
- *     <li>{@code customblocks.admin}  — create, delete, edit, reload, import/export</li>
- *     <li>{@code customblocks.create} — create blocks</li>
- *     <li>{@code customblocks.edit}   — retexture, rename, set properties, shapes, faces</li>
- *     <li>{@code customblocks.give}   — give blocks to self or others</li>
- *     <li>{@code customblocks.use}    — open GUI, use tools</li>
- * </ul>
- * Falls back to OP level from config if no permission mod is present.
- * LuckPerms integration: if Fabric Permissions API is available, checks there first.
+ * Permission gates: when Fabric Permissions API is installed, each {@code check} uses the
+ * {@code customblocks.*} node with the matching {@link CustomBlocksConfig#permissionFallback*}
+ * field as the numeric fallback level (legacy {@link CustomBlocksConfig#permissionLevelUse} /
+ * {@link CustomBlocksConfig#permissionLevelAdmin} seed migration defaults when those fallbacks
+ * are absent from disk).
+ * Without the API, only vanilla {@link ServerCommandSource#hasPermissionLevel} is used
+ * against that same fallback.
  */
 public final class PermissionHelper {
 
-    /** Check if source has admin permission. */
-    public static boolean hasAdmin(ServerCommandSource src) {
-        return src.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin);
+    private static boolean permissionsApiLoaded() {
+        return FabricLoader.getInstance().isModLoaded("fabric-permissions-api-v0");
     }
 
-    /** Check if source can create blocks. */
-    public static boolean canCreate(ServerCommandSource src) {
-        return src.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin);
+    private static boolean check(ServerCommandSource src, String node, int fallbackLevel) {
+        if (permissionsApiLoaded()) {
+            return me.lucko.fabric.api.permissions.v0.Permissions.check(src, node, fallbackLevel);
+        }
+        return src.hasPermissionLevel(fallbackLevel);
     }
 
-    /** Check if source can edit blocks (retexture, rename, properties, shapes). */
-    public static boolean canEdit(ServerCommandSource src) {
-        return src.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin);
-    }
-
-    /** Check if source can delete blocks. */
-    public static boolean canDelete(ServerCommandSource src) {
-        return src.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin);
-    }
-
-    /** Check if source can give blocks. */
-    public static boolean canGive(ServerCommandSource src) {
-        return src.hasPermissionLevel(CustomBlocksConfig.permissionLevelUse);
-    }
-
-    /** Check if source can use GUI / tools. */
     public static boolean canUse(ServerCommandSource src) {
-        return src.hasPermissionLevel(CustomBlocksConfig.permissionLevelUse);
+        return check(src, "customblocks.use", CustomBlocksConfig.permissionFallbackUse);
     }
 
-    /** Check if source can use undo/redo. */
-    public static boolean canUndo(ServerCommandSource src) {
-        return src.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin);
+    public static boolean canCreate(ServerCommandSource src) {
+        return check(src, "customblocks.create", CustomBlocksConfig.permissionFallbackCreate);
     }
 
-    /** Check if source can use admin-level utilities (reload, import, export). */
-    public static boolean canAdmin(ServerCommandSource src) {
-        return src.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin);
+    public static boolean canEdit(ServerCommandSource src) {
+        return check(src, "customblocks.edit", CustomBlocksConfig.permissionFallbackEdit);
     }
 
-    // ── Category Permissions ────────────────────────────────────────────────
-    
-    public static boolean canCategoryView(ServerCommandSource src) {
-        return src.hasPermissionLevel(CustomBlocksConfig.permissionLevelUse);
-    }
-    
-    public static boolean canCategoryAssign(ServerCommandSource src) {
-        return src.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin);
-    }
-    
-    public static boolean canCategoryExport(ServerCommandSource src) {
-        return src.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin);
-    }
-    
-    public static boolean canCategoryManage(ServerCommandSource src) {
-        return src.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin);
+    public static boolean canDelete(ServerCommandSource src) {
+        return check(src, "customblocks.delete", CustomBlocksConfig.permissionFallbackDelete);
     }
 
-    public static boolean canCategoryRemove(ServerCommandSource src) {
-        return src.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin);
-    }
-
-    public static boolean canViewSpecificCategory(net.minecraft.server.network.ServerPlayerEntity player, String categoryKey) {
-        if (player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) return true;
-        // In a real LuckPerms setup we would check "customblocks.category." + categoryKey + ".view"
-        // Without an API, we assume non-admins can view unless it's explicitly restricted/hidden.
-        com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(categoryKey);
-        if (cat != null && cat.hidden()) return false;
-        return true;
-    }
-
-    public static boolean canAssignToSpecificCategory(net.minecraft.server.network.ServerPlayerEntity player, String categoryKey) {
-        if (player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) return true;
-        com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(categoryKey);
-        if (cat != null && cat.locked()) return false;
-        return true;
+    public static boolean canBulk(ServerCommandSource src) {
+        return check(src, "customblocks.bulk", CustomBlocksConfig.permissionFallbackBulk);
     }
 
     /**
-     * Check tool-item usage permission (for use inside Item classes that receive PlayerEntity).
+     * {@code /cb resume} — command may run if any resume target is plausible; each draft kind is
+     * re-checked in {@link com.customblocks.gui.GuiManager#resumePendingDraft} before {@code take()}.
      */
-    public static boolean canUseTool(net.minecraft.entity.player.PlayerEntity player) {
-        return player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin);
+    public static boolean canResumeSession(ServerCommandSource src) {
+        return canBulk(src) || canEdit(src) || canUse(src) || canCategoryManage(src) || canConfig(src)
+            || canPanic(src) || canUndo(src) || canAdmin(src);
+    }
+
+    public static boolean canGive(ServerCommandSource src) {
+        return check(src, "customblocks.use", CustomBlocksConfig.permissionFallbackUse);
+    }
+
+    public static boolean canUndo(ServerCommandSource src) {
+        return check(src, "customblocks.edit", CustomBlocksConfig.permissionFallbackUndo);
+    }
+
+    public static boolean canAdmin(ServerCommandSource src) {
+        return check(src, "customblocks.admin", CustomBlocksConfig.permissionFallbackAdmin);
+    }
+
+    public static boolean canConfig(ServerCommandSource src) {
+        return check(src, "customblocks.config", CustomBlocksConfig.permissionFallbackConfig);
+    }
+
+    public static boolean canFavorite(ServerCommandSource src) {
+        return check(src, "customblocks.favorites", CustomBlocksConfig.permissionFallbackFavorites);
+    }
+
+    public static boolean canPanic(ServerCommandSource src) {
+        return check(src, "customblocks.panic", CustomBlocksConfig.permissionFallbackPanic);
+    }
+
+    public static boolean canMarketplacePublish(ServerCommandSource src) {
+        return check(src, "customblocks.marketplace.publish", CustomBlocksConfig.permissionFallbackMarketplacePublish);
+    }
+
+    /** Phase J / config gate — {@code customblocks.ai}. */
+    public static boolean canAi(ServerCommandSource src) {
+        return check(src, "customblocks.ai", CustomBlocksConfig.permissionFallbackAi);
+    }
+
+    /** Phase S dev console — {@code customblocks.devconsole}. */
+    public static boolean canDevConsole(ServerCommandSource src) {
+        return check(src, "customblocks.devconsole", CustomBlocksConfig.permissionFallbackDevConsole);
+    }
+
+    public static boolean canCategoryView(ServerCommandSource src) {
+        return canUse(src);
+    }
+
+    public static boolean canCategoryAssign(ServerCommandSource src) {
+        return canBulk(src);
+    }
+
+    public static boolean canCategoryExport(ServerCommandSource src) {
+        return canAdmin(src);
+    }
+
+    public static boolean canCategoryManage(ServerCommandSource src) {
+        return canAdmin(src);
+    }
+
+    public static boolean canViewSpecificCategory(ServerPlayerEntity player, String categoryKey) {
+        if (canAdmin(player.getCommandSource())) return true;
+        com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(categoryKey);
+        return cat == null || !cat.hidden();
+    }
+
+    public static boolean canAssignToSpecificCategory(ServerPlayerEntity player, String categoryKey) {
+        if (canAdmin(player.getCommandSource())) return true;
+        com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(categoryKey);
+        return cat == null || !cat.locked();
+    }
+
+    /**
+     * Magic wand / chisel tools — same node and vanilla fallback as {@link #canEdit(ServerCommandSource)}.
+     */
+    public static boolean canUseTool(PlayerEntity player) {
+        if (!(player instanceof ServerPlayerEntity sp)) return false;
+        return canEdit(sp.getCommandSource());
+    }
+
+    /** Action-bar denial when {@link #canUseTool} fails (LuckPerms: {@code customblocks.edit}). */
+    public static Text toolPermissionDeniedMessage() {
+        return Text.literal(VoiceCatalog.format("cmd.tool_permission_denied"));
     }
 
     private PermissionHelper() {}

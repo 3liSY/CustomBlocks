@@ -1,6 +1,8 @@
 package com.customblocks.item;
 
 import com.customblocks.CustomBlocksConfig;
+import com.customblocks.command.PermissionHelper;
+import com.customblocks.gui.ChatHelper;
 import com.customblocks.CustomBlocksMod;
 import com.customblocks.block.SlotBlock;
 import com.customblocks.core.SlotData;
@@ -106,8 +108,8 @@ public class ColorSquareItem extends Item {
         BlockState state = world.getBlockState(pos);
         if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
 
-        if (player != null && !player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
-            player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §cYou need OP to use colour squares."), true);
+        if (player != null && !PermissionHelper.canUseTool(player)) {
+            player.sendMessage(PermissionHelper.toolPermissionDeniedMessage(), true);
             if (world instanceof ServerWorld sw) {
                 sw.playSound(null, player.getBlockPos(),
                     net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),
@@ -117,8 +119,8 @@ public class ColorSquareItem extends Item {
         }
         if (!CustomBlocksConfig.isColorToolModeConfigured()) {
             if (player != null) {
-                player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §eColor tools are not configured yet."), true);
-                player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §7Open §f/cb config §7and choose: §fDefault: Fill corner only §7or §fExtra: Fill corners + more§7."), true);
+                player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_color_not_configured")), true);
+                player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_color_config_hint")), true);
             }
             return ActionResult.FAIL;
         }
@@ -131,7 +133,7 @@ public class ColorSquareItem extends Item {
 
         if (targetId.equals(current.customId)) {
             if (player != null) {
-                player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §7Already §f" + color.label() + "§7."), true);
+                player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_square_already_color", color.label())), true);
                 if (world instanceof ServerWorld sw) {
                     sw.playSound(null, player.getBlockPos(),
                         net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_CHIME.value(),
@@ -144,8 +146,7 @@ public class ColorSquareItem extends Item {
         SlotData target = SlotManager.getById(targetId);
         if (target == null) {
             if (player != null) {
-                player.sendMessage(Text.literal(
-                    "§0§l[§b§lCB§0§l]§r §c§f" + targetId + "§c doesn't exist yet. Create it first with a matching triangle."), true);
+                player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_square_variant_missing", targetId)), true);
             }
             return ActionResult.FAIL;
         }
@@ -155,7 +156,7 @@ public class ColorSquareItem extends Item {
             Block.NOTIFY_LISTENERS | Block.REDRAW_ON_MAIN_THREAD | Block.FORCE_STATE);
 
         if (player != null) {
-            player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §aSwapped to §f" + target.displayName + "§a!"), true);
+            player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_square_swapped", target.displayName)), true);
             if (world instanceof ServerWorld sw) {
                 sw.spawnParticles(net.minecraft.particle.ParticleTypes.END_ROD,
                     pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,

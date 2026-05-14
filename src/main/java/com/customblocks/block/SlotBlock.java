@@ -3,6 +3,7 @@ package com.customblocks.block;
 import com.customblocks.core.SlotData;
 import com.customblocks.core.SlotManager;
 import com.customblocks.gui.GuiManager;
+import com.customblocks.core.HologramManager;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.ShapeContext;
@@ -131,6 +132,15 @@ public class SlotBlock extends Block {
         return correctTool ? speed / hardness / 30f : 1f / hardness / 100f;
     }
 
+    /** I1 — remove hologram when this block is replaced/broken. */
+    @Override
+    public void onStateReplaced(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
+        if (!world.isClient && !newState.isOf(this)) {
+            HologramManager.onBlockRemoved((net.minecraft.server.world.ServerWorld) world, pos);
+        }
+        super.onStateReplaced(state, world, pos, newState, moved);
+    }
+
     /** Build VoxelShape from slot shape boxes. */
     private static VoxelShape buildVoxelShape(String slotKey) {
         SlotData d = SlotManager.getBySlot(slotKey);
@@ -152,6 +162,29 @@ public class SlotBlock extends Block {
             super(block, settings);
             this.slotIndex = block.getSlotIndex();
             this.slotKey = "slot_" + slotIndex;
+        }
+
+        @Override
+        protected boolean postPlacement(net.minecraft.util.math.BlockPos pos,
+                                        net.minecraft.world.World world,
+                                        net.minecraft.entity.player.PlayerEntity player,
+                                        net.minecraft.item.ItemStack stack,
+                                        net.minecraft.block.BlockState state) {
+            boolean result = super.postPlacement(pos, world, player, stack, state);
+            // K1 — record placement stat; R1 — achievement hook
+            if (!world.isClient) {
+                SlotData d = SlotManager.getBySlot(slotKey);
+                if (d != null) {
+                    com.customblocks.core.PlacementStats.recordPlacement(d.customId, player.getUuid());
+                    if (player instanceof net.minecraft.server.network.ServerPlayerEntity sp) {
+                        com.customblocks.core.AchievementManager.onBlockPlaced(sp);
+                    }
+                    // I1 — spawn hologram above the placed block
+                    HologramManager.onBlockPlaced(
+                        (net.minecraft.server.world.ServerWorld) world, pos, d.customId);
+                }
+            }
+            return result;
         }
 
         @Override

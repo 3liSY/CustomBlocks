@@ -12,6 +12,7 @@ import com.customblocks.core.SlotManager;
 
 import com.customblocks.core.UndoManager;
 
+import com.customblocks.gui.ChatHelper;
 import com.customblocks.gui.GuiManager;
 
 import com.customblocks.item.ColorSquareItem;
@@ -35,8 +36,6 @@ import com.customblocks.network.NetworkManager;
 import com.customblocks.network.ResourcePackServer;
 
 import com.customblocks.network.SlotUpdatePayload;
-
-import com.customblocks.network.SyncCompletePayload;
 
 import net.fabricmc.api.ModInitializer;
 
@@ -118,6 +117,9 @@ public class CustomBlocksMod implements ModInitializer {
 
     public static SlotBlock.SlotItem[] SLOT_ITEMS;
 
+    /** X4 — set by async update-check on SERVER_STARTED; null = up-to-date or check pending. */
+    public static volatile String UPDATE_AVAILABLE_VERSION = null;
+
 
 
     public static final RegistryKey<net.minecraft.item.ItemGroup> CUSTOM_BLOCKS_TAB =
@@ -166,13 +168,7 @@ public class CustomBlocksMod implements ModInitializer {
 
                     .dynamicBounds()
 
-                    .luminance(state -> {
-
-                        SlotData d = SlotManager.getByIndex(idx);
-
-                        return d != null ? d.lightLevel : 0;
-
-                    });
+                    .luminance(state -> SlotManager.getLightCached(idx));
 
 
 
@@ -313,8 +309,6 @@ public class CustomBlocksMod implements ModInitializer {
 
         PayloadTypeRegistry.playS2C().register(SlotUpdatePayload.ID, SlotUpdatePayload.CODEC);
 
-        PayloadTypeRegistry.playS2C().register(SyncCompletePayload.ID, SyncCompletePayload.CODEC);
-
         PayloadTypeRegistry.playS2C().register(
                 com.customblocks.network.ChunkedTexturePayload.ID,
                 com.customblocks.network.ChunkedTexturePayload.CODEC);
@@ -403,7 +397,7 @@ public class CustomBlocksMod implements ModInitializer {
                                 context.player().getName().getString(),
                                 payload.textureHash() != null && payload.textureHash().length() > 12
                                     ? payload.textureHash().substring(0, 12) + "..." : payload.textureHash());
-                        NetworkManager.onSyncRequest(context.player(), payload.textureHash());
+                        NetworkManager.onSyncRequest(context.player(), payload.textureHash(), payload.slotHashesJson());
                     });
                 }
         );
@@ -414,7 +408,7 @@ public class CustomBlocksMod implements ModInitializer {
 
                 FabricItemGroup.builder()
 
-                        .displayName(Text.literal("CustomBlocks"))
+                        .displayName(Text.translatable("itemGroup.customblocks.blocks"))
 
                         .icon(() -> {
 
@@ -502,6 +496,13 @@ public class CustomBlocksMod implements ModInitializer {
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             try {
                 NetworkManager.onPlayerJoin(handler.player);
+                com.customblocks.core.WelcomeManager.checkAndWelcome(handler.player);
+                // X4 — notify admins about pending update on join
+                String pending = UPDATE_AVAILABLE_VERSION;
+                if (pending != null && handler.player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
+                    ChatHelper.warn(handler.player,
+                        "§6§l[CB Update] §r§eNew version §f" + pending + " §eavailable — §7modrinth.com/mod/customblocks");
+                }
             } catch (Exception e) {
                 LOGGER.error("[CustomBlocks] Error during player join for {}",
                         handler.player.getName().getString(), e);
@@ -520,7 +521,11 @@ public class CustomBlocksMod implements ModInitializer {
 
             RectangleToolItem.onPlayerDisconnect(handler.player.getUuid());
 
+            com.customblocks.gui.FeedbackHelper.clearBossBar(handler.player);
+
             GuiManager.onPlayerDisconnect(handler.player.getUuid());
+
+            com.customblocks.core.DraftManager.drop(handler.player.getUuid());
 
         });
 
@@ -530,6 +535,7 @@ public class CustomBlocksMod implements ModInitializer {
 
 
             NetworkManager.onServerTick(server);
+            SlotManager.tickStartupLoad();
 
             RectangleToolItem.tickSessionCleanup();
 
@@ -543,13 +549,75 @@ public class CustomBlocksMod implements ModInitializer {
 
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
             SlotManager.flushSave();
+            com.customblocks.core.PlacementStats.save(); // K1
+            com.customblocks.core.AchievementManager.save(); // R1
+            com.customblocks.core.FavoritesManager.flushSave();
             com.customblocks.core.CategoryManager.saveAll();
             com.customblocks.core.AutoCategorizeManager.saveAll();
             com.customblocks.core.CategoryDisplayBlockManager.saveAll();
+            com.customblocks.core.LockManager.save();
+            com.customblocks.core.BlockNotesManager.save();
+            com.customblocks.core.WelcomeManager.save();
+            com.customblocks.core.SnapshotManager.stop();
+            com.customblocks.core.DraftManager.dropAll();
         });
 
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             ResourcePackServer.setServer(server);
+            com.customblocks.core.SampleBlocksLoader.maybeLoadSamples(server); // X7/D1
+            // Phase A6: one-time migration nudge so admins review hardened permission gates.
+            try {
+                java.nio.file.Path marker = java.nio.file.Path.of("config", "customblocks", ".permissions_hardened_notice_v2");
+                if (!java.nio.file.Files.exists(marker)) {
+                    for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                        if (p.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
+                            ChatHelper.warn(p, "Permissions hardened in v2 — review /cb config -> Permissions.");
+                        }
+                    }
+                    java.nio.file.Files.createDirectories(marker.getParent());
+                    java.nio.file.Files.writeString(
+                        marker,
+                        "shown=true\n",
+                        java.nio.charset.StandardCharsets.UTF_8,
+                        java.nio.file.StandardOpenOption.CREATE,
+                        java.nio.file.StandardOpenOption.TRUNCATE_EXISTING
+                    );
+                }
+            } catch (Exception ex) {
+                LOGGER.warn("[CustomBlocks] Could not write permission migration marker", ex);
+            }
+
+            // X4 — async Modrinth update check (daemon — never blocks startup)
+            Thread updateChecker = new Thread(() -> {
+                try {
+                    String current = "2.0.0";
+                    java.net.HttpURLConnection con = (java.net.HttpURLConnection)
+                        new java.net.URL("https://api.modrinth.com/v2/project/customblocks/version" +
+                            "?game_versions=%5B%221.21.1%22%5D&loaders=%5B%22fabric%22%5D")
+                        .openConnection();
+                    con.setRequestMethod("GET");
+                    con.setConnectTimeout(6000);
+                    con.setReadTimeout(6000);
+                    con.setRequestProperty("User-Agent", "CustomBlocks/" + current + " (update-check; github.com/3liSY/CustomBlocks)");
+                    if (con.getResponseCode() == 200) {
+                        String body = new String(con.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                        com.google.gson.JsonArray arr = com.google.gson.JsonParser.parseString(body).getAsJsonArray();
+                        if (!arr.isEmpty()) {
+                            String latest = arr.get(0).getAsJsonObject().get("version_number").getAsString();
+                            if (!latest.equals(current)) {
+                                UPDATE_AVAILABLE_VERSION = latest;
+                                LOGGER.info("[CustomBlocks] §eUpdate available: §f{} → {} | modrinth.com/mod/customblocks", current, latest);
+                            } else {
+                                LOGGER.info("[CustomBlocks] Up to date ({}).", current);
+                            }
+                        }
+                    }
+                } catch (Exception ex) {
+                    LOGGER.debug("[CustomBlocks] Update check skipped: {}", ex.getMessage());
+                }
+            }, "CustomBlocks-UpdateCheck");
+            updateChecker.setDaemon(true);
+            updateChecker.start();
         });
 
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
@@ -565,9 +633,17 @@ public class CustomBlocksMod implements ModInitializer {
         CustomBlockCommand.register();
 
         SlotManager.loadAll();
+        SlotManager.initLightCache(maxSlots); // O7 — prime flat luminance cache
+        com.customblocks.core.PlacementStats.load(); // K1
+        com.customblocks.core.AchievementManager.load(); // R1
+        com.customblocks.core.FavoritesManager.load();
         com.customblocks.core.CategoryManager.loadAll();
         com.customblocks.core.AutoCategorizeManager.loadAll();
         com.customblocks.core.CategoryDisplayBlockManager.loadAll();
+        com.customblocks.core.LockManager.load();
+        com.customblocks.core.BlockNotesManager.load();
+        com.customblocks.core.WelcomeManager.load();
+        com.customblocks.core.SnapshotManager.start(CustomBlocksConfig.autoSnapshotMinutes);
 
         // ── Display Block Hooks ──────────────────────────────────────────────
         // Detect placement of a tagged display block, intercept right-clicks
@@ -592,14 +668,14 @@ public class CustomBlocksMod implements ModInitializer {
                     }
                     com.customblocks.core.CategoryDisplayBlockManager.unregister(dimId, hitPos);
                     sp.getServerWorld().breakBlock(hitPos, false, sp);
-                    sp.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l]\u00A7r \u00A77Picked up display block."), true);
+                    sp.sendMessage(ChatHelper.rawPrefixed(ChatHelper.formattedKey("cmd.display_block_pickup")), true);
                     return net.minecraft.util.ActionResult.SUCCESS;
                 } else {
                     com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(existingCat);
                     if (cat != null) {
                         GuiManager.openCategoryDetail(sp, existingCat, 0);
                     } else {
-                        sp.sendMessage(Text.literal("\u00A70\u00A7l[\u00A7b\u00A7lCB\u00A70\u00A7l]\u00A7r \u00A7cThis category no longer exists."), false);
+                        sp.sendMessage(ChatHelper.rawPrefixed(ChatHelper.formattedKey("cmd.display_block_category_gone")), false);
                     }
                     return net.minecraft.util.ActionResult.SUCCESS;
                 }

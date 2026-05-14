@@ -2,8 +2,8 @@ package com.customblocks.network;
 
 import com.customblocks.CustomBlocksConfig;
 import com.customblocks.CustomBlocksMod;
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpHandler;
+import com.customblocks.gui.ChatHelper;
+import com.customblocks.gui.FeedbackHelper;
 import com.sun.net.httpserver.HttpServer;
 
 import java.io.IOException;
@@ -21,8 +21,6 @@ public class ResourcePackServer {
     private static java.io.File currentPackFile;
     private static String currentHash;
     private static int activePort = -1;
-    private static String lastError = null;
-
     // Single-thread executor: only ONE ZIP build runs at a time.
     // AtomicInteger tracks pending builds — if > 1, we skip because
     // the already-queued build will pick up the latest snapshot.
@@ -58,7 +56,6 @@ public class ResourcePackServer {
                 break;
             } catch (IOException e) {
                 CustomBlocksMod.LOGGER.warn("[CustomBlocks] Port {} is blocked, trying next...", p);
-                lastError = e.getMessage();
             }
         }
 
@@ -85,12 +82,10 @@ public class ResourcePackServer {
             });
             server.setExecutor(null);
             server.start();
-            lastError = null;
             CustomBlocksMod.LOGGER.info("[CustomBlocks] Texture Sanctuary is LIVE on port {}", activePort);
             updatePack();
         } catch (Exception e) {
             CustomBlocksMod.LOGGER.error("[CustomBlocks] Unexpected error starting pipeline", e);
-            lastError = e.getMessage();
         }
     }
 
@@ -137,6 +132,7 @@ public class ResourcePackServer {
                     }
                     currentHash = sb.toString();
                     CustomBlocksMod.LOGGER.info("[CustomBlocks] Cached internal resource pack ZIP (Atomic Update).");
+                    FeedbackHelper.broadcastPackRegeneratedIfDue(serverInstance, 4000L);
                 }
             } catch (Exception e) {
                 CustomBlocksMod.LOGGER.error("[CustomBlocks] Error updating internal pack.", e);
@@ -198,7 +194,11 @@ public class ResourcePackServer {
         if (serverInstance == null || !isRunning() || activePort() <= 0) return;
         
         new Thread(() -> {
-            try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+            try { Thread.sleep(1000); }
+            catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return;
+            }
             serverInstance.execute(() -> {
                 String hash = currentHash;
                 if (hash == null || hash.isEmpty()) return;
@@ -212,7 +212,7 @@ public class ResourcePackServer {
                                 new net.minecraft.network.packet.s2c.common.ResourcePackSendS2CPacket(
                                         packUuid, url, hash, false, // NOT required — won't kick
                                         java.util.Optional.of(net.minecraft.text.Text.literal(
-                                                "§eCustomBlocks textures updated. Accept to refresh.")));
+                                                ChatHelper.formattedKey("cmd.rp_notify_accept_prompt"))));
                         player.networkHandler.sendPacket(packet);
                     } catch (Exception e) {
                         CustomBlocksMod.LOGGER.warn("[CustomBlocks] Failed to send RP update to {}", 

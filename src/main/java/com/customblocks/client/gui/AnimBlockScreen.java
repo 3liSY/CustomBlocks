@@ -41,8 +41,6 @@ public class AnimBlockScreen extends Screen {
     private static final int C_BORDER2 = 0xFF_5566CC;
     private static final int C_ACCENT  = 0xFF_FFB300;
     private static final int C_GREEN   = 0xFF_44FF88;
-    private static final int C_RED     = 0xFF_FF4455;
-    private static final int C_BLUE    = 0xFF_66AAFF;
     private static final int C_GREY    = 0xFF_888899;
     private static final int C_WHITE   = 0xFF_FFFFFF;
     private static final int C_ANIM_ORANGE = 0xFF_FF8844;
@@ -59,7 +57,6 @@ public class AnimBlockScreen extends Screen {
     private ButtonWidget    btnFpsUp10, btnFpsDown10;
 
     // ── Pulse animation ───────────────────────────────────────────────────────
-    private long openTime;
     private int  dotFrame = 0;
     private long lastDotUpdate = 0;
 
@@ -144,7 +141,6 @@ public class AnimBlockScreen extends Screen {
 
     @Override
     protected void init() {
-        openTime    = System.currentTimeMillis();
         panelW      = 260;
         panelH      = 240;
         panelX      = (width  - panelW) / 2;

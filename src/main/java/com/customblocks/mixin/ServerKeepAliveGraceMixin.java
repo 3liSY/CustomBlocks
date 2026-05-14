@@ -41,7 +41,6 @@ import java.util.List;
 @Mixin(ServerCommonNetworkHandler.class)
 public abstract class ServerKeepAliveGraceMixin {
 
-    @Shadow private long lastKeepAliveTime;
     @Shadow private boolean waitingForKeepAlive;
     @Shadow private int latency;
 

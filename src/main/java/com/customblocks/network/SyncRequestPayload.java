@@ -8,22 +8,33 @@ import net.minecraft.util.Identifier;
 /**
  * Client → Server: "I'm ready for the full sync."
  * Sent by the client once its play connection is fully established.
- * This guarantees the Netty pipeline is configured for S2C responses.
  *
- * Phase 3: includes the client's cached texture hash so the server can skip
- * the drip-feed if the client already has all textures. Empty string = no cache.
+ * Phase 3: includes the client's cached global texture hash.
+ * N3:      also includes per-slot CRC32 hashes as a compact JSON string
+ *          {@code {"0":"a1b2c3d4","5":"deadbeef",...}} so the server can
+ *          diff and send only the slots the client is missing or stale on.
+ *          Empty string = no per-slot cache (force full drip-feed).
  */
-public record SyncRequestPayload(String textureHash) implements CustomPayload {
+public record SyncRequestPayload(String textureHash, String slotHashesJson) implements CustomPayload {
 
-    /** Backward-compat: no hash. */
-    public SyncRequestPayload() { this(""); }
+    /** Backward-compat constructor for code that only has the global hash. */
+    public SyncRequestPayload(String textureHash) {
+        this(textureHash, "");
+    }
 
     public static final Id<SyncRequestPayload> ID =
             new Id<>(Identifier.of("customblocks", "sync_request"));
 
     public static final PacketCodec<PacketByteBuf, SyncRequestPayload> CODEC = PacketCodec.of(
-            (value, buf) -> buf.writeString(value.textureHash() != null ? value.textureHash() : ""),
-            buf -> new SyncRequestPayload(buf.readableBytes() > 0 ? buf.readString() : "")
+            (value, buf) -> {
+                buf.writeString(value.textureHash() != null ? value.textureHash() : "");
+                buf.writeString(value.slotHashesJson() != null ? value.slotHashesJson() : "");
+            },
+            buf -> {
+                String hash  = buf.readableBytes() > 0 ? buf.readString() : "";
+                String slots = buf.readableBytes() > 0 ? buf.readString() : "";
+                return new SyncRequestPayload(hash, slots);
+            }
     );
 
     @Override

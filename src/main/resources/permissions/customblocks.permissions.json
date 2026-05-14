@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "title": "CustomBlocks permission nodes (Fabric Permissions API)",
+  "defaults": {
+    "customblocks.use": "Permission level 0 — GUIs, list, tools pickup",
+    "customblocks.edit": "Permission level 0 fallback — retexture, shapes, properties (configure via LuckPerms)",
+    "customblocks.create": "Permission level 4 — /cb create",
+    "customblocks.delete": "Permission level 4 — /cb delete",
+    "customblocks.bulk": "Permission level 4 — bulk assign/recolor/delete",
+    "customblocks.panic": "Permission level 4 — reserved",
+    "customblocks.favorites": "Permission level 4 — favorites scope & future star UX",
+    "customblocks.config": "Permission level 4 — /cb config",
+    "customblocks.admin": "Permission level 4 — reload, import/export, category import",
+    "customblocks.ai": "Permission level 4 — reserved",
+    "customblocks.marketplace.publish": "Permission level 2 — /cb sharecategory",
+    "customblocks.devconsole": "Permission level 4 — reserved"
+  }
+}

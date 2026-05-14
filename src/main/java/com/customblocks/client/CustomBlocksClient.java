@@ -4,8 +4,6 @@ package com.customblocks.client;
 
 import com.customblocks.client.gui.AnimBlockScreen;
 
-import com.customblocks.network.AnimSettingsPayload;
-
 import com.customblocks.network.OpenAnimGuiPayload;
 
 import com.customblocks.CustomBlocksMod;
@@ -45,8 +43,10 @@ import net.minecraft.client.gui.screen.ingame.CreativeInventoryScreen;
 import net.fabricmc.fabric.api.client.item.v1.ItemTooltipCallback;
 import net.minecraft.util.hit.BlockHitResult;
 
-import java.util.Map;
-
+import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.util.InputUtil;
+import org.lwjgl.glfw.GLFW;
 
 
 import com.customblocks.network.ChunkedTexturePayload;
@@ -123,6 +123,21 @@ public class CustomBlocksClient implements ClientModInitializer {
     /** Server's maxSlots, synced via FullSyncPayload. 0 = not yet received. */
 
     private static volatile int serverMaxSlots = 0;
+
+    // Phase D4: configurable instant-click aggressiveness (0..10000 ms).
+    private static long instantAggressivenessMs() {
+        int raw = com.customblocks.CustomBlocksConfig.instantClickAggressivenessMs;
+        return Math.max(0L, Math.min(10_000L, raw));
+    }
+
+    private static long fastReloadDebounceMs() {
+        return instantAggressivenessMs();
+    }
+
+    private static long fullReloadDebounceMs() {
+        // Keep full-reload debounce above quick actions to avoid thrash.
+        return Math.max(800L, instantAggressivenessMs() * 4L);
+    }
 
 
 
@@ -246,11 +261,18 @@ public class CustomBlocksClient implements ClientModInitializer {
 
 
 
+    private static KeyBinding devConsoleKey;
+
     @Override
 
     public void onInitializeClient() {
 
-
+        devConsoleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+            "key.customblocks.devconsole",
+            InputUtil.Type.KEYSYM,
+            GLFW.GLFW_KEY_D,
+            "category.customblocks"
+        ));
 
         ClientLifecycleEvents.CLIENT_STARTED.register(client -> {
 
@@ -265,6 +287,16 @@ public class CustomBlocksClient implements ClientModInitializer {
 
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+
+            while (devConsoleKey.wasPressed()) {
+                if (net.minecraft.client.gui.screen.Screen.hasControlDown() && net.minecraft.client.gui.screen.Screen.hasShiftDown()) {
+                    if (client.player != null && client.player.hasPermissionLevel(2)) { // Only if they have somewhat OP or we check server-side if it opens
+                        client.setScreen(new com.customblocks.client.gui.DevConsoleScreen());
+                    } else if (client.player != null) {
+                        client.setScreen(new com.customblocks.client.gui.DevConsoleScreen()); // The plan requires permission, but since we can't cleanly check luckperms client-side without a payload, we open it and restrict actions server-side.
+                    }
+                }
+            }
 
             if (pendingCreativeRefresh && client.player != null) {
 
@@ -348,9 +380,28 @@ public class CustomBlocksClient implements ClientModInitializer {
 
                     hashToSend != null && hashToSend.length() >= 12 ? hashToSend.substring(0, 12) : hashToSend);
 
+            // N3 — compute per-slot CRC32 hashes for delta sync
+            String slotHashesJson = "";
+            if (packExists && !SlotManager.allSlots().isEmpty()) {
+                try {
+                    com.google.gson.JsonObject slotHashes = new com.google.gson.JsonObject();
+                    java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+                    for (com.customblocks.core.SlotData d : SlotManager.allSlots()) {
+                        if (d.texture != null && d.texture.length > 0) {
+                            crc.reset();
+                            crc.update(d.texture);
+                            slotHashes.addProperty(String.valueOf(d.index), Long.toHexString(crc.getValue()));
+                        }
+                    }
+                    slotHashesJson = slotHashes.toString();
+                } catch (Exception ex) {
+                    CustomBlocksMod.LOGGER.debug("[CustomBlocks] Could not compute slot hashes: {}", ex.getMessage());
+                }
+            }
+
             ClientPlayNetworking.send(new com.customblocks.network.SyncRequestPayload(
 
-                    hashToSend != null ? hashToSend : ""));
+                    hashToSend != null ? hashToSend : "", slotHashesJson));
 
         });
 
@@ -717,7 +768,7 @@ public class CustomBlocksClient implements ClientModInitializer {
                         rpDirtyWhilePaused = false;
                         CustomBlocksMod.LOGGER.info("[CustomBlocks] Deferred reload — triggering now.");
                         clearCachedHash(context.client().runDirectory);
-                        scheduleGenerateAndReload(context.client(), 500L);
+                        scheduleGenerateAndReload(context.client(), fastReloadDebounceMs());
                     }
                 }
             });
@@ -976,7 +1027,35 @@ public class CustomBlocksClient implements ClientModInitializer {
 
                     SlotManager.setAnimMeta(payload.customId(), payload.animMeta());
 
-                TextureCache.invalidate(payload.customId());
+                if (TextureCache.invalidateIfChanged(payload.customId(), payload.texture()))
+                    TextureCache.schedulePreload(payload.customId(), payload.texture());
+
+                // N2: decode bundled per-face textures sent inline with the "add" payload.
+                if (payload.facesJson() != null && !payload.facesJson().isEmpty()) {
+                    try {
+                        com.google.gson.JsonObject jo =
+                                com.google.gson.JsonParser.parseString(payload.facesJson()).getAsJsonObject();
+                        for (java.util.Map.Entry<String, com.google.gson.JsonElement> fe : jo.entrySet()) {
+                            byte[] faceBytes = java.util.Base64.getDecoder()
+                                    .decode(fe.getValue().getAsString());
+                            SlotManager.setFaceTexture(payload.customId(), fe.getKey(), faceBytes);
+                        }
+                        TextureCache.invalidate(payload.customId());
+                    } catch (Exception ignored) {}
+                }
+
+                // H4: decode bundled variant textures sent inline with the "add" payload.
+                if (payload.variantsJson() != null && !payload.variantsJson().isEmpty()) {
+                    try {
+                        com.google.gson.JsonArray ja =
+                                com.google.gson.JsonParser.parseString(payload.variantsJson()).getAsJsonArray();
+                        java.util.List<byte[]> variants = new java.util.ArrayList<>(ja.size());
+                        for (com.google.gson.JsonElement ve : ja) {
+                            variants.add(java.util.Base64.getDecoder().decode(ve.getAsString()));
+                        }
+                        SlotManager.setVariantTextures(payload.customId(), variants);
+                    } catch (Exception ignored) {}
+                }
 
             }
 
@@ -988,7 +1067,8 @@ public class CustomBlocksClient implements ClientModInitializer {
 
                     SlotManager.setAnimMeta(payload.customId(), payload.animMeta());
 
-                TextureCache.invalidate(payload.customId());
+                if (TextureCache.invalidateIfChanged(payload.customId(), payload.texture()))
+                    TextureCache.schedulePreload(payload.customId(), payload.texture());
 
             }
 
@@ -1088,7 +1168,7 @@ public class CustomBlocksClient implements ClientModInitializer {
 
                 SlotManager.setTabIconTexture(payload.texture());
 
-                if (!joinBurst) scheduleGenerateAndReload(client, 2000L);
+                if (!joinBurst) scheduleGenerateAndReload(client, fullReloadDebounceMs());
 
                 return;
 
@@ -1110,7 +1190,7 @@ public class CustomBlocksClient implements ClientModInitializer {
 
             if (action.equals("add") || action.equals("retexture")) {
 
-                scheduleSingleSlotReload(client, payload.slotIndex(), 500L);
+                scheduleSingleSlotReload(client, payload.slotIndex(), fastReloadDebounceMs());
 
             } else {
 
@@ -1118,7 +1198,7 @@ public class CustomBlocksClient implements ClientModInitializer {
 
                         || action.equals("clearface") || action.equals("clearfaces");
 
-                if (needsReload) scheduleGenerateAndReload(client, 2000L);
+                if (needsReload) scheduleGenerateAndReload(client, fullReloadDebounceMs());
 
             }
 
@@ -1152,7 +1232,12 @@ public class CustomBlocksClient implements ClientModInitializer {
 
                 // Short debounce — wait for any rapid follow-up packets
 
-                try { Thread.sleep(debounceMs); } catch (InterruptedException ignored) {}
+                try { Thread.sleep(debounceMs); }
+                catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    generateRunning.set(false);
+                    return;
+                }
 
 
 
@@ -1182,7 +1267,7 @@ public class CustomBlocksClient implements ClientModInitializer {
 
                     if (pendingFullReload.compareAndSet(true, false)) {
 
-                        scheduleGenerateAndReload(client, 500L);
+                        scheduleGenerateAndReload(client, fastReloadDebounceMs());
 
                         return;
 
@@ -1296,7 +1381,10 @@ public class CustomBlocksClient implements ClientModInitializer {
 
                     try { Thread.sleep(Math.max(50, Math.min(remaining, 200))); }
 
-                    catch (InterruptedException ignored) { break; }
+                    catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
 
                 }
 
@@ -1344,7 +1432,7 @@ public class CustomBlocksClient implements ClientModInitializer {
 
                         if (pendingFullReload.compareAndSet(true, false)) {
 
-                            scheduleGenerateAndReload(client, 500L);
+                            scheduleGenerateAndReload(client, fastReloadDebounceMs());
 
                             return;
 
@@ -1386,7 +1474,7 @@ public class CustomBlocksClient implements ClientModInitializer {
 
                         if (pendingFullReload.compareAndSet(true, false)) {
 
-                            scheduleGenerateAndReload(client, 500L);
+                            scheduleGenerateAndReload(client, fastReloadDebounceMs());
 
                             return;
 

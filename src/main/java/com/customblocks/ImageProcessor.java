@@ -1066,6 +1066,182 @@ public final class ImageProcessor {
         return copy;
     }
 
+    // ── G1/G2: Color Studio filters ───────────────────────────────────────────
+
+    /**
+     * G1 — Apply a tint color (RGB multiplier) to a PNG.
+     * Each channel is multiplied by the corresponding factor (0.0–2.0).
+     * Values above 1.0 boost that channel; below 1.0 suppress it.
+     * Alpha channel is preserved unchanged.
+     */
+    public static byte[] applyTint(byte[] png, float r, float g, float b) throws IOException {
+        BufferedImage img = ImageIO.read(new ByteArrayInputStream(png));
+        if (img == null) throw new IOException("Failed to decode image for tint");
+        BufferedImage out = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                int argb = img.getRGB(x, y);
+                int a = (argb >> 24) & 0xFF;
+                int pr = clamp8((int)(((argb >> 16) & 0xFF) * r));
+                int pg = clamp8((int)(((argb >>  8) & 0xFF) * g));
+                int pb = clamp8((int)(( argb        & 0xFF) * b));
+                out.setRGB(x, y, (a << 24) | (pr << 16) | (pg << 8) | pb);
+            }
+        }
+        return toPngBytes(out);
+    }
+
+    /**
+     * G1 — Apply a brightness/contrast adjustment.
+     * brightness: -100 to +100 (added per channel). contrast: 0.1 to 3.0 (factor around 128).
+     */
+    public static byte[] applyBrightness(byte[] png, int brightness, float contrast) throws IOException {
+        BufferedImage img = ImageIO.read(new ByteArrayInputStream(png));
+        if (img == null) throw new IOException("Failed to decode image for brightness");
+        BufferedImage out = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                int argb = img.getRGB(x, y);
+                int a = (argb >> 24) & 0xFF;
+                int r = clamp8((int)(((((argb >> 16) & 0xFF) - 128) * contrast) + 128 + brightness));
+                int g = clamp8((int)(((((argb >>  8) & 0xFF) - 128) * contrast) + 128 + brightness));
+                int b = clamp8((int)(((( argb        & 0xFF) - 128) * contrast) + 128 + brightness));
+                out.setRGB(x, y, (a << 24) | (r << 16) | (g << 8) | b);
+            }
+        }
+        return toPngBytes(out);
+    }
+
+    /**
+     * G1 — Convert image to grayscale (luminance-weighted, alpha preserved).
+     */
+    public static byte[] applyGrayscale(byte[] png) throws IOException {
+        BufferedImage img = ImageIO.read(new ByteArrayInputStream(png));
+        if (img == null) throw new IOException("Failed to decode image for grayscale");
+        BufferedImage out = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                int argb = img.getRGB(x, y);
+                int a = (argb >> 24) & 0xFF;
+                int r = (argb >> 16) & 0xFF;
+                int g = (argb >>  8) & 0xFF;
+                int b =  argb        & 0xFF;
+                int lum = (int)(0.299 * r + 0.587 * g + 0.114 * b);
+                out.setRGB(x, y, (a << 24) | (lum << 16) | (lum << 8) | lum);
+            }
+        }
+        return toPngBytes(out);
+    }
+
+    /**
+     * G1 — Invert all RGB channels (alpha preserved).
+     */
+    public static byte[] applyInvert(byte[] png) throws IOException {
+        BufferedImage img = ImageIO.read(new ByteArrayInputStream(png));
+        if (img == null) throw new IOException("Failed to decode image for invert");
+        BufferedImage out = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                int argb = img.getRGB(x, y);
+                int a = (argb >> 24) & 0xFF;
+                int r = 255 - ((argb >> 16) & 0xFF);
+                int g = 255 - ((argb >>  8) & 0xFF);
+                int b = 255 - ( argb        & 0xFF);
+                out.setRGB(x, y, (a << 24) | (r << 16) | (g << 8) | b);
+            }
+        }
+        return toPngBytes(out);
+    }
+
+    /**
+     * G1 — Flip the image horizontally (mirror left-right, alpha preserved).
+     */
+    public static byte[] applyMirrorH(byte[] png) throws IOException {
+        BufferedImage img = ImageIO.read(new ByteArrayInputStream(png));
+        if (img == null) throw new IOException("Failed to decode image for mirror");
+        int w = img.getWidth(), h = img.getHeight();
+        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                out.setRGB(x, y, img.getRGB(w - 1 - x, y));
+            }
+        }
+        return toPngBytes(out);
+    }
+
+    /**
+     * G1 — Rotate image 90 degrees clockwise (square images stay square).
+     */
+    public static byte[] applyRotate90(byte[] png) throws IOException {
+        BufferedImage img = ImageIO.read(new ByteArrayInputStream(png));
+        if (img == null) throw new IOException("Failed to decode image for rotate");
+        int w = img.getWidth(), h = img.getHeight();
+        BufferedImage out = new BufferedImage(h, w, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                out.setRGB(h - 1 - y, x, img.getRGB(x, y));
+            }
+        }
+        return toPngBytes(out);
+    }
+
+    /**
+     * G2 — Generate a 16-color tinted palette set from a base PNG.
+     * Returns 16 PNGs, each with a different hue-shifted tint applied.
+     * Tints are evenly spaced around the HSB hue wheel at full saturation,
+     * blended at {@code strength} (0.0 = no change, 1.0 = full tint).
+     */
+    public static List<byte[]> generateTintPalette(byte[] png, float strength) throws IOException {
+        BufferedImage base = ImageIO.read(new ByteArrayInputStream(png));
+        if (base == null) throw new IOException("Failed to decode image for palette");
+        List<byte[]> palette = new ArrayList<>(16);
+        for (int i = 0; i < 16; i++) {
+            float hue = i / 16.0f;
+            float[] tintRgb = hsvToRgb(hue, 1.0f, 1.0f);
+            float tr = tintRgb[0], tg = tintRgb[1], tb = tintRgb[2];
+            BufferedImage out = new BufferedImage(base.getWidth(), base.getHeight(), BufferedImage.TYPE_INT_ARGB);
+            for (int y = 0; y < base.getHeight(); y++) {
+                for (int x = 0; x < base.getWidth(); x++) {
+                    int argb = base.getRGB(x, y);
+                    int a = (argb >> 24) & 0xFF;
+                    float r = ((argb >> 16) & 0xFF) / 255f;
+                    float g = ((argb >>  8) & 0xFF) / 255f;
+                    float b  = ( argb        & 0xFF) / 255f;
+                    // Luma-preserving tint: multiply by tint color, blend with original
+                    float nr = r * (1 - strength) + (r * tr) * strength;
+                    float ng = g * (1 - strength) + (g * tg) * strength;
+                    float nb = b * (1 - strength) + (b * tb) * strength;
+                    out.setRGB(x, y, (a << 24) | (clamp8((int)(nr * 255)) << 16) |
+                            (clamp8((int)(ng * 255)) << 8) | clamp8((int)(nb * 255)));
+                }
+            }
+            palette.add(toPngBytes(out));
+        }
+        return palette;
+    }
+
+    private static float[] hsvToRgb(float h, float s, float v) {
+        int hi = (int)(h * 6) % 6;
+        float f = h * 6 - (int)(h * 6);
+        float p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+        return switch (hi) {
+            case 0 -> new float[]{v, t, p};
+            case 1 -> new float[]{q, v, p};
+            case 2 -> new float[]{p, v, t};
+            case 3 -> new float[]{p, q, v};
+            case 4 -> new float[]{t, p, v};
+            default-> new float[]{v, p, q};
+        };
+    }
+
+    private static int clamp8(int v) { return Math.max(0, Math.min(255, v)); }
+
+    private static byte[] toPngBytes(BufferedImage img) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ImageIO.write(img, "PNG", baos);
+        return baos.toByteArray();
+    }
+
     private static String detectFormat(byte[] raw) {
         if (raw.length < 4) return null;
         if (raw[0]==(byte)0xFF && raw[1]==(byte)0xD8) return "JPEG";

@@ -21,6 +21,8 @@ dependencies {
     modImplementation "net.fabricmc.fabric-api:fabric-api:0.104.0+1.21.1"
     include "net.fabricmc.fabric-api:fabric-api:0.104.0+1.21.1"
 
+    modImplementation("me.lucko:fabric-permissions-api:0.3.1") { transitive = false }
+
     // Phase 6: TwelveMonkeys removed. WebP handled via URL rewriting + wsrv.nl proxy.
 
     // Phase 9: jcodec — pure-Java MP4/H264 decoder for video-to-texture support
@@ -40,4 +42,139 @@ tasks.withType(JavaCompile).configureEach {
 java {
     sourceCompatibility = JavaVersion.VERSION_21
     targetCompatibility = JavaVersion.VERSION_21
+}
+
+tasks.register('verifyVoiceCatalog') {
+    group = 'verification'
+    description = 'Ensures voice_*.json files match voice_keys_inventory.txt and contain no [CB] literals.'
+    def langDir = layout.projectDirectory.dir('src/main/resources/assets/customblocks/lang').asFile
+    inputs.dir(langDir)
+    doLast {
+        def inventoryFile = new File(langDir, 'voice_keys_inventory.txt')
+        if (!inventoryFile.exists()) throw new GradleException('Missing voice_keys_inventory.txt')
+        def keys = inventoryFile.readLines('UTF-8').collect { it.trim() }.findAll { it && !it.startsWith('#') }
+        if (keys.isEmpty()) throw new GradleException('voice_keys_inventory.txt has no keys')
+
+        def slurper = new groovy.json.JsonSlurper()
+        ['voice_friendly', 'voice_pro', 'voice_royal', 'voice_minimal', 'voice_arabic', 'voice_silly'].each { stem ->
+            def f = new File(langDir, stem + '.json')
+            if (!f.exists()) throw new GradleException('Missing ' + f.name)
+            def json = slurper.parse(f) as Map
+            keys.each { k ->
+                if (!json.containsKey(k)) throw new GradleException(f.name + ' missing key: ' + k)
+                def v = json[k]?.toString() ?: ''
+                if (v.contains('[CB]')) throw new GradleException(f.name + ' key ' + k + ' contains forbidden [CB]')
+            }
+            def extras = json.keySet() - keys.toSet()
+            if (!extras.isEmpty()) throw new GradleException(f.name + ' undocumented keys: ' + extras)
+        }
+    }
+}
+
+tasks.named('build').configure { dependsOn tasks.named('verifyVoiceCatalog') }
+
+// ── Mojibake gate ──────────────────────────────────────────────────────────────
+// Scans every .java and .json source file for known mojibake byte sequences.
+// If ANY file contains a corrupted sequence the build FAILS with file + line info.
+// To fix: open MOJIBAKE_SHIELD.md, repair the corruption, re-run build.
+tasks.register('verifyMojibake') {
+    group = 'verification'
+    description = 'Fails the build if any .java or .json source file contains mojibake sequences. See MOJIBAKE_SHIELD.md.'
+
+    def srcJava = layout.projectDirectory.dir('src/main/java').asFile
+    def srcRes  = layout.projectDirectory.dir('src/main/resources').asFile
+    inputs.dir(srcJava)
+    inputs.dir(srcRes)
+
+    doLast {
+        // Patterns that are corrupted text (CP1252 bytes mis-decoded as Latin-1 then re-encoded as UTF-8).
+        // TextSanitizer.java is excluded because it intentionally contains these as repair-dictionary keys.
+        def PATTERNS = [
+            'Â°', 'Â·', 'Ã‚', 'Ãƒ', 'â€', 'âœ', 'â–', 'â"',
+            'â†', 'Â«', 'Â»', 'Ã¢', 'âœ–', 'âœ¦', 'â–¶', 'â—€',
+            'Ã°Å¸', 'Ã¢â‚¬', 'Ã¢Å"'
+        ]
+
+        def violations = []
+
+        [srcJava, srcRes].each { root ->
+            root.eachFileRecurse { file ->
+                if (!file.isFile()) return
+                def name = file.name
+                if (!(name.endsWith('.java') || name.endsWith('.json'))) return
+                // TextSanitizer intentionally stores mojibake as repair keys — skip it.
+                if (name == 'TextSanitizer.java') return
+
+                def lines = file.readLines('UTF-8')
+                lines.eachWithIndex { line, idx ->
+                    PATTERNS.each { pat ->
+                        if (line.contains(pat)) {
+                            violations << "${file.absolutePath}:${idx + 1} — pattern '${pat}' found"
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!violations.isEmpty()) {
+            def msg = new StringBuilder()
+            msg.append('\n\n')
+            msg.append('════════════════════════════════════════════════════════════\n')
+            msg.append('  MOJIBAKE DETECTED — BUILD FAILED\n')
+            msg.append('  Read MOJIBAKE_SHIELD.md before fixing.\n')
+            msg.append('════════════════════════════════════════════════════════════\n')
+            violations.each { msg.append("  ✖ ${it}\n") }
+            msg.append('════════════════════════════════════════════════════════════\n')
+            throw new Exception(msg.toString())
+        }
+    }
+}
+
+// ── Sound linkage gate ─────────────────────────────────────────────────────────
+// Scans every .java source file for playSound calls that use raw SoundEvents.*
+// without .value() — which causes silent crashes per THE_ROYAL_DIRECTIVE.md §4.
+tasks.register('verifySound') {
+    group = 'verification'
+    description = 'Fails the build if any .java file uses SoundEvents without .value() in playSound. See MOJIBAKE_SHIELD.md.'
+
+    def srcJava = layout.projectDirectory.dir('src/main/java').asFile
+    inputs.dir(srcJava)
+
+    doLast {
+        // In Yarn 1.21.1+build.3, BLOCK_NOTE_BLOCK_* constants are RegistryEntry<SoundEvent>
+        // and require .value() to unwrap.  All other SoundEvents.* constants are bare SoundEvent
+        // and must NOT use .value().  Only check the NOTE_BLOCK family.
+        def RAW_NOTE_BLOCK = java.util.regex.Pattern.compile(
+            'SoundEvents\\.BLOCK_NOTE_BLOCK_[A-Z0-9_]+(?!\\.value\\(\\))\\s*[,)]'
+        )
+
+        def violations = []
+
+        srcJava.eachFileRecurse { file ->
+            if (!file.isFile() || !file.name.endsWith('.java')) return
+            def lines = file.readLines('UTF-8')
+            lines.eachWithIndex { line, idx ->
+                if (RAW_NOTE_BLOCK.matcher(line).find()) {
+                    violations << "${file.absolutePath}:${idx + 1} — BLOCK_NOTE_BLOCK_* needs .value(): ${line.trim()}"
+                }
+            }
+        }
+
+        if (!violations.isEmpty()) {
+            def msg = new StringBuilder()
+            msg.append('\n\n')
+            msg.append('════════════════════════════════════════════════════════════\n')
+            msg.append('  SOUND LINKAGE VIOLATION — BUILD FAILED\n')
+            msg.append('  BLOCK_NOTE_BLOCK_* constants are RegistryEntry<SoundEvent> and need .value()\n')
+            msg.append('════════════════════════════════════════════════════════════\n')
+            violations.each { msg.append("  ✖ ${it}\n") }
+            msg.append('════════════════════════════════════════════════════════════\n')
+            throw new Exception(msg.toString())
+        }
+    }
+}
+
+tasks.named('build').configure {
+    dependsOn tasks.named('verifyMojibake')
+    dependsOn tasks.named('verifySound')
 }

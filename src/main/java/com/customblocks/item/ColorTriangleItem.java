@@ -2,6 +2,8 @@ package com.customblocks.item;
 
 import com.customblocks.CustomBlocksMod;
 import com.customblocks.CustomBlocksConfig;
+import com.customblocks.command.PermissionHelper;
+import com.customblocks.gui.ChatHelper;
 import com.customblocks.core.SlotData;
 import com.customblocks.core.SlotManager;
 import com.customblocks.core.UndoManager;
@@ -124,16 +126,15 @@ public class ColorTriangleItem extends Item {
         BlockState state = world.getBlockState(pos);
         if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
 
-        if (player != null && !player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
-            player.sendMessage(
-                Text.literal("§0§l[§b§lCB§0§l]§r §cYou need OP to use colour triangles."), true);
+        if (player != null && !PermissionHelper.canUseTool(player)) {
+            player.sendMessage(PermissionHelper.toolPermissionDeniedMessage(), true);
             if (world instanceof ServerWorld sw) sw.playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
             return ActionResult.FAIL;
         }
         if (!CustomBlocksConfig.isColorToolModeConfigured()) {
             if (player != null) {
-                player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §eColor tools are not configured yet."), true);
-                player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §7Open §f/cb config §7and choose: §fDefault: Fill corner only §7or §fExtra: Fill corners + more§7."), true);
+                player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_color_not_configured")), true);
+                player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_color_config_hint")), true);
             }
             return ActionResult.FAIL;
         }
@@ -153,8 +154,7 @@ public class ColorTriangleItem extends Item {
 
         if (workTexture == null || workTexture.length == 0) {
             if (player != null) {
-                player.sendMessage(
-                    Text.literal("§0§l[§b§lCB§0§l]§r §cThis block has no texture data to recolour."), true);
+                player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_triangle_no_texture")), true);
                 if (world instanceof ServerWorld sw) sw.playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
             }
             return ActionResult.FAIL;
@@ -170,8 +170,7 @@ public class ColorTriangleItem extends Item {
         // Already this colour?
         if (newId.equals(source.customId)) {
             if (player != null)
-                player.sendMessage(
-                    Text.literal("§0§l[§b§lCB§0§l]§r §7This block is already §f" + color.label() + "§7."), true);
+                player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_triangle_already_color", color.label())), true);
             return ActionResult.SUCCESS;
         }
 
@@ -181,9 +180,7 @@ public class ColorTriangleItem extends Item {
             if (player != null) {
                 player.getInventory().insertStack(
                     new ItemStack(CustomBlocksMod.SLOT_ITEMS[existing.index]));
-                player.sendMessage(
-                    Text.literal("§0§l[§b§lCB§0§l]§r §aGiven §f" + existing.displayName
-                        + "§a (variant already existed)."), true);
+                player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_triangle_variant_exists", existing.displayName)), true);
                 if (world instanceof ServerWorld sw) {
                     sw.spawnParticles(net.minecraft.particle.ParticleTypes.GLOW, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 5, 0.2, 0.2, 0.2, 0.05);
                     sw.playSound(null, pos, net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, net.minecraft.sound.SoundCategory.PLAYERS, 0.8f, 1.2f);
@@ -195,8 +192,7 @@ public class ColorTriangleItem extends Item {
         // Need a free slot
         if (SlotManager.freeSlots() == 0) {
             if (player != null)
-                player.sendMessage(
-                    Text.literal("§0§l[§b§lCB§0§l]§r §cNo free block slots! Delete some blocks first."), true);
+                player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_triangle_no_slots_long")), true);
             return ActionResult.FAIL;
         }
 
@@ -214,13 +210,13 @@ public class ColorTriangleItem extends Item {
                 server.execute(() -> {
                     if (SlotManager.freeSlots() == 0) {
                         if (fp != null)
-                            fp.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §cNo free slots!"), true);
+                            fp.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.no_free_slots_short")), true);
                         return;
                     }
                     SlotData newD = SlotManager.assign(newId, newName, newTexture);
                     if (newD == null) {
                         if (fp != null)
-                            fp.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §cFailed to allocate slot."), true);
+                            fp.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_triangle_allocate_failed")), true);
                         return;
                     }
                     // Copy properties from the source block
@@ -239,9 +235,7 @@ public class ColorTriangleItem extends Item {
                     if (fp != null) {
                         fp.getInventory().insertStack(
                             new ItemStack(CustomBlocksMod.SLOT_ITEMS[newD.index]));
-                        fp.sendMessage(
-                            Text.literal("§0§l[§b§lCB§0§l]§r §aCreated §f" + newName
-                                + " §aand added it to your inventory!"), true);
+                        fp.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_triangle_created", newName)), true);
                         
                         ServerWorld sw = (ServerWorld) world;
                         sw.spawnParticles(net.minecraft.particle.ParticleTypes.END_ROD, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 15, 0.3, 0.3, 0.3, 0.1);
@@ -251,8 +245,7 @@ public class ColorTriangleItem extends Item {
             } catch (Exception e) {
                 server.execute(() -> {
                     if (fp != null)
-                        fp.sendMessage(
-                            Text.literal("§0§l[§b§lCB§0§l]§r §cRecolour failed: " + e.getMessage()), true);
+                        fp.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_triangle_recolour_failed", e.getMessage())), true);
                 });
             }
         }, "CB-Recolour");

@@ -2,6 +2,8 @@ package com.customblocks.item;
 
 import com.customblocks.CustomBlocksMod;
 import com.customblocks.CustomBlocksConfig;
+import com.customblocks.command.PermissionHelper;
+import com.customblocks.gui.ChatHelper;
 import com.customblocks.ImageProcessor;
 import com.customblocks.core.SlotData;
 import com.customblocks.core.SlotManager;
@@ -22,6 +24,7 @@ import net.minecraft.util.ActionResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -80,8 +83,8 @@ public class RectangleToolItem extends Item {
         BlockState state = world.getBlockState(pos);
         if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
 
-        if (player != null && !player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
-            player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §cYou need OP to use the Rainbow Rectangle."), true);
+        if (player != null && !PermissionHelper.canUseTool(player)) {
+            player.sendMessage(PermissionHelper.toolPermissionDeniedMessage(), true);
             return ActionResult.FAIL;
         }
 
@@ -105,13 +108,11 @@ public class RectangleToolItem extends Item {
         PENDING.put(uuid, new PendingSession(pos, face, data.customId, size));
         SESSION_TIMESTAMPS.put(uuid, System.currentTimeMillis());
 
-        player.sendMessage(Text.literal(
-            "§0§l[§b§lCB§0§l]§r §eClicked §f" + face.toUpperCase() + " §eof §f" + data.displayName + "§e."), false);
-        player.sendMessage(Text.literal(
-            "§ePaste image URL (PNG/JPG/GIF/WebP…) — will create a new variant:"), false);
-        player.sendMessage(Text.literal(
-            "§7  §aShift+click §7= high quality (256px)   §8current: §f" + size + "px"), false);
-        player.sendMessage(Text.literal("§7Type §ccancel §7to abort."), false);
+        String faceU = face.toUpperCase(Locale.ROOT);
+        player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_rect_clicked_face", faceU, data.displayName)), false);
+        player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_rect_paste_url")), false);
+        player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_rect_quality_line", size)), false);
+        player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.gui_face_paste_cancel_hint")), false);
 
         if (world instanceof ServerWorld sw) {
             sw.spawnParticles(net.minecraft.particle.ParticleTypes.GLOW, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 10, 0.2, 0.2, 0.2, 0.05);
@@ -132,14 +133,13 @@ public class RectangleToolItem extends Item {
         String trimmed = message.trim();
 
         if (trimmed.equalsIgnoreCase("cancel")) {
-            player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §7Face-paint cancelled."), false);
+            player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_rect_cancelled")), false);
             player.getServerWorld().playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
             return true;
         }
 
         if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-            player.sendMessage(Text.literal(
-                "§0§l[§b§lCB§0§l]§r §cNeeds a URL starting with http:// or https://"), false);
+            player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.gui_needs_url_http")), false);
             return true;
         }
 
@@ -150,8 +150,8 @@ public class RectangleToolItem extends Item {
         MinecraftServer server = player.getServer();
         if (server == null) return true;
 
-        player.sendMessage(Text.literal(
-            "§0§l[§b§lCB§0§l]§r §eDownloading " + face.toUpperCase() + " face at §f" + size + "px§e..."), false);
+        player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_rect_downloading_face",
+            face.toUpperCase(Locale.ROOT), size)), false);
 
         Thread t = new Thread(() -> {
             try {
@@ -166,7 +166,7 @@ public class RectangleToolItem extends Item {
                     faceBytes = anim.bytes();
                     faceAnim  = anim.mcmeta();
                     server.execute(() -> player.sendMessage(Text.literal(
-                        "§0§l[§b§lCB§0§l]§r §bAnimated Image — " + anim.frameCount() + " frames!"), false));
+                        ChatHelper.formattedKey("cmd.tool_rect_animated_frames", anim.frameCount())), false));
                 } else {
                     faceBytes = ImageProcessor.toPng(raw);
                     faceBytes = ImageProcessor.padToSquare(faceBytes);
@@ -180,13 +180,11 @@ public class RectangleToolItem extends Item {
                 server.execute(() -> {
                     SlotData original = SlotManager.getById(baseId);
                     if (original == null) {
-                        player.sendMessage(Text.literal(
-                            "§0§l[§b§lCB§0§l]§r §cBlock '" + baseId + "' was deleted."), false);
+                        player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_rect_base_deleted", baseId)), false);
                         return;
                     }
                     if (SlotManager.freeSlots() == 0) {
-                        player.sendMessage(Text.literal(
-                            "§0§l[§b§lCB§0§l]§r §cNo free slots! Delete a block first."), false);
+                        player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_rect_no_slots_delete")), false);
                         return;
                     }
 
@@ -196,7 +194,7 @@ public class RectangleToolItem extends Item {
                     byte[] texCopy = original.texture != null ? original.texture.clone() : null;
                     SlotData newBlock = SlotManager.assign(variantId, variantName, texCopy);
                     if (newBlock == null) {
-                        player.sendMessage(Text.literal("§0§l[§b§lCB§0§l]§r §cCould not create variant — no free slots."), false);
+                        player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_rect_variant_create_failed")), false);
                         return;
                     }
 
@@ -236,9 +234,8 @@ public class RectangleToolItem extends Item {
                                     fe.getKey()));
                     }
 
-                    player.sendMessage(Text.literal(
-                        "§0§l[§b§lCB§0§l]§r §aCreated variant §f'" + variantId + "'§a! " +
-                        "§7(slot #" + newBlock.index + ") — original untouched."), false);
+                    player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_rect_variant_done",
+                        variantId, newBlock.index)), false);
                     
                     world.spawnParticles(net.minecraft.particle.ParticleTypes.END_ROD, session.pos().getX() + 0.5, session.pos().getY() + 0.5, session.pos().getZ() + 0.5, 20, 0.3, 0.3, 0.3, 0.1);
                     world.playSound(null, session.pos(), net.minecraft.sound.SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, net.minecraft.sound.SoundCategory.PLAYERS, 1f, 1f);
@@ -246,7 +243,7 @@ public class RectangleToolItem extends Item {
 
             } catch (Exception e) {
                 server.execute(() -> player.sendMessage(
-                    Text.literal("§0§l[§b§lCB§0§l]§r §cFailed: " + e.getMessage()), false));
+                    Text.literal(ChatHelper.formattedKey("cmd.tool_rect_async_failed", e.getMessage())), false));
             }
         }, "PB-RectDownload");
         t.setDaemon(true);

@@ -63,6 +63,10 @@ public record GuiState(
         return new GuiState(GuiMode.HELP_MENU, null, 0, false, 0, false);
     }
 
+    public static GuiState welcome() {
+        return new GuiState(GuiMode.WELCOME_MENU, null, 0, false, 0, false);
+    }
+
     public static GuiState tools() {
         return new GuiState(GuiMode.TOOLS_GUI, null, 0, false, 0, false);
     }
@@ -115,8 +119,13 @@ public record GuiState(
         return new GuiState(GuiMode.UNDO_PICKER, null, page, false, 0, false);
     }
 
+    /** {@code page} is the config sub-tab: {@code 0} main panel, {@code 1} permission fallbacks. */
+    public static GuiState configGui(int tab) {
+        return new GuiState(GuiMode.CONFIG_GUI, null, tab, false, 0, false);
+    }
+
     public static GuiState configGui() {
-        return new GuiState(GuiMode.CONFIG_GUI, null, 0, false, 0, false);
+        return configGui(0);
     }
 
     public static GuiState configWarning() {
@@ -207,6 +216,48 @@ public record GuiState(
 
     public static GuiState colorFillMode() {
         return new GuiState(GuiMode.COLOR_FILL_MODE, null, 0, false, 0, false);
+    }
+
+    public static GuiState recoverGui(int page) {
+        return new GuiState(GuiMode.RECOVER_GUI, null, page, false, 0, false);
+    }
+
+    public static GuiState featureMenu(int tab) {
+        return new GuiState(GuiMode.FEATURE_MENU, null, tab, false, 0, false);
+    }
+
+    public static GuiState permissionsSummary() {
+        return new GuiState(GuiMode.PERMISSIONS_SUMMARY, null, 0, false, 0, false);
+    }
+
+    /** K2 — usage statistics dashboard. */
+    public static GuiState statsGui() {
+        return new GuiState(GuiMode.STATS_GUI, null, 0, false, 0, false);
+    }
+
+    /** H4 — variant texture manager for a block. editingId = customId, page = unused. */
+    public static GuiState variantGui(String editingId) {
+        return new GuiState(GuiMode.VARIANT_GUI, editingId, 0, false, 0, false);
+    }
+
+    /** G1 — color studio. editingId = customId. */
+    public static GuiState colorStudio(String editingId) {
+        return new GuiState(GuiMode.COLOR_STUDIO, editingId, 0, false, 0, false);
+    }
+
+    /** G2 — palette generator. editingId = customId. */
+    public static GuiState paletteGenerator(String editingId) {
+        return new GuiState(GuiMode.PALETTE_GENERATOR, editingId, 0, false, 0, false);
+    }
+
+    /** J2 — AI smart suggest GUI. editingId = customId. */
+    public static GuiState aiSuggestGui(String editingId) {
+        return new GuiState(GuiMode.AI_SUGGEST_GUI, editingId, 0, false, 0, false);
+    }
+
+    /** L3 — Cloud Vault market browser. page = current page index. */
+    public static GuiState marketGui(int page) {
+        return new GuiState(GuiMode.MARKET_GUI, null, page, false, 0, false);
     }
 
     // Mutation (returns new instance)

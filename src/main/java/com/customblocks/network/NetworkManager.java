@@ -125,26 +125,34 @@ public final class NetworkManager {
         // Without this, the client's SlotManager has null textures after FullSyncPayload
         // and ResourcePackGenerator writes placeholders (purple/black missing textures).
         TextureQueue queue = getOrCreateQueue(player);
-        int texCount = 0, faceCount = 0, nullCount = 0;
+        int texCount = 0, bundledFaceSlots = 0, nullCount = 0;
         for (SlotData data : SlotManager.allSlots()) {
+            // Bundle all per-face textures into the "add" payload as a JSON map (N2 optimisation).
+            // This collapses what was previously 1 "add" + N "setface" packets into a single "add".
+            String facesJson = null;
+            if (!data.faceTextures.isEmpty()) {
+                com.google.gson.JsonObject jo = new com.google.gson.JsonObject();
+                for (var face : data.faceTextures.entrySet()) {
+                    jo.addProperty(face.getKey(),
+                            java.util.Base64.getEncoder().encodeToString(face.getValue()));
+                }
+                facesJson = jo.toString();
+                bundledFaceSlots++;
+            }
+            // H4 — bundle variant textures as a JSON array of base64 strings
+            String variantsJson = buildVariantsJson(data);
             if (data.texture != null && data.texture.length > 0) {
                 queue.enqueue(new SlotUpdatePayload("add", data.index, data.customId,
                         data.displayName, data.texture,
-                        data.lightLevel, data.hardness, data.soundType, null, null, data.animMeta));
+                        data.lightLevel, data.hardness, data.soundType,
+                        null, null, data.animMeta, facesJson, variantsJson));
                 texCount++;
             } else {
                 nullCount++;
             }
-            // Also send per-face texture overrides
-            for (var face : data.faceTextures.entrySet()) {
-                queue.enqueue(new SlotUpdatePayload("setface", data.index, data.customId,
-                        null, face.getValue(),
-                        data.lightLevel, data.hardness, data.soundType, face.getKey()));
-                faceCount++;
-            }
         }
-        LOGGER.info("[CustomBlocks] Drip-feed queued for {}: {} textures, {} faces, {} null-texture slots",
-                player.getName().getString(), texCount, faceCount, nullCount);
+        LOGGER.info("[CustomBlocks] Drip-feed queued for {}: {} textures ({} with bundled faces), {} null-texture slots",
+                player.getName().getString(), texCount, bundledFaceSlots, nullCount);
 
         // Sentinel: tells the client that every join texture has been queued.
         // The client uses this to fire exactly one resource-pack reload instead
@@ -250,13 +258,12 @@ public final class NetworkManager {
      * Phase 3: If the client's cached texture hash matches the server's, skip the
      * entire drip-feed and send metadata + sync_done only. This makes rejoins instant.
      */
-    public static void onSyncRequest(ServerPlayerEntity player, String clientHash) {
+    public static void onSyncRequest(ServerPlayerEntity player, String clientHash, String slotHashesJson) {
         if (clientHash != null && !clientHash.isEmpty()) {
             String serverHash = SlotManager.computeTextureHash();
             if (clientHash.equals(serverHash)) {
                 LOGGER.info("[CustomBlocks] Hash match for {} (hash={}). Skipping drip-feed.",
                         player.getName().getString(), serverHash.substring(0, Math.min(12, serverHash.length())));
-                // Send metadata-only FullSyncPayload so client has slot names/properties
                 List<FullSyncPayload.SlotEntry> entries = new ArrayList<>();
                 for (SlotData data : SlotManager.allSlots()) {
                     entries.add(new FullSyncPayload.SlotEntry(
@@ -266,18 +273,91 @@ public final class NetworkManager {
                 byte[] tabIcon = SlotManager.getTabIconTexture();
                 ServerPlayNetworking.send(player, new FullSyncPayload(entries, tabIcon,
                         com.customblocks.CustomBlocksConfig.maxSlots));
-                // Send immediate sync_done — no drip-feed needed
                 TextureQueue queue = getOrCreateQueue(player);
                 queue.enqueue(new SlotUpdatePayload("sync_done", -1, serverHash, null,
                         new byte[0], 0, 0f, "stone"));
                 return;
             }
+
+            // N3 — per-slot delta: if client sent slot hashes, only send what's missing/changed.
+            if (slotHashesJson != null && !slotHashesJson.isEmpty()) {
+                try {
+                    java.util.Map<Integer, String> clientSlots = new java.util.HashMap<>();
+                    com.google.gson.JsonObject jo = com.google.gson.JsonParser.parseString(slotHashesJson).getAsJsonObject();
+                    for (var e : jo.entrySet()) {
+                        clientSlots.put(Integer.parseInt(e.getKey()), e.getValue().getAsString());
+                    }
+                    java.util.Map<Integer, String> serverSlots = SlotManager.computeSlotHashMap();
+
+                    // Metadata sync first
+                    List<FullSyncPayload.SlotEntry> entries = new ArrayList<>();
+                    for (SlotData data : SlotManager.allSlots()) {
+                        entries.add(new FullSyncPayload.SlotEntry(
+                                data.index, data.customId, data.displayName,
+                                null, data.lightLevel, data.hardness, data.soundType, data.animMeta));
+                    }
+                    ServerPlayNetworking.send(player, new FullSyncPayload(entries,
+                            SlotManager.getTabIconTexture(), com.customblocks.CustomBlocksConfig.maxSlots));
+
+                    // Drip-feed only changed/missing slots
+                    TextureQueue queue = getOrCreateQueue(player);
+                    int deltaCount = 0;
+                    for (SlotData data : SlotManager.allSlots()) {
+                        if (data.texture == null || data.texture.length == 0) continue;
+                        String clientCrc = clientSlots.get(data.index);
+                        String serverCrc = serverSlots.get(data.index);
+                        if (serverCrc != null && serverCrc.equals(clientCrc)) continue; // client has it
+
+                        String facesJson = null;
+                        if (!data.faceTextures.isEmpty()) {
+                            com.google.gson.JsonObject fj = new com.google.gson.JsonObject();
+                            for (var face : data.faceTextures.entrySet()) {
+                                fj.addProperty(face.getKey(),
+                                        java.util.Base64.getEncoder().encodeToString(face.getValue()));
+                            }
+                            facesJson = fj.toString();
+                        }
+                        String variantsJson = buildVariantsJson(data);
+                        queue.enqueue(new SlotUpdatePayload("add", data.index, data.customId,
+                                data.displayName, data.texture,
+                                data.lightLevel, data.hardness, data.soundType,
+                                null, null, data.animMeta, facesJson, variantsJson));
+                        deltaCount++;
+                    }
+
+                    // Also send "remove" for slots client knows but server no longer has
+                    for (int idx : clientSlots.keySet()) {
+                        if (!serverSlots.containsKey(idx)) {
+                            SlotData d = SlotManager.getByIndex(idx);
+                            if (d == null) {
+                                queue.enqueue(new SlotUpdatePayload("remove", idx, "", null, null, 0, 0f, "stone"));
+                            }
+                        }
+                    }
+
+                    String serverHash2 = SlotManager.computeTextureHash();
+                    queue.enqueue(new SlotUpdatePayload("sync_done", -1, serverHash2, null,
+                            new byte[0], 0, 0f, "stone"));
+                    LOGGER.info("[CustomBlocks] N3 delta sync for {}: {} slots changed (of {} total), {} client-had",
+                            player.getName().getString(), deltaCount, serverSlots.size(), clientSlots.size());
+                    return;
+                } catch (Exception ex) {
+                    LOGGER.warn("[CustomBlocks] N3 delta parse failed for {}, falling back to full sync: {}",
+                            player.getName().getString(), ex.getMessage());
+                }
+            }
+
             LOGGER.info("[CustomBlocks] Hash mismatch for {} (client={}, server={}). Full drip-feed.",
                     player.getName().getString(),
                     clientHash.substring(0, Math.min(12, clientHash.length())),
                     serverHash.substring(0, Math.min(12, serverHash.length())));
         }
         sendFullSync(player);
+    }
+
+    /** Legacy overload kept for call sites that don't yet pass slotHashesJson. */
+    public static void onSyncRequest(ServerPlayerEntity player, String clientHash) {
+        onSyncRequest(player, clientHash, "");
     }
 
     /** Called when a player joins — mandatory resource pack only (no sync here). */
@@ -360,6 +440,17 @@ public final class NetworkManager {
         return PLAYER_QUEUES.computeIfAbsent(player.getUuid(), k -> new TextureQueue());
     }
 
-    /** Expose chunk threshold for diagnostic logging. */
-    public static int getChunkThreshold() { return CHUNK_THRESHOLD; }
+    /**
+     * H4 — Build a JSON array string of base64-encoded variant textures for a slot,
+     * or null if the slot has no variants.
+     */
+    private static String buildVariantsJson(SlotData data) {
+        if (!data.hasVariants()) return null;
+        com.google.gson.JsonArray ja = new com.google.gson.JsonArray();
+        for (byte[] v : data.variantTextures) {
+            ja.add(java.util.Base64.getEncoder().encodeToString(v));
+        }
+        return ja.toString();
+    }
+
 }

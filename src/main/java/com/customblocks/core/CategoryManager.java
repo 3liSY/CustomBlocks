@@ -256,28 +256,4 @@ public final class CategoryManager {
                 .collect(Collectors.toList());
     }
 
-    public static List<SlotData> getUncategorizedBlocks() {
-        return SlotManager.sortedSlots().stream()
-                .filter(d -> !assignments.containsKey(d.customId))
-                .collect(Collectors.toList());
-    }
-
-    // ── Snapshot Restore (Phase 10) ─────────────────────────────────────────
-
-    /** Replace the entire categories + assignments with the supplied snapshot. */
-    public static synchronized void restoreFromSnapshot(
-            Map<String, Set<String>> assignSnap,
-            Map<String, Category> catSnap) {
-        categories.clear();
-        if (catSnap != null) {
-            for (Map.Entry<String, Category> e : catSnap.entrySet()) categories.put(e.getKey(), e.getValue());
-        }
-        assignments.clear();
-        if (assignSnap != null) {
-            for (Map.Entry<String, Set<String>> e : assignSnap.entrySet()) {
-                assignments.put(e.getKey(), new HashSet<>(e.getValue()));
-            }
-        }
-        saveAll();
-    }
 }

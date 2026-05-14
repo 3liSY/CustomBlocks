@@ -1,7 +1,6 @@
 package com.customblocks.item;
 
-import com.customblocks.CustomBlocksMod;
-import com.customblocks.CustomBlocksConfig;
+import com.customblocks.command.PermissionHelper;
 import com.customblocks.core.SlotData;
 import com.customblocks.core.SlotManager;
 import com.customblocks.block.SlotBlock;
@@ -59,9 +58,8 @@ public class AmethystChiselItem extends Item {
         BlockState state = world.getBlockState(pos);
         if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
 
-        if (player != null && !player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
-            player.sendMessage(
-                Text.literal("§0§l[§b§lCB§0§l]§r §cYou need OP to use the Amethyst Chisel."), true);
+        if (player != null && !PermissionHelper.canUseTool(player)) {
+            player.sendMessage(PermissionHelper.toolPermissionDeniedMessage(), true);
             if (world instanceof ServerWorld sw)
                 sw.playSound(null, player.getBlockPos(),
                     net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),

@@ -323,12 +323,41 @@ public class ResourcePackGenerator {
 
 
                 // ── Blockstate ────────────────────────────────────────────────
-
-                JsonObject variant  = new JsonObject(); variant.addProperty("model", modelRef);
-
-                JsonObject variants = new JsonObject(); variants.add("", variant);
-
-                JsonObject bs       = new JsonObject(); bs.add("variants", variants);
+                // H4: if block has variant textures, emit weighted random variant array.
+                JsonObject bs = new JsonObject();
+                if (data.hasVariants()) {
+                    // Write variant texture files + per-variant models
+                    for (int vi = 0; vi < data.variantTextures.size(); vi++) {
+                        byte[] varTex = data.variantTextures.get(vi);
+                        File varTexDest = new File(assets, "textures/block/" + slotKey + "_var" + vi + ".png");
+                        writePng(varTex, varTexDest);
+                        // Variant model
+                        JsonObject vbm = new JsonObject();
+                        vbm.addProperty("parent", "minecraft:block/cube_all");
+                        JsonObject vtex = new JsonObject();
+                        vtex.addProperty("all", MOD_ID + ":block/" + slotKey + "_var" + vi);
+                        vbm.add("textures", vtex);
+                        writeJson(vbm, new File(assets, "models/block/" + slotKey + "_var" + vi + ".json"));
+                    }
+                    // Build weighted variants array: v0 = main texture, v1+ = extra variants
+                    com.google.gson.JsonArray variantArr = new com.google.gson.JsonArray();
+                    // main model (slot_N.json) is variant index "v_main"
+                    JsonObject mainEntry = new JsonObject();
+                    mainEntry.addProperty("model", modelRef);
+                    variantArr.add(mainEntry);
+                    for (int vi = 0; vi < data.variantTextures.size(); vi++) {
+                        JsonObject vEntry = new JsonObject();
+                        vEntry.addProperty("model", MOD_ID + ":block/" + slotKey + "_var" + vi);
+                        variantArr.add(vEntry);
+                    }
+                    JsonObject variantsObj = new JsonObject();
+                    variantsObj.add("", variantArr);
+                    bs.add("variants", variantsObj);
+                } else {
+                    JsonObject variant  = new JsonObject(); variant.addProperty("model", modelRef);
+                    JsonObject variantsObj = new JsonObject(); variantsObj.add("", variant);
+                    bs.add("variants", variantsObj);
+                }
 
                 writeJson(bs, new File(assets, "blockstates/" + slotKey + ".json"));
 
@@ -782,40 +811,45 @@ public class ResourcePackGenerator {
 
 
 
-            // ── Blockstate + item model — only if missing (static files) ──────
-
-            File bsFile = new File(assets, "blockstates/" + slotKey + ".json");
-
-            if (!bsFile.exists()) {
-
+            // ── Blockstate + item model — always regenerate (may have new variants) ──
+            {
                 new File(assets, "blockstates").mkdirs();
-
                 new File(assets, "models/item").mkdirs();
+                String modelRef2 = MOD_ID + ":block/" + slotKey;
 
-                String modelRef = MOD_ID + ":block/" + slotKey;
-
-
-
-                // Blockstate
-
-                JsonObject variant  = new JsonObject(); variant.addProperty("model", modelRef);
-
-                JsonObject variants = new JsonObject(); variants.add("", variant);
-
-                JsonObject bs       = new JsonObject(); bs.add("variants", variants);
-
-                writeJson(bs, bsFile);
-
-
-
-                // Item model
+                JsonObject bs2 = new JsonObject();
+                if (data != null && data.hasVariants()) {
+                    for (int vi = 0; vi < data.variantTextures.size(); vi++) {
+                        byte[] varTex = data.variantTextures.get(vi);
+                        File varTexDest = new File(assets, "textures/block/" + slotKey + "_var" + vi + ".png");
+                        writePng(varTex, varTexDest);
+                        JsonObject vbm = new JsonObject();
+                        vbm.addProperty("parent", "minecraft:block/cube_all");
+                        JsonObject vtex = new JsonObject();
+                        vtex.addProperty("all", MOD_ID + ":block/" + slotKey + "_var" + vi);
+                        vbm.add("textures", vtex);
+                        writeJson(vbm, new File(assets, "models/block/" + slotKey + "_var" + vi + ".json"));
+                    }
+                    com.google.gson.JsonArray variantArr2 = new com.google.gson.JsonArray();
+                    JsonObject mainEntry2 = new JsonObject(); mainEntry2.addProperty("model", modelRef2);
+                    variantArr2.add(mainEntry2);
+                    for (int vi = 0; vi < data.variantTextures.size(); vi++) {
+                        JsonObject vEntry2 = new JsonObject();
+                        vEntry2.addProperty("model", MOD_ID + ":block/" + slotKey + "_var" + vi);
+                        variantArr2.add(vEntry2);
+                    }
+                    JsonObject variantsObj2 = new JsonObject(); variantsObj2.add("", variantArr2);
+                    bs2.add("variants", variantsObj2);
+                } else {
+                    JsonObject variant2  = new JsonObject(); variant2.addProperty("model", modelRef2);
+                    JsonObject variantsObj2 = new JsonObject(); variantsObj2.add("", variant2);
+                    bs2.add("variants", variantsObj2);
+                }
+                writeJson(bs2, new File(assets, "blockstates/" + slotKey + ".json"));
 
                 JsonObject im = new JsonObject();
-
-                im.addProperty("parent", modelRef);
-
+                im.addProperty("parent", modelRef2);
                 writeJson(im, new File(assets, "models/item/" + slotKey + ".json"));
-
             }
 
 
@@ -988,7 +1022,8 @@ public class ResourcePackGenerator {
 
                 try {
 
-                    // Extract slot index from "slot_123.png", "slot_123_north.png", "slot_123.json", etc.
+                    // Extract slot index from "slot_123.png", "slot_123_north.png",
+                    // "slot_123_var0.png", "slot_123.json", etc.
 
                     String afterPrefix = name.substring(entry[1].length());
 
@@ -1082,24 +1117,6 @@ public class ResourcePackGenerator {
     // ── Item texture generators ───────────────────────────────────────────────
 
 
-
-    /**
-
-     * Glossy colour-swatch square (16×16 RGBA):
-
-     *  - 1-px transparent margin on all sides
-
-     *  - 1-px very-dark border ring
-
-     *  - main colour fill
-
-     *  - top highlight strip (colour blended ~55% toward white)
-
-     *  - bottom-right shadow strip (colour × 0.65)
-
-     *  - 2-px bright shine dot at top-left inner corner
-
-     */
 
     /**
 
