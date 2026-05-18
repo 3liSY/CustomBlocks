@@ -38,7 +38,7 @@ public final class ImageProcessor {
     /**
      * Container for processed image data and its corresponding Minecraft animation metadata.
      */
-    public record ProcessResult(byte[] bytes, String mcmeta, int frameCount) {
+    public record ProcessResult(byte[] bytes, String mcmeta, int frameCount, String warning) {
         public boolean isAnimated() { return frameCount > 1; }
     }
 
@@ -86,6 +86,15 @@ public final class ImageProcessor {
 
             // Detect animated format (GIF, APNG, animated WebP)
             if (isAnimatedImage(raw)) {
+                // 1.25 — Reject oversized GIFs before processing to prevent OOM / server crash
+                int maxMb = Math.max(1, com.customblocks.CustomBlocksConfig.maxGifSizeMb);
+                long maxBytes = (long) maxMb * 1024 * 1024;
+                if (raw.length > maxBytes) {
+                    double actualMb = raw.length / (1024.0 * 1024.0);
+                    throw new IOException(String.format(
+                        "§c[CB] §fGIF too large (§c%.1f§f MB). Max allowed: §f%d§f MB. Compress it first or use a shorter animation.",
+                        actualMb, maxMb));
+                }
                 ProcessResult anim = processAnimation(raw, targetSize);
                 if (anim != null && anim.isAnimated()) {
                     if (isBrokenTexture(anim.bytes))
@@ -108,7 +117,7 @@ public final class ImageProcessor {
             byte[] processed = resizeTo(png, targetSize);
             if (isBrokenTexture(processed))
                 throw new IOException("§eGot the image, but it came out broken after processing. §7Try saving it as a normal PNG and paste the new link.");
-            return new ProcessResult(processed, null, 1);
+            return new ProcessResult(processed, null, 1, null);
         } catch (IOException e) {
             // Re-throw our own friendly messages as-is
             throw e;
@@ -145,6 +154,9 @@ public final class ImageProcessor {
      * Max 10 MB.
      */
     public static byte[] download(String url) throws IOException, InterruptedException {
+        // 1.25 — SSRF protection: block private/internal network addresses
+        validateUrlSecurity(url);
+
         String fetchUrl = url;
 
         // Discord CDN — append ?format=png so Discord auto-converts WebP to PNG
@@ -406,6 +418,73 @@ public final class ImageProcessor {
     }
 
     /**
+     * 1.31 — Same algorithm as {@link #replaceBackground} but paints background pixels
+     * with a custom RGB colour instead of black.  Used by the hex-colour tool to produce
+     * correctly-tinted variant textures.
+     *
+     * @param pngBytes source PNG bytes
+     * @param rgb      target fill colour as 0xRRGGBB (alpha is ignored — always fully opaque)
+     */
+    public static byte[] replaceBackgroundWithColor(byte[] pngBytes, int rgb) throws IOException {
+        int fillR = (rgb >> 16) & 0xFF;
+        int fillG = (rgb >>  8) & 0xFF;
+        int fillB =  rgb        & 0xFF;
+        int FILL = 0xFF000000 | (fillR << 16) | (fillG << 8) | fillB;
+
+        BufferedImage img = ImageIO.read(new ByteArrayInputStream(pngBytes));
+        if (img == null) return pngBytes;
+        int w = img.getWidth(), h = img.getHeight();
+        BufferedImage argb = toArgb(img);
+
+        final int[][] DIRS = {{1,0},{-1,0},{0,1},{0,-1}};
+        boolean[][] isBg   = new boolean[w][h];
+
+        Queue<int[]> queue = new ArrayDeque<>();
+        for (int x = 0; x < w; x++) {
+            if (!isBg[x][0]   && isBackground(argb.getRGB(x, 0)))   { isBg[x][0]   = true; queue.add(new int[]{x, 0});   }
+            if (!isBg[x][h-1] && isBackground(argb.getRGB(x, h-1))) { isBg[x][h-1] = true; queue.add(new int[]{x, h-1}); }
+        }
+        for (int y = 1; y < h - 1; y++) {
+            if (!isBg[0][y]   && isBackground(argb.getRGB(0, y)))   { isBg[0][y]   = true; queue.add(new int[]{0, y});   }
+            if (!isBg[w-1][y] && isBackground(argb.getRGB(w-1, y))) { isBg[w-1][y] = true; queue.add(new int[]{w-1, y}); }
+        }
+        while (!queue.isEmpty()) {
+            int[] px = queue.poll();
+            int x = px[0], y = px[1];
+            for (int[] d : DIRS) {
+                int nx = x + d[0], ny = y + d[1];
+                if (nx >= 0 && nx < w && ny >= 0 && ny < h
+                        && !isBg[nx][ny] && isBackground(argb.getRGB(nx, ny))) {
+                    isBg[nx][ny] = true;
+                    queue.add(new int[]{nx, ny});
+                }
+            }
+        }
+
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                if (isBg[x][y]) {
+                    argb.setRGB(x, y, FILL);
+                    continue;
+                }
+                int pixel = argb.getRGB(x, y);
+                int a = (pixel >> 24) & 0xFF;
+                if (a < 255) {
+                    // Premultiply alpha against fill colour
+                    int r = (int)(((pixel >> 16) & 0xFF) * a / 255.0 + (fillR * (255 - a) / 255.0) + 0.5);
+                    int g = (int)(((pixel >>  8) & 0xFF) * a / 255.0 + (fillG * (255 - a) / 255.0) + 0.5);
+                    int b = (int)( (pixel        & 0xFF) * a / 255.0 + (fillB * (255 - a) / 255.0) + 0.5);
+                    argb.setRGB(x, y, 0xFF000000 | (Math.min(255,r) << 16) | (Math.min(255,g) << 8) | Math.min(255,b));
+                }
+            }
+        }
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ImageIO.write(argb, "PNG", baos);
+        return baos.toByteArray();
+    }
+
+    /**
      * Returns true if this pixel should be treated as background during flood-fill.
      * Uses the configured white-background colour distance mode.
      */
@@ -541,7 +620,7 @@ public final class ImageProcessor {
             }
             mcmeta.append("]}}");
 
-            return new ProcessResult(baos.toByteArray(), mcmeta.toString(), frames.size());
+            return new ProcessResult(baos.toByteArray(), mcmeta.toString(), frames.size(), null);
         } catch (OutOfMemoryError oom) {
             CustomBlocksMod.LOGGER.error("[CustomBlocks] OOM during video processing — try a shorter video or lower resolution");
             return null;
@@ -816,6 +895,23 @@ public final class ImageProcessor {
 
                 if (frames.isEmpty()) return null;
 
+                // 1.12 Layer 1 — Cap decoded strip size BEFORE building the strip
+                long estimatedStripBytes = (long) frameSize * frameSize * frames.size() * 4;
+                long maxStripBytes = com.customblocks.CustomBlocksConfig.maxGifStripBytes;
+                String animWarning = null;
+                if (estimatedStripBytes > maxStripBytes) {
+                    int maxFrames = (int)(maxStripBytes / ((long) frameSize * frameSize * 4));
+                    maxFrames = Math.max(1, maxFrames);
+                    int oldCount = frames.size();
+                    frames = frames.subList(0, Math.min(maxFrames, frames.size()));
+                    ticks = ticks.subList(0, Math.min(maxFrames, ticks.size()));
+                    animWarning = "§eGIF had " + oldCount + " frames — trimmed to " + frames.size()
+                        + " to fit safely. §7Use /cb anim to adjust.";
+                    CustomBlocksMod.LOGGER.warn(
+                        "[CustomBlocks] 1.12 Layer 1: GIF too large (~{}MB) — trimmed from {} to {} frames",
+                        estimatedStripBytes / 1_000_000, oldCount, frames.size());
+                }
+
                 // Build vertical strip at target frame size
                 BufferedImage strip = new BufferedImage(frameSize, frameSize * frames.size(), BufferedImage.TYPE_INT_ARGB);
                 Graphics2D gStrip = strip.createGraphics();
@@ -833,6 +929,28 @@ public final class ImageProcessor {
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 ImageIO.write(strip, "PNG", baos);
 
+                // 1.12 Layer 2 — Cap final PNG size after encoding; retry at 64px if over 2 MB
+                if (baos.size() > 2_000_000L && frameSize > 64) {
+                    int smallSize = 64;
+                    BufferedImage strip2 = new BufferedImage(smallSize, smallSize * frames.size(), BufferedImage.TYPE_INT_ARGB);
+                    Graphics2D gStrip2 = strip2.createGraphics();
+                    gStrip2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+                    gStrip2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+                    gStrip2.setComposite(AlphaComposite.Clear);
+                    gStrip2.fillRect(0, 0, smallSize, smallSize * frames.size());
+                    gStrip2.setComposite(AlphaComposite.SrcOver);
+                    for (int k = 0; k < frames.size(); k++) {
+                        gStrip2.drawImage(frames.get(k), 0, k * smallSize, smallSize, smallSize, null);
+                    }
+                    gStrip2.dispose();
+                    baos.reset();
+                    ImageIO.write(strip2, "PNG", baos);
+                    String sizeWarning = "§eTexture re-encoded at 64px per frame to fit size limits.";
+                    animWarning = (animWarning != null ? animWarning + " " : "") + sizeWarning;
+                    CustomBlocksMod.LOGGER.warn(
+                        "[CustomBlocks] 1.12 Layer 2: GIF PNG too large — re-encoded at 64px ({} frames)", frames.size());
+                }
+
                 // Minecraft .mcmeta with interpolate + explicit {index,time} entries
                 StringBuilder mcmeta = new StringBuilder("{\"animation\":{\"interpolate\":true,\"frames\":[");
                 for (int i = 0; i < frames.size(); i++) {
@@ -841,11 +959,12 @@ public final class ImageProcessor {
                 }
                 mcmeta.append("]}}");
 
-                return new ProcessResult(baos.toByteArray(), mcmeta.toString(), frames.size());
+                return new ProcessResult(baos.toByteArray(), mcmeta.toString(), frames.size(), animWarning);
             }
         } catch (OutOfMemoryError oom) {
-            CustomBlocksMod.LOGGER.error("[CustomBlocks] OOM during GIF processing - try a smaller GIF");
-            return null;
+            // 1.12 Layer 4 — Graceful OOM: free nothing was pinned, give player a clear message
+            CustomBlocksMod.LOGGER.error("[CustomBlocks] OOM during GIF processing — server ran out of memory");
+            throw new RuntimeException("§cGIF too large for server memory. §7Try a shorter GIF (under 30 frames) or a smaller resolution.");
         } catch (Exception e) {
             CustomBlocksMod.LOGGER.error("[CustomBlocks] Animation processing failed", e);
             return null;
@@ -905,12 +1024,51 @@ public final class ImageProcessor {
     }
 
     /**
+     * 1.9 — Round size to nearest power-of-2, clamped to [16, MAX_SIZE].
+     * Uses floor (rounds down) to avoid upscaling — 150 → 128, 200 → 128, 260 → 256.
+     * If the input already exceeds MAX_SIZE it is capped; if below 16 it is floored.
+     */
+    public static int nearestPowerOf2(int size) {
+        size = Math.max(16, Math.min(MAX_SIZE, size));
+        return Integer.highestOneBit(size); // floor power-of-2
+    }
+
+    /** True when n is already a valid power-of-2 (n > 0 and exactly one bit set). */
+    private static boolean isPowerOf2(int n) {
+        return n > 0 && (n & (n - 1)) == 0;
+    }
+
+    /**
+     * 1.9 — Validation gate for static textures: decode, check power-of-2 dimensions,
+     * and resize to nearest power-of-2 square if needed.
+     * Do NOT call this on animated strips — they are handled by processAnimation().
+     * Returns the original bytes unchanged if already correct or on any decode error.
+     */
+    public static byte[] ensurePowerOf2(byte[] pngBytes) {
+        if (pngBytes == null || pngBytes.length == 0) return pngBytes;
+        try {
+            BufferedImage img = ImageIO.read(new ByteArrayInputStream(pngBytes));
+            if (img == null) return pngBytes;
+            int w = img.getWidth(), h = img.getHeight();
+            if (isPowerOf2(w) && isPowerOf2(h)) return pngBytes;
+            int target = nearestPowerOf2(Math.max(w, h));
+            CustomBlocksMod.LOGGER.warn(
+                "[CustomBlocks] 1.9 Validation gate: non-power-of-2 texture ({}x{}) → resizing to {}x{}",
+                w, h, target, target);
+            return resizeTo(pngBytes, target);
+        } catch (Exception e) {
+            return pngBytes; // best-effort — don't break pack generation
+        }
+    }
+
+    /**
      * Scale image to exactly targetSize × targetSize pixels using bicubic interpolation.
-     * targetSize is clamped to [16, MAX_SIZE].
+     * targetSize is snapped to the nearest power-of-2 (see nearestPowerOf2) so that
+     * Minecraft's mipmap system is never compromised by a non-conforming atlas entry.
      * If the image is already the right size, returns the input unchanged.
      */
     public static byte[] resizeTo(byte[] pngBytes, int targetSize) throws IOException {
-        targetSize = Math.max(16, Math.min(MAX_SIZE, targetSize));
+        targetSize = nearestPowerOf2(targetSize);
         BufferedImage img = ImageIO.read(new ByteArrayInputStream(pngBytes));
         if (img == null) return pngBytes;
         if (img.getWidth() == targetSize && img.getHeight() == targetSize) return pngBytes;
@@ -939,6 +1097,8 @@ public final class ImageProcessor {
             BufferedImage img = ImageIO.read(new ByteArrayInputStream(pngBytes));
             if (img == null) return true;
             int w = img.getWidth(), h = img.getHeight();
+            // 1.21 — Dimension check: textures smaller than 16×16 are broken
+            if (w < 16 || h < 16) return true;
             int magentaPixels = 0;   // pure magenta (255,0,255)
             int blackPixels   = 0;   // pure black (0,0,0)
             int totalPixels   = w * h;
@@ -1250,5 +1410,64 @@ public final class ImageProcessor {
         if (raw[0]=='R' && raw[1]=='I' && raw[2]=='F' && raw[3]=='F') return "RIFF/WebP";
         if (raw[0]==0x42 && raw[1]==0x4D) return "BMP";
         return "Unknown (" + String.format("%02X %02X %02X %02X", raw[0], raw[1], raw[2], raw[3]) + ")";
+    }
+
+    // ── SSRF protection (item 1.25) ──────────────────────────────────────────
+
+    /**
+     * Validates that a URL points to a public internet address.
+     * Blocks localhost, private networks (10.x, 172.16.x, 192.168.x),
+     * link-local (169.254.x — cloud metadata endpoints), and unroutable addresses.
+     *
+     * Call this at the top of every method that accepts a user-supplied URL
+     * before any HTTP connection is opened.
+     *
+     * @throws IOException with a player-friendly error message if the URL is disallowed.
+     */
+    public static void validateUrlSecurity(String urlString) throws IOException {
+        if (urlString == null || urlString.isBlank()) {
+            throw new IOException("§c[CB] That URL is not allowed. Only public internet addresses are accepted.");
+        }
+
+        java.net.URI uri;
+        try {
+            uri = java.net.URI.create(urlString);
+        } catch (IllegalArgumentException e) {
+            throw new IOException("§c[CB] That URL is not allowed. Only public internet addresses are accepted.");
+        }
+
+        String scheme = uri.getScheme();
+        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+            throw new IOException("§c[CB] That URL is not allowed. Only public internet addresses are accepted.");
+        }
+
+        String host = uri.getHost();
+        if (host == null || host.isBlank()) {
+            throw new IOException("§c[CB] That URL is not allowed. Only public internet addresses are accepted.");
+        }
+
+        java.net.InetAddress addr;
+        try {
+            addr = java.net.InetAddress.getByName(host);
+        } catch (java.net.UnknownHostException e) {
+            // Unknown host — cannot resolve, not necessarily malicious; let it through
+            // so valid but temporarily-down hosts still get a friendly network error.
+            return;
+        }
+
+        if (addr.isLoopbackAddress()) {
+            throw new IOException("§c[CB] That URL is not allowed. Only public internet addresses are accepted.");
+        }
+        if (addr.isSiteLocalAddress()) {
+            // Covers 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+            throw new IOException("§c[CB] That URL is not allowed. Only public internet addresses are accepted.");
+        }
+        if (addr.isLinkLocalAddress()) {
+            // Covers 169.254.x.x (AWS/GCP/Azure cloud metadata endpoints)
+            throw new IOException("§c[CB] That URL is not allowed. Only public internet addresses are accepted.");
+        }
+        if (addr.isAnyLocalAddress()) {
+            throw new IOException("§c[CB] That URL is not allowed. Only public internet addresses are accepted.");
+        }
     }
 }

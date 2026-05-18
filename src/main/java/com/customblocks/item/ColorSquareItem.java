@@ -5,6 +5,8 @@ import com.customblocks.command.PermissionHelper;
 import com.customblocks.gui.ChatHelper;
 import com.customblocks.CustomBlocksMod;
 import com.customblocks.block.SlotBlock;
+import com.customblocks.core.ColorDetection;
+import com.customblocks.core.ColorNames;
 import com.customblocks.core.SlotData;
 import com.customblocks.core.SlotManager;
 import net.minecraft.block.Block;
@@ -23,6 +25,8 @@ import net.minecraft.util.ActionResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 
@@ -39,8 +43,12 @@ public class ColorSquareItem extends Item {
     private static final String NBT_LABEL = "cb_square_label";
     private static final String NBT_KEY = "cb_square_key";
 
-    /** Keep in sync with built-in triangle colors and command suggestions. */
-    public static final String[] KNOWN_COLORS = {"black", "yellow", "green"};
+    /**
+     * All 16 canonical color family names.
+     * Kept in sync with {@link ColorNames#FAMILY_NAMES} — used for ID-segment scanning.
+     */
+    public static final String[] KNOWN_COLORS =
+        ColorNames.FAMILY_NAMES.toArray(new String[0]);
 
     private final String colorWord;
     private final String colorName;
@@ -129,7 +137,7 @@ public class ColorSquareItem extends Item {
         if (current == null) return ActionResult.PASS;
 
         SquareColor color = resolveColor(ctx.getStack());
-        String targetId = resolveTargetId(current.customId, color.key());
+        String targetId = resolveTargetId(current.customId, color.key(), current.texture);
 
         if (targetId.equals(current.customId)) {
             if (player != null) {
@@ -145,10 +153,51 @@ public class ColorSquareItem extends Item {
 
         SlotData target = SlotManager.getById(targetId);
         if (target == null) {
-            if (player != null) {
-                player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_square_variant_missing", targetId)), true);
+            // 1.28 — colorSquareFallbackMode: use_base / auto_create / error
+            String fallback = CustomBlocksConfig.colorSquareFallbackMode;
+            if ("error".equals(fallback)) {
+                if (player != null) {
+                    player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_square_variant_missing", targetId)), true);
+                }
+                return ActionResult.FAIL;
             }
-            return ActionResult.FAIL;
+            // use_base or auto_create: find the base block and create a recolored variant
+            String baseId = findBaseId(targetId, color.key());
+            SlotData baseBlock = baseId != null ? SlotManager.getById(baseId) : null;
+            if (baseBlock == null) {
+                if (player != null) {
+                    player.sendMessage(Text.literal("§c[CB] §fVariant '§c" + targetId + "§f' not found and no base block '§c"
+                            + (baseId != null ? baseId : "?") + "§f' exists to create it from."), true);
+                }
+                return ActionResult.FAIL;
+            }
+            // 1.31 — if this is a hex color key (hex_RRGGBB), recolor the base texture
+            // instead of copying it as-is. This ensures the variant actually looks like the
+            // target hex color instead of being an identical copy of the base block.
+            byte[] variantTexture = baseBlock.texture;
+            if (baseBlock.texture != null && color.key().startsWith("hex_") && color.key().length() == 10) {
+                try {
+                    String hexPart = color.key().substring(4); // strip "hex_"
+                    int rgb = Integer.parseInt(hexPart, 16);
+                    int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
+                    variantTexture = ColorTriangleItem.recolourTexture(baseBlock.texture, r, g, b,
+                        com.customblocks.CustomBlocksConfig.useTrappedHoleFill());
+                } catch (Exception recolorEx) {
+                    // fall back to plain copy if recoloring fails
+                }
+            }
+            SlotData created = SlotManager.assign(targetId, baseBlock.displayName + " (" + color.label() + ")", variantTexture);
+            if (created == null) {
+                if (player != null) {
+                    player.sendMessage(Text.literal("§c[CB] §fCould not create variant '§c" + targetId + "§f' — no free slots."), true);
+                }
+                return ActionResult.FAIL;
+            }
+            SlotManager.saveAll();
+            target = created;
+            if ("auto_create".equals(fallback) && player != null) {
+                player.sendMessage(Text.literal("§7[CB] §fCreated §b" + targetId + "§7 from base block §f" + baseId + "§7."), true);
+            }
         }
 
         // Client notify + forced redraw without neighbor churn keeps the swap snappy for recording.
@@ -170,19 +219,55 @@ public class ColorSquareItem extends Item {
         return ActionResult.SUCCESS;
     }
 
-    private static String resolveTargetId(String currentId, String targetColorKey) {
+    /**
+     * Determine the ID of the target color variant.
+     *
+     * Layer 1 — name scan: scan ID segments against all 16 families + 40 aliases.
+     * If a segment resolves to ANY color family it is replaced with targetColorKey.
+     * Example: "obsidian_black" → targetColorKey="yellow" → "obsidian_yellow"
+     *          "marble_crimson" (alias crimson→red) → "marble_yellow"
+     *
+     * Layer 2 — pixel analysis: if no color segment found and we have texture bytes,
+     * run HSB bucket clustering on the texture to detect the dominant color.
+     * The detected family segment is replaced, or the key is appended.
+     *
+     * @param currentId    the block's current customId
+     * @param targetColorKey the target color key (e.g. "yellow", "hex_ff0000")
+     * @param textureBytes  the block's texture bytes (may be null — skips pixel analysis)
+     */
+    static String resolveTargetId(String currentId, String targetColorKey, byte[] textureBytes) {
         String baseId = stripCustomColorSuffix(currentId);
         String[] segments = baseId.split("_", -1);
+
+        // Layer 1 — name scan using full ColorNames vocabulary
         for (int i = 0; i < segments.length; i++) {
-            for (String known : KNOWN_COLORS) {
-                if (segments[i].equalsIgnoreCase(known)) {
-                    segments[i] = targetColorKey;
-                    return String.join("_", segments);
+            String resolved = ColorNames.resolveFamily(segments[i]);
+            if (resolved != null) {
+                segments[i] = targetColorKey;
+                return String.join("_", segments);
+            }
+        }
+
+        // Layer 2 — pixel analysis fallback
+        if (textureBytes != null && textureBytes.length > 0) {
+            ColorDetection.DetectionResult result = ColorDetection.detect(textureBytes);
+            if (result.confident() && result.primary != null) {
+                // Found a dominant color — replace last segment that is a plain word,
+                // or append the target key.
+                // Try to find ANY segment that pixel-matches the detected family and replace it.
+                for (int i = 0; i < segments.length; i++) {
+                    if (segments[i].equalsIgnoreCase(result.primary)) {
+                        segments[i] = targetColorKey;
+                        return String.join("_", segments);
+                    }
                 }
             }
         }
+
+        // No color segment found either way — append target key as suffix
         return baseId + "_" + targetColorKey;
     }
+
 
     private static String stripCustomColorSuffix(String id) {
         return id.replaceFirst("(?i)_hex_[0-9a-f]{6}$", "");
@@ -222,6 +307,33 @@ public class ColorSquareItem extends Item {
 
     private static String hexForRgb(int rgb) {
         return String.format(Locale.ROOT, "%06X", rgb & 0xFFFFFF);
+    }
+
+    /**
+     * 1.28 — find the "base" block ID to fall back on when a color variant doesn't exist.
+     * Example: targetId="fortnite_black", colorKey="black" → returns "fortnite" if it exists.
+     * Tries exact suffix strip first, then scans segments for any color family name.
+     */
+    private static String findBaseId(String targetId, String colorKey) {
+        // 1. Exact suffix strip: "fortnite_black" - "_black" = "fortnite"
+        String suffix = "_" + colorKey;
+        if (targetId.endsWith(suffix)) {
+            String base = targetId.substring(0, targetId.length() - suffix.length());
+            if (!base.isEmpty() && SlotManager.hasId(base)) return base;
+        }
+        // 2. Scan segments right-to-left for any color family, strip it
+        String[] parts = targetId.split("_", -1);
+        for (int i = parts.length - 1; i >= 0; i--) {
+            String seg = parts[i];
+            if (seg.equalsIgnoreCase(colorKey) || ColorNames.resolveFamily(seg) != null) {
+                List<String> segs = new ArrayList<>(Arrays.asList(parts));
+                segs.remove(i);
+                if (segs.isEmpty()) continue;
+                String candidate = String.join("_", segs);
+                if (SlotManager.hasId(candidate)) return candidate;
+            }
+        }
+        return null;
     }
 
     private record SquareColor(String label, String key) {}

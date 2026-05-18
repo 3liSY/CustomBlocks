@@ -16,6 +16,7 @@ import com.customblocks.command.PermissionHelper;
 import com.customblocks.block.SlotBlock;
 import com.customblocks.network.SlotUpdatePayload;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -35,6 +36,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -44,9 +46,10 @@ public class CustomBlockCommand {
         .connectTimeout(java.time.Duration.ofSeconds(5))
         .build();
 
-    // Mixed alphabet for share codes — excludes filesystem-unsafe chars (/ \ : ? * " < > |)
+    // 1.38 — alphanumeric only; !@#$%& removed: & breaks URL query params, % is a Windows batch var,
+    // # truncates URLs as a fragment, and % & are illegal in Windows filenames.
     private static final String SHARE_ALPHABET =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%&";
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
     /** Generates a 12-char code from SHA-256 hash of the input. */
     public static String generateShareCode(String input) {
@@ -349,6 +352,114 @@ public class CustomBlockCommand {
                         .executes(ctx -> cmdBulkDelete(ctx.getSource(),
                             StringArgumentType.getString(ctx, "ids")))))
 
+                // ── Phase 2 bulk hub ─────────────────────────────────────────
+                .then(CommandManager.literal("bulk")
+                    .requires(PermissionHelper::canBulk)
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) com.customblocks.gui.GuiManager.openBulkHub(p);
+                        return 1;
+                    }))
+                .then(CommandManager.literal("bulkgui")
+                    .requires(PermissionHelper::canBulk)
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) com.customblocks.gui.GuiManager.openBulkHub(p);
+                        return 1;
+                    }))
+
+                // ── bulkrename ───────────────────────────────────────────────
+                .then(CommandManager.literal("bulkrename")
+                    .requires(PermissionHelper::canBulk)
+                    .executes(ctx -> usage(ctx.getSource(), "bulkrename"))
+                    .then(CommandManager.argument("args", StringArgumentType.greedyString())
+                        .executes(ctx -> cmdBulkRename(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "args")))))
+
+                // ── bulkreid ─────────────────────────────────────────────────
+                .then(CommandManager.literal("bulkreid")
+                    .requires(PermissionHelper::canBulk)
+                    .executes(ctx -> usage(ctx.getSource(), "bulkreid"))
+                    .then(CommandManager.argument("args", StringArgumentType.greedyString())
+                        .executes(ctx -> cmdBulkReId(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "args")))))
+
+                // ── bulkproperty ─────────────────────────────────────────────
+                .then(CommandManager.literal("bulkproperty")
+                    .requires(PermissionHelper::canBulk)
+                    .executes(ctx -> usage(ctx.getSource(), "bulkproperty"))
+                    .then(CommandManager.argument("args", StringArgumentType.greedyString())
+                        .executes(ctx -> cmdBulkProperty(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "args")))))
+
+                // ── bulkexport ───────────────────────────────────────────────
+                .then(CommandManager.literal("bulkexport")
+                    .requires(PermissionHelper::canBulk)
+                    .executes(ctx -> usage(ctx.getSource(), "bulkexport"))
+                    .then(CommandManager.argument("scope", StringArgumentType.greedyString())
+                        .executes(ctx -> cmdBulkExport(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "scope")))))
+
+                // ── bulkmove ─────────────────────────────────────────────────
+                .then(CommandManager.literal("bulkmove")
+                    .requires(PermissionHelper::canBulk)
+                    .executes(ctx -> usage(ctx.getSource(), "bulkmove"))
+                    .then(CommandManager.argument("args", StringArgumentType.greedyString())
+                        .executes(ctx -> cmdBulkMove(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "args")))))
+
+                // ── bulkduplicate ────────────────────────────────────────────
+                .then(CommandManager.literal("bulkduplicate")
+                    .requires(PermissionHelper::canBulk)
+                    .executes(ctx -> usage(ctx.getSource(), "bulkduplicate"))
+                    .then(CommandManager.argument("args", StringArgumentType.greedyString())
+                        .executes(ctx -> cmdBulkDuplicate(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "args")))))
+
+                // ── bulklock / bulkunlock ─────────────────────────────────────
+                .then(CommandManager.literal("bulklock")
+                    .requires(PermissionHelper::canBulk)
+                    .executes(ctx -> usage(ctx.getSource(), "bulklock"))
+                    .then(CommandManager.argument("scope", StringArgumentType.greedyString())
+                        .executes(ctx -> cmdBulkLock(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "scope"), true))))
+                .then(CommandManager.literal("bulkunlock")
+                    .requires(PermissionHelper::canBulk)
+                    .executes(ctx -> usage(ctx.getSource(), "bulklock"))
+                    .then(CommandManager.argument("scope", StringArgumentType.greedyString())
+                        .executes(ctx -> cmdBulkLock(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "scope"), false))))
+
+                // ── bulkfavorite / bulkunfavorite ────────────────────────────
+                .then(CommandManager.literal("bulkfavorite")
+                    .requires(PermissionHelper::canBulk)
+                    .executes(ctx -> usage(ctx.getSource(), "bulkfavorite"))
+                    .then(CommandManager.argument("scope", StringArgumentType.greedyString())
+                        .executes(ctx -> cmdBulkFavorite(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "scope"), true))))
+                .then(CommandManager.literal("bulkunfavorite")
+                    .requires(PermissionHelper::canBulk)
+                    .executes(ctx -> usage(ctx.getSource(), "bulkfavorite"))
+                    .then(CommandManager.argument("scope", StringArgumentType.greedyString())
+                        .executes(ctx -> cmdBulkFavorite(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "scope"), false))))
+
+                // ── bulkshape ────────────────────────────────────────────────
+                .then(CommandManager.literal("bulkshape")
+                    .requires(PermissionHelper::canBulk)
+                    .executes(ctx -> usage(ctx.getSource(), "bulkshape"))
+                    .then(CommandManager.argument("args", StringArgumentType.greedyString())
+                        .executes(ctx -> cmdBulkShape(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "args")))))
+
+                // ── bulksound ────────────────────────────────────────────────
+                .then(CommandManager.literal("bulksound")
+                    .requires(PermissionHelper::canBulk)
+                    .executes(ctx -> usage(ctx.getSource(), "bulksound"))
+                    .then(CommandManager.argument("args", StringArgumentType.greedyString())
+                        .executes(ctx -> cmdBulkSound(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "args")))))
+
                 // ── rename ──────────────────────────────────────────────────
                 .then(CommandManager.literal("rename")
                     .requires(PermissionHelper::canEdit)
@@ -442,6 +553,14 @@ public class CustomBlockCommand {
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
                         .executes(ctx -> cmdFavorite(ctx.getSource(), StringArgumentType.getString(ctx, "id")))))
+
+                // 1.30 — Dedicated unfavorite command (no accidental re-adding)
+                .then(CommandManager.literal("unfavorite")
+                    .requires(PermissionHelper::canFavorite)
+                    .executes(ctx -> cmdUnfavorite(ctx.getSource(), null))
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .executes(ctx -> cmdUnfavorite(ctx.getSource(), StringArgumentType.getString(ctx, "id")))))
 
                 // ── lock / unlock (Phase H1) ─────────────────────────────────
                 .then(CommandManager.literal("lock")
@@ -741,7 +860,11 @@ public class CustomBlockCommand {
                         if (p != null) GuiManager.openConfigWarningGui(p);
                         else ChatHelper.error(ctx.getSource(), ChatHelper.formattedKey("cmd.console_player_only"));
                         return 1;
-                    }))
+                    })
+                    // 1.29 — /cb config hologram <true|false>
+                    .then(CommandManager.literal("hologram")
+                        .then(CommandManager.argument("enabled", BoolArgumentType.bool())
+                            .executes(ctx -> cmdConfigHologram(ctx.getSource(), BoolArgumentType.getBool(ctx, "enabled"))))))
 
                 // ── reload ───────────────────────────────────────────────────
                 .then(CommandManager.literal("reload")
@@ -774,6 +897,18 @@ public class CustomBlockCommand {
                     .then(CommandManager.literal("resume")
                         .requires(PermissionHelper::canAdmin)
                         .executes(ctx -> cmdRpPause(ctx.getSource(), false))))
+
+                // ── sync — 1.22 player-triggered re-sync ─────────────────────
+                .then(CommandManager.literal("sync")
+                    .executes(ctx -> cmdSync(ctx.getSource())))
+
+                // ── unsuppress — 1.23 restore broken-block warning ───────────
+                .then(CommandManager.literal("unsuppress")
+                    .requires(PermissionHelper::canEdit)
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .executes(ctx -> cmdUnsuppress(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "id")))))
 
                 // ── setshape ─────────────────────────────────────────────────
                 .then(CommandManager.literal("setshape")
@@ -1136,6 +1271,10 @@ public class CustomBlockCommand {
                     if (result.isAnimated()) {
                         SlotManager.setAnimMeta(id, result.mcmeta());
                         ChatHelper.info(src, ChatHelper.formattedKey("cmd.anim_meta_generated"));
+                    }
+                    // 1.12 — relay any trim/resize warning to the player
+                    if (result.warning() != null) {
+                        src.sendMessage(net.minecraft.text.Text.literal(result.warning()));
                     }
 
                     UndoManager.pushUndoCreate(id, getPlayerUuid(src));
@@ -1552,7 +1691,11 @@ public class CustomBlockCommand {
 
             java.nio.file.Path exportDir = java.nio.file.Path.of("config/customblocks/exports");
             java.nio.file.Files.createDirectories(exportDir);
-            java.nio.file.Files.writeString(exportDir.resolve(hash + ".json"), jsonStr, java.nio.charset.StandardCharsets.UTF_8);
+            // 1.15 — atomic write: temp file + move so a crash mid-write can't corrupt the cache
+            java.nio.file.Path exportTarget = exportDir.resolve(hash + ".json");
+            java.nio.file.Path exportTmp = exportDir.resolve(hash + ".json.tmp");
+            java.nio.file.Files.writeString(exportTmp, jsonStr, java.nio.charset.StandardCharsets.UTF_8);
+            java.nio.file.Files.move(exportTmp, exportTarget, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             GuiManager.uploadShareToCloud(hash, jsonStr);
 
             String code = "CB~" + hash;
@@ -1748,7 +1891,11 @@ public class CustomBlockCommand {
     private static void cacheCloudShare(String hash, String json) throws java.io.IOException {
         java.nio.file.Path exportDir = java.nio.file.Path.of("config/customblocks/exports");
         java.nio.file.Files.createDirectories(exportDir);
-        java.nio.file.Files.writeString(exportDir.resolve(hash + ".json"), json, java.nio.charset.StandardCharsets.UTF_8);
+        // 1.15 — atomic write
+        java.nio.file.Path target = exportDir.resolve(hash + ".json");
+        java.nio.file.Path tmp = exportDir.resolve(hash + ".json.tmp");
+        java.nio.file.Files.writeString(tmp, json, java.nio.charset.StandardCharsets.UTF_8);
+        java.nio.file.Files.move(tmp, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
     }
 
     private static void playCloudImportSuccess(ServerPlayerEntity player) {
@@ -1956,9 +2103,11 @@ public class CustomBlockCommand {
                 ImageProcessor.ProcessResult anim = ImageProcessor.isAnimatedImage(raw) ? ImageProcessor.processAnimation(raw, size) : null;
                 byte[] bytes;
                 String animMeta = null;
+                String animWarning = null;
                 if (anim != null && anim.isAnimated()) {
                     bytes = anim.bytes();
                     animMeta = anim.mcmeta();
+                    animWarning = anim.warning(); // 1.12 — capture trim/resize warning
                 } else {
                     bytes = ImageProcessor.toPng(raw);
                     bytes = ImageProcessor.padToSquare(bytes);
@@ -1967,7 +2116,10 @@ public class CustomBlockCommand {
                 }
                 final byte[] fb = bytes;
                 final String fa = animMeta;
+                final String fWarn = animWarning;
                 server.execute(() -> {
+                    // 1.12 — relay any trim/resize warning to the player
+                    if (fWarn != null) src.sendMessage(net.minecraft.text.Text.literal(fWarn));
                     SlotData d = SlotManager.getById(id);
         UndoManager.pushUndoMutation(id, d, "retexture", getPlayerUuid(src));
                     if (d == null) { src.sendMessage(notFound(id)); return; }
@@ -2083,6 +2235,39 @@ public class CustomBlockCommand {
         } else {
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.favorite_added", id));
         }
+        return 1;
+    }
+
+    /** 1.30 — Dedicated unfavorite: never accidentally re-adds. */
+    private static int cmdUnfavorite(ServerCommandSource src, String rawId) {
+        ServerPlayerEntity p = src.getPlayer();
+        if (p == null) {
+            ChatHelper.error(src, ChatHelper.formattedKey("cmd.console_player_only"));
+            return 0;
+        }
+        if (rawId == null || rawId.isBlank()) {
+            // No args → list current favorites (same as /cb favorite)
+            java.util.ArrayList<String> favs = new java.util.ArrayList<>(FavoritesManager.validatedSet(p.getUuid()));
+            if (favs.isEmpty()) {
+                ChatHelper.info(src, ChatHelper.formattedKey("cmd.favorite_list_empty"));
+                return 1;
+            }
+            int max = 48;
+            java.util.List<String> head = favs.subList(0, Math.min(max, favs.size()));
+            ChatHelper.info(src, ChatHelper.formattedKey("cmd.favorite_list_summary", favs.size(), String.join("§7, §f", head)));
+            return 1;
+        }
+        String id = sanitize(rawId);
+        if (!SlotManager.hasId(id)) {
+            src.sendError(notFound(id));
+            return 0;
+        }
+        if (!FavoritesManager.isFavorite(p.getUuid(), id)) {
+            ChatHelper.info(src, "§7[CB] §f" + id + " §7is not in your favorites.");
+            return 1;
+        }
+        FavoritesManager.toggle(p.getUuid(), id, src.getServer()); // removes it
+        ChatHelper.success(src, "§7[CB] §f✗ §f" + id + " §7removed from favorites.");
         return 1;
     }
 
@@ -2879,7 +3064,7 @@ public class CustomBlockCommand {
         p.sendMessage(ChatHelper.rawPrefixed("§d§lPick Voice §7(click a mode):"), false);
         String[] modes = {"friendly", "professional", "royal", "minimal", "arabic", "silly"};
         for (String mode : modes) {
-            String sample = com.customblocks.core.VoiceCatalog.formatForMode(mode, "cancel.search.empty");
+            String sample = com.customblocks.core.VoiceCatalog.formatForMode(mode, "cmd.voice.set", mode);
             net.minecraft.text.MutableText line = net.minecraft.text.Text.literal("  §f" + mode + " §8— §7" + sample)
                 .styled(s -> s.withClickEvent(new net.minecraft.text.ClickEvent(
                     net.minecraft.text.ClickEvent.Action.RUN_COMMAND, "/cb voice " + mode
@@ -3277,6 +3462,41 @@ public class CustomBlockCommand {
         return new ScopeResolution(out, invalid);
     }
 
+    // 1.22 — Rate-limit /cb sync to once per 10 seconds per player
+    private static final java.util.concurrent.ConcurrentHashMap<java.util.UUID, Long> SYNC_COOLDOWN =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long SYNC_COOLDOWN_MS = 10_000L;
+
+    private static int cmdSync(ServerCommandSource src) {
+        ServerPlayerEntity player = src.getPlayer();
+        if (player == null) {
+            ChatHelper.error(src, "This command can only be used by a player.");
+            return 0;
+        }
+        long now = System.currentTimeMillis();
+        Long last = SYNC_COOLDOWN.get(player.getUuid());
+        if (last != null && (now - last) < SYNC_COOLDOWN_MS) {
+            long waitSec = (SYNC_COOLDOWN_MS - (now - last)) / 1000 + 1;
+            ChatHelper.warn(player, "§7Please wait §f" + waitSec + "s §7before re-syncing.");
+            return 0;
+        }
+        SYNC_COOLDOWN.put(player.getUuid(), now);
+        ChatHelper.info(player, "§7Re-syncing block textures…");
+        com.customblocks.network.NetworkManager.sendFullSync(player);
+        return 1;
+    }
+
+    /** 1.23 — Re-enable the broken-texture warning for a previously suppressed block. */
+    private static int cmdUnsuppress(ServerCommandSource src, String id) {
+        if (!SlotManager.hasId(id)) {
+            ChatHelper.error(src, "Unknown block ID: " + id);
+            return 0;
+        }
+        com.customblocks.core.SlotManager.setSuppressed(id, false);
+        ChatHelper.success(src, "§aWarning restored for §f" + id + "§a. It will now appear in the broken-blocks view if it has no texture.");
+        return 1;
+    }
+
     private static int cmdRpPause(ServerCommandSource src, boolean pause) {
         var server = src.getServer();
         var packet = new com.customblocks.network.RpPausePayload(pause);
@@ -3291,22 +3511,67 @@ public class CustomBlockCommand {
         return 1;
     }
 
+    /** 1.29 — /cb config hologram <true|false>  — toggle hologram visibility from command line. */
+    private static int cmdConfigHologram(ServerCommandSource src, boolean enabled) {
+        com.customblocks.CustomBlocksConfig.hologramEnabled = enabled;
+        com.customblocks.CustomBlocksConfig.save();
+        if (enabled) {
+            ChatHelper.success(src, "§a[CB] Hologram enabled. Changes apply immediately.");
+            if (com.customblocks.CustomBlocksConfig.hologramHeight <= 0.0f) {
+                ChatHelper.info(src, "§e[CB] Hologram height is 0 — set hologram-height above 0 in config for visible holograms.");
+            }
+        } else {
+            ChatHelper.info(src, "§7[CB] Hologram disabled.");
+        }
+        return 1;
+    }
+
     private static int cmdReload(ServerCommandSource src) {
-        ChatHelper.success(src, ChatHelper.formattedKey("cmd.reload_background"));
-        // Fix 4: Run off the server thread to prevent blocking ticks for 10+ seconds
+        // 1.27 — Full reload: config + blocks + resource pack rebuild + push to all players
+        ChatHelper.success(src, "§7[CB] Reloading config, blocks, and resource pack...");
         SlotManager.flushSave();
+        net.minecraft.server.MinecraftServer server = src.getServer();
+        int onlineCount = server.getPlayerManager().getPlayerList().size();
         new Thread(() -> {
+            // Step 1 — Config
+            try {
+                com.customblocks.CustomBlocksConfig.load();
+            } catch (Exception e) {
+                IncidentRecorder.record("reload", "CustomBlocksConfig.load", e);
+                server.execute(() ->
+                    ChatHelper.error(src, "§c[CB] Config reload failed: §f" + e.getMessage()
+                        + "§c. Previous config remains active."));
+                return;
+            }
+            // Step 2 — Block data
             try {
                 SlotManager.loadAll();
-                src.getServer().execute(() -> {
-                    CustomBlocksMod.broadcastFullSync(src.getServer());
-                    ChatHelper.success(src, ChatHelper.formattedKey("cmd.reload_done"));
-                });
             } catch (Exception e) {
                 IncidentRecorder.record("reload", "SlotManager.loadAll", e);
-                src.getServer().execute(() ->
-                    ChatHelper.error(src, ChatHelper.formattedKey("cmd.reload_failed", e.getMessage())));
+                server.execute(() ->
+                    ChatHelper.error(src, "§c[CB] Block reload failed: §f" + e.getMessage()));
+                return;
             }
+            // Step 3 — Resource pack rebuild + push
+            try {
+                com.customblocks.ResourcePackManager.scheduleRebuild(server);
+            } catch (Exception e) {
+                IncidentRecorder.record("reload", "ResourcePackManager.scheduleRebuild", e);
+                server.execute(() ->
+                    ChatHelper.error(src, "§c[CB] Reload failed during pack generation: §f" + e.getMessage()
+                        + "§c. Blocks were reloaded but pack was NOT pushed."));
+                return;
+            }
+            // Step 4 — Broadcast data sync
+            server.execute(() -> {
+                CustomBlocksMod.broadcastFullSync(server);
+                if (onlineCount == 0) {
+                    ChatHelper.success(src, "§a[CB] Reload complete. No players online — pack will be sent on next join.");
+                } else {
+                    ChatHelper.success(src, "§a[CB] Reload complete. Config §a✓ §fBlocks §a✓ §fResource pack pushed to §f"
+                        + onlineCount + "§a player(s).");
+                }
+            });
         }, "CustomBlocks-Reload").start();
         return 1;
     }
@@ -3799,6 +4064,17 @@ public class CustomBlockCommand {
         String msg = switch (cmd) {
             case "create"       -> "create <id> <name> [size] <url>";
             case "bulkdelete"    -> "bulkdelete <id1> <id2> ...  — delete multiple blocks";
+            case "bulk", "bulkgui" -> "bulk  — open Bulk Operations hub GUI";
+            case "bulkrename"    -> "bulkrename <scope> --prefix <text> | --suffix <text> | --replace <old> --with <new>";
+            case "bulkreid"      -> "bulkreid <scope> --replace <old> --with <new>  — renames block IDs";
+            case "bulkproperty"  -> "bulkproperty <scope> <sound|glow|hardness|collision> <value>";
+            case "bulkexport"    -> "bulkexport <scope>  — export blocks + textures as ZIP";
+            case "bulkmove"      -> "bulkmove <scope> <category>  — move blocks to a category";
+            case "bulkduplicate" -> "bulkduplicate <scope> [--suffix <text>]  — clone blocks with new IDs";
+            case "bulklock"      -> "bulklock <scope>  — lock blocks against editing";
+            case "bulkfavorite"  -> "bulkfavorite <scope>  — star/unstar blocks";
+            case "bulkshape"     -> "bulkshape <scope> <preset>  — presets: full slab thin carpet pillar small micro";
+            case "bulksound"     -> "bulksound <scope> <sound>  — set sound type for multiple blocks";
             case "delete"       -> "delete <id>";
             case "rename"       -> "rename <id> <newname>";
             case "reid"         -> "reid <id> <newid>  — change block ID";
@@ -3923,7 +4199,10 @@ public class CustomBlockCommand {
                 java.nio.file.Path exportDir = java.nio.file.Path.of("config", "customblocks", "exports");
                 java.nio.file.Files.createDirectories(exportDir);
                 java.nio.file.Path outFile = exportDir.resolve(id + ".png");
-                java.nio.file.Files.write(outFile, d.texture);
+                // 1.15 — atomic write
+                java.nio.file.Path outTmp = exportDir.resolve(id + ".png.tmp");
+                java.nio.file.Files.write(outTmp, d.texture);
+                java.nio.file.Files.move(outTmp, outFile, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
                 src.getServer().execute(() -> {
                     ChatHelper.success(src, "§aExported §f" + id + " §ato §f" + outFile);
                     com.customblocks.core.HistoryTracker.record(getPlayerUuid(src), getPlayerName(src), "exported", id);
@@ -3982,5 +4261,459 @@ public class CustomBlockCommand {
 
         ChatHelper.success(src, "§aShowcasing §f" + d.displayName + " §afor 30 seconds.");
         return 1;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Phase 2.2 — Bulk operation commands
+    // ════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Parse a greedy-string args line into a map of flags and a leading scope token.
+     * Format: [scope] [--flag1 value1] [--flag2 value2] [--dryrun]
+     * Returns map with "scope" key and flag keys (without "--").
+     */
+    private static java.util.Map<String, String> parseBulkArgs(String args) {
+        java.util.Map<String, String> out = new java.util.LinkedHashMap<>();
+        String[] tokens = args.trim().split("\\s+");
+        StringBuilder scope = new StringBuilder();
+        int i = 0;
+        // Collect leading non-flag tokens as scope (until we hit a --)
+        while (i < tokens.length && !tokens[i].startsWith("--")) {
+            if (scope.length() > 0) scope.append(" ");
+            scope.append(tokens[i]);
+            i++;
+        }
+        out.put("scope", scope.toString().trim());
+        // Parse --key value pairs
+        while (i < tokens.length) {
+            String tok = tokens[i];
+            if (tok.startsWith("--")) {
+                String key = tok.substring(2).toLowerCase(java.util.Locale.ROOT);
+                if (i + 1 < tokens.length && !tokens[i + 1].startsWith("--")) {
+                    i++;
+                    out.put(key, tokens[i]);
+                } else {
+                    out.put(key, "true");
+                }
+            }
+            i++;
+        }
+        return out;
+    }
+
+    /** Common scope-to-blocks resolver for bulk commands. Returns empty list + error if scope is blank/missing. */
+    private static List<SlotData> resolveScope(ServerCommandSource src, String scope) {
+        if (scope == null || scope.isBlank()) {
+            ChatHelper.error(src, "§cProvide a scope: §fall §7| §fcategory:<key> §7| §fname:<text> §7| §f<id1,id2,...>");
+            return null;
+        }
+        UUID playerUuid = getPlayerUuid(src);
+        List<SlotData> blocks = com.customblocks.core.BulkScope.resolve(scope, playerUuid);
+        if (blocks.isEmpty()) {
+            ChatHelper.error(src, "§cNo blocks matched scope: §f" + scope);
+            return null;
+        }
+        return blocks;
+    }
+
+    /** Dry-run or threshold guard — returns true if operation should proceed. */
+    private static boolean bulkGuard(ServerCommandSource src, List<SlotData> blocks,
+                                     java.util.Map<String, String> flags, String opName) {
+        boolean dryRun = flags.containsKey("dryrun") || flags.containsKey("dry-run");
+        int count = blocks.size();
+        int threshold = com.customblocks.CustomBlocksConfig.bulkConfirmThreshold;
+        if (dryRun) {
+            ChatHelper.info(src, "§e[Dry run] §7" + opName + " would affect §f" + count + " §7block(s):");
+            blocks.stream().limit(10).forEach(d -> ChatHelper.info(src, "  §b" + d.customId + " §7— " + d.displayName));
+            if (count > 10) ChatHelper.info(src, "  §8... and " + (count - 10) + " more.");
+            return false;
+        }
+        if (count > threshold && !flags.containsKey("apply") && !flags.containsKey("confirm")) {
+            ChatHelper.warn(src, "§e" + opName + " will affect §f" + count + " §eblocks. "
+                    + "Add §b--apply §eto confirm, or §b--dryrun §eto preview.");
+            return false;
+        }
+        return true;
+    }
+
+    // ── bulkrename ──────────────────────────────────────────────────────────
+
+    private static int cmdBulkRename(ServerCommandSource src, String args) {
+        java.util.Map<String, String> flags = parseBulkArgs(args);
+        List<SlotData> blocks = resolveScope(src, flags.get("scope"));
+        if (blocks == null) return 0;
+        if (!bulkGuard(src, blocks, flags, "Bulk Rename")) return 1;
+
+        String prefix  = flags.getOrDefault("prefix",  "");
+        String suffix  = flags.getOrDefault("suffix",  "");
+        String fromStr = flags.getOrDefault("replace", null);
+        String toStr   = flags.getOrDefault("with",    "");
+        if (prefix.isEmpty() && suffix.isEmpty() && fromStr == null) {
+            ChatHelper.error(src, "§cProvide at least one: §b--prefix <text> §7| §b--suffix <text> §7| §b--replace <old> --with <new>");
+            return 0;
+        }
+
+        int count = 0;
+        for (SlotData d : blocks) {
+            String newName = d.displayName;
+            if (fromStr != null) newName = newName.replace(fromStr, toStr);
+            if (!prefix.isEmpty()) newName = prefix + newName;
+            if (!suffix.isEmpty()) newName = newName + suffix;
+            final String finalName = newName;
+            SlotData prev = com.customblocks.core.SlotManager.getById(d.customId);
+            if (prev != null) {
+                com.customblocks.core.UndoManager.pushUndoMutation(d.customId, prev, "meta", getPlayerUuid(src));
+                com.customblocks.core.SlotManager.rename(d.customId, finalName);
+                count++;
+            }
+        }
+        if (src.getServer() != null) com.customblocks.ResourcePackManager.scheduleRebuild(src.getServer());
+        ChatHelper.success(src, "§aRenamed §f" + count + " §7block(s). §8/cb undo to revert.");
+        return 1;
+    }
+
+    // ── bulkreid ────────────────────────────────────────────────────────────
+
+    private static int cmdBulkReId(ServerCommandSource src, String args) {
+        java.util.Map<String, String> flags = parseBulkArgs(args);
+        List<SlotData> blocks = resolveScope(src, flags.get("scope"));
+        if (blocks == null) return 0;
+        if (!bulkGuard(src, blocks, flags, "Bulk Re-ID")) return 1;
+
+        String fromStr = flags.get("replace");
+        String toStr   = flags.getOrDefault("with", "");
+        if (fromStr == null) {
+            ChatHelper.error(src, "§cProvide: §b--replace <old_fragment> --with <new_fragment>");
+            return 0;
+        }
+        // Pre-check for collisions
+        List<String> collisions = new ArrayList<>();
+        for (SlotData d : blocks) {
+            String newId = d.customId.replace(fromStr, toStr);
+            if (!newId.equals(d.customId) && com.customblocks.core.SlotManager.hasId(newId)) collisions.add(newId);
+        }
+        if (!collisions.isEmpty()) {
+            ChatHelper.error(src, "§cID collision(s) detected — aborting. Conflicting IDs:");
+            collisions.forEach(id -> ChatHelper.error(src, "  §f" + id));
+            return 0;
+        }
+
+        int count = 0;
+        for (SlotData d : blocks) {
+            String newId = d.customId.replace(fromStr, toStr);
+            if (!newId.equals(d.customId)) {
+                SlotData prev = com.customblocks.core.SlotManager.getById(d.customId);
+                if (prev != null) {
+                    com.customblocks.core.UndoManager.pushUndoMutation(d.customId, prev, "meta", getPlayerUuid(src));
+                    com.customblocks.core.SlotManager.update(d.customId, sd -> sd.withCustomId(newId));
+                    // Update category assignments
+                    new java.util.HashSet<>(com.customblocks.core.CategoryManager.getCategoriesForBlock(d.customId))
+                            .forEach(cat -> {
+                                com.customblocks.core.CategoryManager.unassignBlock(d.customId, cat);
+                                com.customblocks.core.CategoryManager.assignBlock(newId, cat);
+                            });
+                    count++;
+                }
+            }
+        }
+        if (src.getServer() != null) com.customblocks.ResourcePackManager.scheduleRebuild(src.getServer());
+        ChatHelper.success(src, "§aRe-ID'd §f" + count + " §7block(s): §f" + fromStr + " §7→ §f" + toStr + "  §8/cb undo to revert.");
+        return 1;
+    }
+
+    // ── bulkproperty ────────────────────────────────────────────────────────
+
+    private static int cmdBulkProperty(ServerCommandSource src, String args) {
+        java.util.Map<String, String> flags = parseBulkArgs(args);
+        String scopeAndProp = flags.get("scope"); // "scope prop value" all in one token
+        // scope = everything before last 2 tokens; prop = second-to-last; value = last
+        String[] parts = (scopeAndProp == null ? "" : scopeAndProp).trim().split("\\s+");
+        if (parts.length < 3) {
+            ChatHelper.error(src, "§cUsage: /cb bulkproperty <scope> <property> <value>");
+            ChatHelper.error(src, "§7Properties: §bsound §7| §bglow §7| §bhardness §7| §bcollision");
+            return 0;
+        }
+        String prop  = parts[parts.length - 2].toLowerCase(java.util.Locale.ROOT);
+        String value = parts[parts.length - 1];
+        String scopeStr = String.join(" ", java.util.Arrays.copyOf(parts, parts.length - 2));
+        List<SlotData> blocks = resolveScope(src, scopeStr);
+        if (blocks == null) return 0;
+        flags.put("scope", scopeStr);
+        if (!bulkGuard(src, blocks, flags, "Bulk Property")) return 1;
+
+        int count = 0;
+        for (SlotData d : blocks) {
+            SlotData prev = com.customblocks.core.SlotManager.getById(d.customId);
+            if (prev == null) continue;
+            com.customblocks.core.UndoManager.pushUndoMutation(d.customId, prev, "meta", getPlayerUuid(src));
+            try {
+                switch (prop) {
+                    case "sound" -> com.customblocks.core.SlotManager.update(d.customId, sd -> sd.withSoundType(value));
+                    case "glow", "light" -> com.customblocks.core.SlotManager.setLightLevel(d.customId, Integer.parseInt(value));
+                    case "hardness" -> com.customblocks.core.SlotManager.update(d.customId, sd -> sd.withHardness(Float.parseFloat(value)));
+                    case "collision", "nocollision" -> com.customblocks.core.SlotManager.update(d.customId, sd -> sd.withNoCollision(Boolean.parseBoolean(value)));
+                    default -> { ChatHelper.error(src, "§cUnknown property: §f" + prop); return 0; }
+                }
+                count++;
+            } catch (NumberFormatException e) {
+                ChatHelper.error(src, "§cInvalid value for §f" + prop + "§c: §f" + value);
+                return 0;
+            }
+        }
+        if (src.getServer() != null) com.customblocks.ResourcePackManager.scheduleRebuild(src.getServer());
+        ChatHelper.success(src, "§aSet §f" + prop + "=" + value + " §7on §f" + count + " §7block(s). §8/cb undo to revert.");
+        return 1;
+    }
+
+    // ── bulkexport ──────────────────────────────────────────────────────────
+
+    private static int cmdBulkExport(ServerCommandSource src, String scopeRaw) {
+        List<SlotData> blocks = resolveScope(src, scopeRaw);
+        if (blocks == null) return 0;
+        ChatHelper.info(src, "§7Exporting §f" + blocks.size() + " §7block(s) to ZIP...");
+        thread(() -> {
+            try {
+                java.nio.file.Path exportDir = java.nio.file.Path.of("config", "customblocks", "exports");
+                java.nio.file.Files.createDirectories(exportDir);
+                String stamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss").format(new java.util.Date());
+                java.nio.file.Path zipPath = exportDir.resolve("bulk_export_" + stamp + ".zip");
+                try (java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(
+                        java.nio.file.Files.newOutputStream(zipPath))) {
+                    com.google.gson.JsonArray manifest = new com.google.gson.JsonArray();
+                    for (SlotData d : blocks) {
+                        com.google.gson.JsonObject meta = new com.google.gson.JsonObject();
+                        meta.addProperty("customId",    d.customId);
+                        meta.addProperty("displayName", d.displayName);
+                        meta.addProperty("lightLevel",  d.lightLevel);
+                        meta.addProperty("hardness",    d.hardness);
+                        meta.addProperty("soundType",   d.soundType);
+                        manifest.add(meta);
+                        if (d.texture != null && d.texture.length > 0) {
+                            zos.putNextEntry(new java.util.zip.ZipEntry("textures/" + d.customId + ".png"));
+                            zos.write(d.texture);
+                            zos.closeEntry();
+                        }
+                    }
+                    zos.putNextEntry(new java.util.zip.ZipEntry("manifest.json"));
+                    zos.write(manifest.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    zos.closeEntry();
+                }
+                src.getServer().execute(() ->
+                        ChatHelper.success(src, "§aExported §f" + blocks.size() + " §7block(s) to §f" + zipPath));
+            } catch (Exception e) {
+                src.getServer().execute(() ->
+                        ChatHelper.error(src, "§cExport failed: §f" + e.getMessage()));
+            }
+        });
+        return 1;
+    }
+
+    // ── bulkmove ────────────────────────────────────────────────────────────
+
+    private static int cmdBulkMove(ServerCommandSource src, String args) {
+        java.util.Map<String, String> flags = parseBulkArgs(args);
+        String scopeAndCat = flags.get("scope");
+        if (scopeAndCat == null || scopeAndCat.isBlank()) {
+            ChatHelper.error(src, "§cUsage: /cb bulkmove <scope> <category>");
+            return 0;
+        }
+        String[] parts = scopeAndCat.trim().split("\\s+");
+        if (parts.length < 2) {
+            ChatHelper.error(src, "§cUsage: /cb bulkmove <scope> <target_category>");
+            return 0;
+        }
+        String targetCat = parts[parts.length - 1];
+        String scopeStr  = String.join(" ", java.util.Arrays.copyOf(parts, parts.length - 1));
+        com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(targetCat);
+        if (cat == null) {
+            ChatHelper.error(src, "§cCategory not found: §f" + targetCat);
+            return 0;
+        }
+        List<SlotData> blocks = resolveScope(src, scopeStr);
+        if (blocks == null) return 0;
+        flags.put("scope", scopeStr);
+        if (!bulkGuard(src, blocks, flags, "Bulk Move")) return 1;
+
+        com.customblocks.core.UndoManager.pushCategoryUndo(
+                com.customblocks.core.UndoManager.captureCategorySnapshot("bulkmove→" + targetCat, getPlayerUuid(src)));
+        int count = 0;
+        for (SlotData d : blocks) {
+            com.customblocks.core.CategoryManager.assignBlock(d.customId, cat.key());
+            count++;
+        }
+        ChatHelper.success(src, "§aMoved §f" + count + " §7block(s) to §f" + cat.displayName() + ". §8/cb undo to revert.");
+        return 1;
+    }
+
+    // ── bulkduplicate ───────────────────────────────────────────────────────
+
+    private static int cmdBulkDuplicate(ServerCommandSource src, String args) {
+        java.util.Map<String, String> flags = parseBulkArgs(args);
+        List<SlotData> blocks = resolveScope(src, flags.get("scope"));
+        if (blocks == null) return 0;
+        if (!bulkGuard(src, blocks, flags, "Bulk Duplicate")) return 1;
+
+        String suffix = flags.getOrDefault("suffix", "_copy");
+        int free = com.customblocks.core.SlotManager.freeSlots();
+        if (blocks.size() > free) {
+            ChatHelper.error(src, "§cNot enough free slots (§f" + free + " §cavailable, §f" + blocks.size() + " §crequested).");
+            return 0;
+        }
+        int count = 0;
+        for (SlotData d : blocks) {
+            String newId = d.customId + suffix;
+            int attempts = 0;
+            while (com.customblocks.core.SlotManager.hasId(newId) && attempts < 20) {
+                newId = d.customId + suffix + (++attempts);
+            }
+            if (com.customblocks.core.SlotManager.hasId(newId)) continue;
+            SlotData created = com.customblocks.core.SlotManager.assign(newId, d.displayName + suffix, d.texture);
+            if (created != null) {
+                final String fNewId = newId;
+                com.customblocks.core.SlotManager.update(fNewId, sd -> sd
+                        .withLightLevel(d.lightLevel)
+                        .withHardness(d.hardness)
+                        .withSoundType(d.soundType)
+                        .withNoCollision(d.noCollision)
+                        .withAnimMeta(d.animMeta)
+                        .withShapeBoxes(d.shapeBoxes)
+                        .withHologramText(d.hologramText));
+                com.customblocks.core.UndoManager.pushUndoCreate(fNewId, getPlayerUuid(src));
+                count++;
+            }
+        }
+        if (src.getServer() != null) com.customblocks.ResourcePackManager.scheduleRebuild(src.getServer());
+        ChatHelper.success(src, "§aDuplicated §f" + count + " §7block(s) with suffix §f\"" + suffix + "\". §8/cb undo to revert.");
+        return 1;
+    }
+
+    // ── bulklock / bulkunlock ────────────────────────────────────────────────
+
+    private static int cmdBulkLock(ServerCommandSource src, String scopeRaw, boolean lock) {
+        List<SlotData> blocks = resolveScope(src, scopeRaw);
+        if (blocks == null) return 0;
+        int count = 0;
+        for (SlotData d : blocks) {
+            if (lock) { if (com.customblocks.core.LockManager.lock(d.customId))   count++; }
+            else      { if (com.customblocks.core.LockManager.unlock(d.customId)) count++; }
+        }
+        ChatHelper.success(src, "§7" + (lock ? "Locked" : "Unlocked") + " §f" + count + " §7block(s).");
+        return 1;
+    }
+
+    // ── bulkfavorite / bulkunfavorite ────────────────────────────────────────
+
+    private static int cmdBulkFavorite(ServerCommandSource src, String scopeRaw, boolean favorite) {
+        UUID playerUuid = getPlayerUuid(src);
+        List<SlotData> blocks = resolveScope(src, scopeRaw);
+        if (blocks == null) return 0;
+        int count = 0;
+        for (SlotData d : blocks) {
+            boolean isFav = com.customblocks.core.FavoritesManager.isFavorite(playerUuid, d.customId);
+            if (favorite != isFav) {
+                com.customblocks.core.FavoritesManager.toggle(playerUuid, d.customId, src.getServer());
+                count++;
+            }
+        }
+        ChatHelper.success(src, "§d" + (favorite ? "Starred" : "Unstarred") + " §f" + count + " §7block(s).");
+        return 1;
+    }
+
+    // ── bulkshape ────────────────────────────────────────────────────────────
+
+    private static int cmdBulkShape(ServerCommandSource src, String args) {
+        java.util.Map<String, String> flags = parseBulkArgs(args);
+        String scopeAndPreset = flags.get("scope");
+        if (scopeAndPreset == null || scopeAndPreset.isBlank()) {
+            ChatHelper.error(src, "§cUsage: /cb bulkshape <scope> <preset>");
+            ChatHelper.error(src, "§7Presets: §bfull slab thin carpet pillar small micro pane trapdoor fence stairs cross");
+            return 0;
+        }
+        String[] parts = scopeAndPreset.trim().split("\\s+");
+        if (parts.length < 2) {
+            ChatHelper.error(src, "§cProvide both a scope and a shape preset name.");
+            return 0;
+        }
+        String presetName = parts[parts.length - 1].toLowerCase(java.util.Locale.ROOT);
+        String scopeStr   = String.join(" ", java.util.Arrays.copyOf(parts, parts.length - 1));
+        List<SlotData.ShapeBox> boxes = ShapePresets.get(presetName);
+        if (boxes == null) {
+            ChatHelper.error(src, "§cUnknown shape preset: §f" + presetName
+                    + " §7— try: full slab thin carpet pillar small micro pane trapdoor fence stairs cross");
+            return 0;
+        }
+        List<SlotData> blocks = resolveScope(src, scopeStr);
+        if (blocks == null) return 0;
+        flags.put("scope", scopeStr);
+        if (!bulkGuard(src, blocks, flags, "Bulk Shape")) return 1;
+
+        int count = 0;
+        for (SlotData d : blocks) {
+            SlotData prev = com.customblocks.core.SlotManager.getById(d.customId);
+            if (prev != null) {
+                com.customblocks.core.UndoManager.pushUndoMutation(d.customId, prev, "shape", getPlayerUuid(src));
+                com.customblocks.core.SlotManager.update(d.customId, sd -> sd.withShapeBoxes(boxes));
+                count++;
+            }
+        }
+        if (src.getServer() != null) com.customblocks.ResourcePackManager.scheduleRebuild(src.getServer());
+        ChatHelper.success(src, "§aApplied shape §f" + presetName + " §7to §f" + count + " §7block(s). §8/cb undo to revert.");
+        return 1;
+    }
+
+    // ── bulksound ────────────────────────────────────────────────────────────
+
+    private static int cmdBulkSound(ServerCommandSource src, String args) {
+        java.util.Map<String, String> flags = parseBulkArgs(args);
+        String scopeAndSound = flags.get("scope");
+        if (scopeAndSound == null || scopeAndSound.isBlank()) {
+            ChatHelper.error(src, "§cUsage: /cb bulksound <scope> <sound>");
+            return 0;
+        }
+        String[] parts = scopeAndSound.trim().split("\\s+");
+        if (parts.length < 2) {
+            ChatHelper.error(src, "§cProvide both a scope and a sound type.");
+            return 0;
+        }
+        String sound    = parts[parts.length - 1].toLowerCase(java.util.Locale.ROOT);
+        String scopeStr = String.join(" ", java.util.Arrays.copyOf(parts, parts.length - 1));
+        List<SlotData> blocks = resolveScope(src, scopeStr);
+        if (blocks == null) return 0;
+        flags.put("scope", scopeStr);
+        if (!bulkGuard(src, blocks, flags, "Bulk Sound")) return 1;
+
+        int count = 0;
+        for (SlotData d : blocks) {
+            SlotData prev = com.customblocks.core.SlotManager.getById(d.customId);
+            if (prev != null) {
+                com.customblocks.core.UndoManager.pushUndoMutation(d.customId, prev, "meta", getPlayerUuid(src));
+                com.customblocks.core.SlotManager.update(d.customId, sd -> sd.withSoundType(sound));
+                count++;
+            }
+        }
+        if (src.getServer() != null) com.customblocks.ResourcePackManager.scheduleRebuild(src.getServer());
+        ChatHelper.success(src, "§aSet sound §f" + sound + " §7on §f" + count + " §7block(s). §8/cb undo to revert.");
+        return 1;
+    }
+
+    /** Thin helper over ShapePresets lookup (avoids a GuiManager dependency). */
+    private static final class ShapePresets {
+        private static final java.util.Map<String, List<SlotData.ShapeBox>> MAP;
+        static {
+            MAP = new java.util.HashMap<>();
+            MAP.put("full",      List.of(new SlotData.ShapeBox(0,0,0,16,16,16)));
+            MAP.put("slab",      List.of(new SlotData.ShapeBox(0,0,0,16,8,16)));
+            MAP.put("thin",      List.of(new SlotData.ShapeBox(0,0,0,16,4,16)));
+            MAP.put("carpet",    List.of(new SlotData.ShapeBox(0,0,0,16,1,16)));
+            MAP.put("pillar",    List.of(new SlotData.ShapeBox(4,0,4,12,16,12)));
+            MAP.put("small",     List.of(new SlotData.ShapeBox(2,0,2,14,8,14)));
+            MAP.put("micro",     List.of(new SlotData.ShapeBox(6,0,6,10,10,10)));
+            MAP.put("pane",      List.of(new SlotData.ShapeBox(7,0,0,9,16,16)));
+            MAP.put("trapdoor",  List.of(new SlotData.ShapeBox(0,0,0,16,3,16)));
+            MAP.put("fence",     List.of(new SlotData.ShapeBox(6,0,6,10,16,10)));
+            MAP.put("stairs",    List.of(new SlotData.ShapeBox(0,0,0,16,8,16), new SlotData.ShapeBox(0,8,0,16,16,8)));
+            MAP.put("cross",     List.of(new SlotData.ShapeBox(6,0,0,10,16,16), new SlotData.ShapeBox(0,0,6,16,16,10)));
+        }
+        static List<SlotData.ShapeBox> get(String name) { return MAP.get(name); }
     }
 }

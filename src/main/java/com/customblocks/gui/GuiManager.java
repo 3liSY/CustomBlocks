@@ -4,6 +4,7 @@ import com.customblocks.CustomBlocksMod;
 import com.customblocks.CustomBlocksConfig;
 import com.customblocks.ImageProcessor;
 import com.customblocks.TextSanitizer;
+import com.customblocks.command.PermissionHelper;
 import com.customblocks.core.SlotData;
 import com.customblocks.core.SlotManager;
 import com.customblocks.core.UndoManager;
@@ -134,6 +135,12 @@ public class GuiManager {
     /** L3 — cached market listing per-player (fetched async). */
     private static final Map<UUID, java.util.List<JsonObject>> MARKET_CACHE = new ConcurrentHashMap<>();
     private static final int MARKET_PAGE_SIZE = 18;
+    /** 1.27 — per-player sort preference (session-only, resets on disconnect). */
+    private static final Map<UUID, SortMode> PLAYER_SORT_PREFS = new ConcurrentHashMap<>();
+    /** Phase 2 — shared bulk selection (persists across bulk hub pages and op picker pages). */
+    private static final Map<UUID, Set<String>> BULK_SELECTIONS = new ConcurrentHashMap<>();
+    /** Phase 2 — category filter active in the bulk op picker (null = show all). */
+    private static final Map<UUID, String> BULK_OP_CAT_FILTER = new ConcurrentHashMap<>();
 
     private static final float[] HARD_CYCLE      = { -1f, 0f, 0.5f, 1.5f, 3f, 5f, 10f, 50f };
     private static final int     BLOCKS_PER_PAGE = 18;
@@ -188,7 +195,7 @@ public class GuiManager {
 
     public static boolean isReopeningScreen(UUID uuid) { return REOPENING_SCREENS.contains(uuid); }
 
-    private static final java.util.Set<UUID> RESTORING = new java.util.HashSet<>();
+    private static final java.util.Set<UUID> RESTORING = java.util.concurrent.ConcurrentHashMap.newKeySet(); // 1.35 — thread-safe
 
     /**
      * Push current state to back-stack before navigating away.
@@ -280,12 +287,21 @@ public class GuiManager {
         CLICK_COOLDOWN.remove(uuid);
         BULK_DELETE_SELECTIONS.remove(uuid);
         BULK_DELETE_CONFIRM_ARMED.remove(uuid);
+        BULK_SELECTIONS.remove(uuid);
+        BULK_OP_CAT_FILTER.remove(uuid);
         FACE_CHANGE_SELECTIONS.remove(uuid);
         FACE_CHANGE_RETURN_PAGES.remove(uuid);
         ESC_DEBOUNCE.remove(uuid);
         SEARCH_QUERIES.remove(uuid);
         RECENT_BLOCKS.remove(uuid);
         MARKET_CACHE.remove(uuid);
+        // 1.37 — bulk recolor wizard state cleanup to prevent memory leaks
+        BULK_RECOLOR_COLOR.remove(uuid);
+        BULK_RECOLOR_SCOPE.remove(uuid);
+        BULK_RECOLOR_SCOPE_VALUE.remove(uuid);
+        BULK_RECOLOR_EXCLUDE.remove(uuid);
+        BULK_RECOLOR_SELECTED.remove(uuid);
+        BULK_RECOLOR_CONFIRM_ARMED.remove(uuid);
     }
 
     // ── Draft resume (Phase C2) ──────────────────────────────────────────────
@@ -553,6 +569,79 @@ public class GuiManager {
         openScreenFromGuiState(player, GuiState.featureMenu(tab), buildFeatureMenu(player, tab), Text.translatable("customblocks.gui.feature_menu.title"));
     }
 
+    // ── 5.25 Voice Mode Picker GUI ────────────────────────────────────────────
+
+    public static void openVoicePickerGui(ServerPlayerEntity player) {
+        openScreenFromGuiState(player, GuiState.voicePicker(), buildVoicePickerGui(player), Text.translatable("customblocks.gui.voice_picker.title"));
+    }
+
+    private static final String[][] VOICE_MODES_DISPLAY = {
+        // {modeKey, displayName, item, description}
+        {"friendly",     "§a§lFriendly",     "EMERALD",        "§7Warm, encouraging messages."},
+        {"professional", "§e§lProfessional", "GOLD_INGOT",     "§7Clean, no-fluff output."},
+        {"royal",        "§d§lRoyal",        "NETHER_STAR",    "§7Formal and dramatic language."},
+        {"minimal",      "§7§lMinimal",      "GRAY_DYE",       "§7Shortest possible messages."},
+        {"arabic",       "§6§lArabic",       "HEART_OF_THE_SEA","§7Messages displayed in Arabic."},
+        {"silly",        "§c§lSilly",        "SLIME_BALL",     "§7Playful and fun responses."},
+    };
+
+    private static SimpleInventory buildVoicePickerGui(ServerPlayerEntity player) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+
+        inv.setStack(4, uiGlint(Items.NOTE_BLOCK, "§b§l🎙 Voice Mode",
+            "§7Choose how CustomBlocks speaks to you.",
+            "§8Active: §f" + com.customblocks.CustomBlocksConfig.voiceMode));
+
+        // Mode tiles — slots 10, 12, 14, 28, 30, 32 (two rows, 3 per row, spread out)
+        int[] modeSlots = {10, 12, 14, 28, 30, 32};
+        String active = com.customblocks.CustomBlocksConfig.voiceMode;
+        for (int i = 0; i < VOICE_MODES_DISPLAY.length; i++) {
+            String[] m = VOICE_MODES_DISPLAY[i];
+            String key = m[0]; String label = m[1]; String itemName = m[2]; String desc = m[3];
+            Item item = switch (itemName) {
+                case "EMERALD"         -> Items.EMERALD;
+                case "GOLD_INGOT"      -> Items.GOLD_INGOT;
+                case "NETHER_STAR"     -> Items.NETHER_STAR;
+                case "GRAY_DYE"        -> Items.GRAY_DYE;
+                case "HEART_OF_THE_SEA"-> Items.HEART_OF_THE_SEA;
+                default                -> Items.SLIME_BALL;
+            };
+            boolean isActive = key.equals(active);
+            String statusLine = isActive ? "§a§l✔ Currently active" : "§8Click to set as active.";
+            ItemStack tile = isActive
+                ? uiGlint(item, label, desc, statusLine)
+                : ui(item, label, desc, statusLine);
+            inv.setStack(modeSlots[i], tile);
+        }
+
+        inv.setStack(49, uiGlint(Items.ECHO_SHARD, "§c◀ Back", "§7Return to Feature Menu."));
+        return inv;
+    }
+
+    private static void handleVoicePickerClick(ServerPlayerEntity player, int slot) {
+        int[] modeSlots = {10, 12, 14, 28, 30, 32};
+        for (int i = 0; i < modeSlots.length && i < VOICE_MODES_DISPLAY.length; i++) {
+            if (slot == modeSlots[i]) {
+                String key = VOICE_MODES_DISPLAY[i][0];
+                String label = VOICE_MODES_DISPLAY[i][1];
+                if (key.equals(com.customblocks.CustomBlocksConfig.voiceMode)) {
+                    player.sendMessage(net.minecraft.text.Text.literal("§7[CB] Voice mode is already §b" + key + "§7."), true);
+                    return;
+                }
+                com.customblocks.CustomBlocksConfig.voiceMode = key;
+                com.customblocks.CustomBlocksConfig.save();
+                player.sendMessage(net.minecraft.text.Text.literal("§a✔ §fVoice mode set to: §b" + key), true);
+                player.getServerWorld().playSound(null, player.getBlockPos(),
+                    net.minecraft.sound.SoundEvents.ENTITY_PLAYER_LEVELUP,
+                    net.minecraft.sound.SoundCategory.PLAYERS, 0.5f, 1.2f);
+                openVoicePickerGui(player); // refresh
+                return;
+            }
+        }
+        if (slot == 49) { playClick(player); openFeatureMenu(player, 4); }
+    }
+
     private static SimpleInventory buildRecoverGui(ServerPlayerEntity player, int page) {
         SimpleInventory inv = new SimpleInventory(54);
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
@@ -602,22 +691,246 @@ public class GuiManager {
 
         if (page > 0)            inv.setStack(45, uiGlint(Items.ARROW, "§7◀ Previous Page"));
         if (deletions.size() > offset + browseSlots) inv.setStack(53, uiGlint(Items.ARROW, "§7Next Page ▶"));
-        inv.setStack(49, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
+        inv.setStack(49, uiGlint(Items.ECHO_SHARD, "§c◀ Back")); // Royal Directive
         return inv;
     }
 
     private static SimpleInventory buildWelcomeGui(ServerPlayerEntity player) {
         SimpleInventory inv = new SimpleInventory(54);
         inv.setStack(22, named(Items.NETHER_STAR, "§b§lWelcome to CustomBlocks!", "§7Use §f/cb §7to get started.", "§7Type §f/cb help §7for all commands."));
-        inv.setStack(49, named(Items.BARRIER, "§cClose"));
+        inv.setStack(49, uiGlint(Items.ECHO_SHARD, "§c◀ Back")); // Royal Directive — 5.x
         return inv;
     }
 
+    // ── 5.24 Feature Menu — 8-tab navigation hub ────────────────────────────────
+
+    private static final Item[] FM_TAB_ITEMS = {
+        Items.HEART_OF_THE_SEA, Items.NETHERITE_INGOT, Items.ECHO_SHARD,
+        Items.TOTEM_OF_UNDYING, Items.NETHER_STAR, Items.ELYTRA,
+        Items.DRAGON_EGG, Items.NETHER_STAR
+    };
+    private static final String[] FM_TAB_NAMES = {
+        "§b§lBlocks", "§6§lEdit", "§5§lBulk", "§d§lHistory",
+        "§e§lSettings", "§4§lSafety", "§2§lServer", "§c§lAdmin"
+    };
+    private static final String[] FM_TAB_DESC = {
+        "§7List, Search, Favorites, Recent, Categories",
+        "§7Editor, Retexture, Shape, Lock, Notes, Magic Items",
+        "§7Bulk Recolor, Delete, Export, Import",
+        "§7Macro Scripts & Command History",
+        "§7Config, Voice Mode, Hologram",
+        "§7Undo, Panic, Recovery, Safety Center",
+        "§7Stats, Cache, Marketplace, Diagnostics, Help",
+        "§7Permissions, Backup, Audit — admin only"
+    };
+
     private static SimpleInventory buildFeatureMenu(ServerPlayerEntity player, int tab) {
         SimpleInventory inv = new SimpleInventory(54);
-        inv.setStack(22, named(Items.COMPASS, "§d§lFeature Menu", "§7Feature configuration coming soon."));
-        inv.setStack(49, named(Items.BARRIER, "§cClose"));
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+
+        // Header row (slots 0-7): one tab button per tab
+        boolean isAdmin = PermissionHelper.canAdmin(player.getCommandSource());
+        for (int i = 0; i < 8; i++) {
+            boolean adminTab = (i == 7);
+            if (adminTab && !isAdmin) {
+                inv.setStack(i, ui(Items.BARRIER, "§8§lAdmin", "§7Requires admin permission.", "§8Click to try anyway."));
+            } else if (i == tab) {
+                inv.setStack(i, uiGlint(FM_TAB_ITEMS[i], FM_TAB_NAMES[i] + " §7[Active]", FM_TAB_DESC[i]));
+            } else {
+                inv.setStack(i, ui(FM_TAB_ITEMS[i], FM_TAB_NAMES[i], FM_TAB_DESC[i], "§8Click to open this tab."));
+            }
+        }
+        // Slot 8: Menu title/logo
+        inv.setStack(8, uiGlint(Items.NETHER_STAR, "§d§l✦ Feature Menu",
+            "§7CustomBlocks navigation hub.", "§8Pick a tab to explore features."));
+
+        // Content area (slots 9-44)
+        switch (tab) {
+            case 0 -> {
+                inv.setStack(10, ui(Items.BOOKSHELF,       "§fBlock List",     "§7Browse all custom blocks.", "§8Left-click to open."));
+                inv.setStack(11, ui(Items.SPYGLASS,        "§fSearch",         "§7Search by name or ID.", "§8Left-click to open."));
+                inv.setStack(12, ui(Items.TOTEM_OF_UNDYING,"§fFavorites",      "§7Your starred blocks.", "§8Left-click to open."));
+                inv.setStack(13, ui(Items.CLOCK,           "§fRecent Blocks",  "§7Blocks you edited recently.", "§8Left-click to open."));
+                inv.setStack(14, ui(Items.BOOK,            "§fCategories",     "§7Browse & manage categories.", "§8Left-click to open."));
+            }
+            case 1 -> {
+                inv.setStack(10, ui(Items.IRON_PICKAXE,    "§fEditor",         "§7Open the block editor.", "§8Left-click to open."));
+                inv.setStack(11, ui(Items.PAINTING,        "§fRetexture",      "§7Upload a texture via URL.", "§8Left-click to open."));
+                inv.setStack(12, ui(Items.SHEARS,          "§fShape Editor",   "§7Customize block collision.", "§8Left-click to open."));
+                inv.setStack(13, ui(Items.TRIPWIRE_HOOK,   "§fLock / Unlock",  "§7Protect a block from edits.", "§8Left-click to open."));
+                inv.setStack(14, ui(Items.WRITABLE_BOOK,   "§fBlock Notes",    "§7Admin notes per block.", "§8Left-click to open."));
+                inv.setStack(15, ui(Items.NETHERITE_INGOT, "§fMagic Items",    "§7Give yourself mod tools.", "§8Left-click to open."));
+                inv.setStack(16, ui(Items.ITEM_FRAME,      "§fColor Studio",   "§7Tint, brighten, or invert.", "§8Left-click to open."));
+                inv.setStack(17, ui(Items.AMETHYST_SHARD,  "§fPalette Gen.",   "§7Generate a 16-color set.", "§8Left-click to open."));
+            }
+            case 2 -> {
+                inv.setStack(10, ui(Items.PINK_DYE,        "§fBulk Recolor",   "§7Recolor many blocks at once.", "§8Left-click to open."));
+                inv.setStack(11, ui(Items.TNT,             "§fBulk Delete",    "§7Delete a selection of blocks.", "§8Left-click to open."));
+                inv.setStack(12, ui(Items.CHEST,           "§fExport All",     "§7Export all blocks to JSON.", "§8Left-click to open."));
+                inv.setStack(13, ui(Items.BARREL,          "§fExport Category","§7Export one category to JSON.", "§8Left-click to open."));
+                inv.setStack(14, ui(Items.HOPPER,          "§fImport Blocks",  "§7Import blocks from JSON.", "§8Left-click to open."));
+                inv.setStack(15, ui(Items.NETHER_STAR,     "§fBulk Hub",       "§7All bulk operations.", "§8Left-click to open."));
+            }
+            case 3 -> {
+                inv.setStack(10, ui(Items.CHAIN_COMMAND_BLOCK, "§fMacro Scripts", "§7Record & replay command macros.", "§8Left-click to open."));
+                inv.setStack(11, ui(Items.CLOCK,               "§fUndo History",  "§7Browse and restore past states.", "§8Left-click to open."));
+            }
+            case 4 -> {
+                inv.setStack(10, ui(Items.COMPARATOR,      "§fConfig GUI",     "§7Server configuration settings.", "§8Left-click to open."));
+                inv.setStack(11, ui(Items.NOTE_BLOCK,      "§fVoice Mode",     "§7Pick message style.", "§8Left-click to open."));
+                boolean hologramOn = com.customblocks.CustomBlocksConfig.hologramEnabled;
+                inv.setStack(12, ui(hologramOn ? Items.BEACON : Items.GLASS,
+                    hologramOn ? "§aHologram §7(Enabled)" : "§cHologram §7(Disabled)",
+                    "§7Floating name above blocks.",
+                    "§8Click to toggle. Current: " + (hologramOn ? "§aON" : "§cOFF")));
+            }
+            case 5 -> {
+                inv.setStack(10, ui(Items.SHIELD,          "§fSafety Center",  "§7Broken blocks, auto-snapshots.", "§8Left-click to open."));
+                inv.setStack(11, ui(Items.ARROW,           "§fUndo Picker",    "§7Restore a previous state.", "§8Left-click to open."));
+                inv.setStack(12, ui(Items.FIRE_CHARGE,     "§4§lPanic Mode",   "§cEmergency reset all blocks.", "§8Left-click — opens panic menu."));
+                inv.setStack(13, ui(Items.AMETHYST_SHARD,  "§fRecovery",       "§7Restore deleted blocks.", "§8Left-click to open."));
+            }
+            case 6 -> {
+                inv.setStack(10, ui(Items.EMERALD,         "§fStats",          "§7Placement stats & activity.", "§8Left-click to open."));
+                inv.setStack(11, ui(Items.ENDER_PEARL,     "§fResource Pack",  "§7Pack info & rebuild.", "§8Left-click to open."));
+                inv.setStack(12, ui(Items.GOLD_INGOT,      "§fMarketplace",    "§7Browse shared blocks.", "§8Left-click to open."));
+                inv.setStack(13, ui(Items.COMPASS,         "§fDiagnostics",    "§7Server health & debug.", "§8Left-click to open."));
+                inv.setStack(14, ui(Items.LECTERN,         "§fHelp",           "§7Command reference.", "§8Left-click to open."));
+            }
+            case 7 -> {
+                if (isAdmin) {
+                    inv.setStack(10, ui(Items.PAPER,       "§fPermissions",    "§7View LuckPerms nodes.", "§8Left-click to open."));
+                    inv.setStack(11, ui(Items.NETHER_STAR, "§fForce Save",     "§7Save all data to disk now.", "§8Left-click to execute."));
+                    inv.setStack(12, ui(Items.CHEST,       "§fBackup",         "§7Create a snapshot backup.", "§8Left-click to execute."));
+                    inv.setStack(13, ui(Items.COMPARATOR,  "§fReload Pack",    "§7Regenerate & push resource pack.", "§8Left-click to execute."));
+                    inv.setStack(14, ui(Items.BOOK,        "§fAudit Log",      "§7View /cb audit output.", "§8Left-click to open."));
+                } else {
+                    inv.setStack(22, ui(Items.BARRIER, "§cAdmin Only", "§7You need admin permission to use this tab."));
+                }
+            }
+        }
+
+        // Footer
+        inv.setStack(49, uiGlint(Items.ECHO_SHARD, "§c◀ Back", "§7Return to main dashboard."));
         return inv;
+    }
+
+    private static void handleFeatureMenuClick(ServerPlayerEntity player, GuiState state, int slot) {
+        int tab = state.page();
+        boolean isAdmin = PermissionHelper.canAdmin(player.getCommandSource());
+
+        // Tab header row (slots 0-7)
+        if (slot >= 0 && slot < 8) {
+            if (slot == 7 && !isAdmin) {
+                playError(player);
+                ChatHelper.error(player, "Admin tab requires admin permission.");
+                return;
+            }
+            if (slot != tab) {
+                playClick(player);
+                openFeatureMenu(player, slot);
+            }
+            return;
+        }
+
+        // Footer
+        if (slot == 49) { playClick(player); openMain(player, 0); return; }
+
+        // Content area — dispatch by active tab
+        switch (tab) {
+            case 0 -> {
+                switch (slot) {
+                    case 10 -> { playClick(player); openMain(player, 0); }
+                    case 11 -> { playClick(player); openSearchPicker(player, "", 0); }
+                    case 12 -> { playClick(player); openMain(player, 0); } // favorites — opens main for now
+                    case 13 -> { playClick(player); openMain(player, 0); } // recent — opens main for now
+                    case 14 -> { playClick(player); openCategoryBrowser(player, 0); }
+                }
+            }
+            case 1 -> {
+                switch (slot) {
+                    case 10 -> { playClick(player); openEditorPicker(player); }
+                    case 11 -> { playClick(player); openEditorPicker(player); }
+                    case 12 -> { playClick(player); openEditorPicker(player); } // shape editor opens via editor
+                    case 13 -> { playClick(player); openEditorPicker(player); }
+                    case 14 -> { playClick(player); openEditorPicker(player); }
+                    case 15 -> { playClick(player); openMagicItemsGui(player); }
+                    case 16 -> { playClick(player); openEditorPicker(player); } // color studio via editor
+                    case 17 -> { playClick(player); openEditorPicker(player); }
+                }
+            }
+            case 2 -> {
+                switch (slot) {
+                    case 10 -> { playClick(player); openBulkHub(player); }
+                    case 11 -> { playClick(player); openBulkDelete(player, 0); }
+                    case 12 -> { playClick(player); openBulkHub(player); }
+                    case 13 -> { playClick(player); openBulkHub(player); }
+                    case 14 -> { playClick(player); openBulkHub(player); }
+                    case 15 -> { playClick(player); openBulkHub(player); }
+                }
+            }
+            case 3 -> {
+                switch (slot) {
+                    case 10 -> { playClick(player); openEditorPicker(player); } // macro scripts — placeholder
+                    case 11 -> { playClick(player); openUndoPicker(player, 0); }
+                }
+            }
+            case 4 -> {
+                switch (slot) {
+                    case 10 -> { playClick(player); openConfigGui(player); }
+                    case 11 -> { playClick(player); openVoicePickerGui(player); }
+                    case 12 -> {
+                        // Hologram toggle
+                        com.customblocks.CustomBlocksConfig.hologramEnabled = !com.customblocks.CustomBlocksConfig.hologramEnabled;
+                        com.customblocks.CustomBlocksConfig.save();
+                        playClick(player);
+                        String msg = com.customblocks.CustomBlocksConfig.hologramEnabled ? "§aHolograms enabled." : "§cHolograms disabled.";
+                        player.sendMessage(net.minecraft.text.Text.literal(msg), true);
+                        openFeatureMenu(player, 4); // refresh
+                    }
+                }
+            }
+            case 5 -> {
+                switch (slot) {
+                    case 10 -> { playClick(player); openMaintenanceMenu(player); }
+                    case 11 -> { playClick(player); openUndoPicker(player, 0); }
+                    case 12 -> { playClick(player); openMaintenanceMenu(player); }
+                    case 13 -> { playClick(player); openRecoverGui(player, 0); }
+                }
+            }
+            case 6 -> {
+                switch (slot) {
+                    case 10 -> { playClick(player); openStatsGui(player); }
+                    case 11 -> { playClick(player); openResourceHub(player); }
+                    case 12 -> { playClick(player); openMarketGui(player, 0, false); }
+                    case 13 -> { playClick(player); openMaintenanceMenu(player); }
+                    case 14 -> { playClick(player); openHelpGui(player); }
+                }
+            }
+            case 7 -> {
+                if (!isAdmin) { playError(player); return; }
+                switch (slot) {
+                    case 10 -> { playClick(player); openMaintenanceMenu(player); } // permissions via maintenance
+                    case 11 -> {
+                        com.customblocks.core.SlotManager.flushSave();
+                        playClick(player);
+                        ChatHelper.success(player, "All data saved to disk.");
+                    }
+                    case 12 -> {
+                        playClick(player);
+                        ChatHelper.info(player, "Snapshot backup created.");
+                        com.customblocks.core.SnapshotManager.takeSnapshot("manual_feature_menu");
+                    }
+                    case 13 -> {
+                        playClick(player);
+                        ChatHelper.info(player, "Regenerating resource pack...");
+                        com.customblocks.core.SlotManager.saveAll(); // triggers pack rebuild via packDirty
+                        com.customblocks.network.ServerPackGenerator.flushPendingBuildIfNeeded();
+                    }
+                    case 14 -> { playClick(player); openMaintenanceMenu(player); }
+                }
+            }
+        }
     }
 
     private static SimpleInventory namedInv(int size) { return new SimpleInventory(size); }
@@ -688,6 +1001,10 @@ public class GuiManager {
                 case PALETTE_GENERATOR -> openPaletteGenerator(player, state.editingId());
                 case AI_SUGGEST_GUI -> openAiSuggestGui(player, state.editingId());
                 case MARKET_GUI -> openMarketGui(player, state.page(), false);
+                case BULK_HUB -> openBulkHub(player);
+                case BULK_OP_PICKER -> openBulkOpPicker(player, state.editingId(), state.page());
+                case COLOR_PICKER -> openColorPicker(player, state.editingId());
+                case VOICE_PICKER -> openVoicePickerGui(player); // 5.25
                 default -> openMain(player, 0);
             }
         } finally {
@@ -752,13 +1069,18 @@ public class GuiManager {
                 case BULK_RECOLOR_CONFIRM -> handleBulkRecolorConfirmClick(player, state, slot);
                 case COLOR_FILL_MODE -> handleColorFillModeClick(player, state, slot);
                 case RECOVER_GUI -> handleRecoverGuiClick(player, state, slot);
-                case WELCOME_MENU, FEATURE_MENU -> { if (slot == 49) openMain(player, 0); }
+                case WELCOME_MENU -> { if (slot == 49) openMain(player, 0); }
+                case FEATURE_MENU -> handleFeatureMenuClick(player, state, slot);
                 case STATS_GUI -> handleStatsGuiClick(player, state, slot);
                 case VARIANT_GUI -> handleVariantGuiClick(player, state, slot);
                 case COLOR_STUDIO -> handleColorStudioClick(player, state, slot);
                 case PALETTE_GENERATOR -> handlePaletteGeneratorClick(player, state, slot);
                 case AI_SUGGEST_GUI -> handleAiSuggestClick(player, state, slot);
                 case MARKET_GUI -> handleMarketGuiClick(player, state, slot);
+                case BULK_HUB -> handleBulkHubClick(player, state, slot);
+                case BULK_OP_PICKER -> handleBulkOpPickerClick(player, state, slot);
+                case COLOR_PICKER -> handleColorPickerClick(player, state, slot);
+                case VOICE_PICKER -> handleVoicePickerClick(player, slot); // 5.25
             }
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] GUI Command Error: {}", e.getMessage(), e);
@@ -878,7 +1200,16 @@ public class GuiManager {
                         playSuccess(player);
                         FeedbackHelper.actionBar(player, "§a§l✔ §r§aTexture updated: §f" + blockId);
                         NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("retexture", d.index, blockId, null, result.bytes(), d.lightLevel, d.hardness, d.soundType, null, null, result.mcmeta()));
-                        ChatHelper.success(player, "Texture updated! " + (result.isAnimated() ? "§b(Animated)" : "§7(Static)"));
+                        // 1.21 — Retexture confirmation with player count
+                        int onlinePlayers = srv.getPlayerManager().getPlayerList().size();
+                        String animTag = result.isAnimated() ? " §b(Animated)" : "";
+                        if (onlinePlayers > 0) {
+                            ChatHelper.success(player, blockId + " retextured — pack queued." + animTag
+                                    + " §7Refreshing for §f" + onlinePlayers + " §7player(s).");
+                        } else {
+                            ChatHelper.success(player, blockId + " retextured — pack queued." + animTag
+                                    + " §7Pack will sync when players join.");
+                        }
                         openEditor(player, blockId, rp);
                     });
                 } catch (Exception e) { srv.execute(() -> { playError(player); send(player, "§c[GUI] Failed: " + e.getMessage()); openEditor(player, blockId, rp); }); } });
@@ -1112,7 +1443,19 @@ public class GuiManager {
                 String key = blockId;
                 try {
                     switch (key) {
-                        case "maxSlots" -> CustomBlocksConfig.maxSlots = Math.max(1, Math.min(8192, Integer.parseInt(text)));
+                        case "maxSlots" -> {
+                            int newVal = Math.max(1, Math.min(8192, Integer.parseInt(text)));
+                            // 1.16 Guard 2 — refuse to lower below highest used slot index
+                            int highestUsed = com.customblocks.core.SlotManager.highestUsedSlotIndex();
+                            if (highestUsed >= 0 && newVal < highestUsed + 1) {
+                                int needed = highestUsed + 1;
+                                send(player, "§c[CustomBlocks] ⚠ Cannot reduce Block Capacity to " + newVal
+                                    + " — you have blocks using slot indices up to §f" + highestUsed
+                                    + "§c. Keeping it at §f" + needed + "§c.");
+                                newVal = needed;
+                            }
+                            CustomBlocksConfig.maxSlots = newVal;
+                        }
                         case "defaultTextureSize" -> CustomBlocksConfig.defaultTextureSize = Math.max(16, Math.min(256, Integer.parseInt(text)));
                         case "bgRemovalTolerance" -> CustomBlocksConfig.bgRemovalTolerance = Math.max(0, Math.min(100, Integer.parseInt(text)));
                         case "maxUndoDepth" -> CustomBlocksConfig.maxUndoDepth = Math.max(1, Math.min(100, Integer.parseInt(text)));
@@ -1120,7 +1463,7 @@ public class GuiManager {
                         case "texturePayloadsPerTick" -> CustomBlocksConfig.texturePayloadsPerTick = Math.max(1, Math.min(50, Integer.parseInt(text)));
                         case "resourcePackPort" -> CustomBlocksConfig.resourcePackPort = Math.max(0, Math.min(65535, Integer.parseInt(text)));
                         case "reloadDebounceMs" -> CustomBlocksConfig.reloadDebounceMs = Math.max(500, Math.min(10000, Long.parseLong(text)));
-                        case "cloudShareUrl" -> CustomBlocksConfig.cloudShareUrl = text.trim();
+                        // cloudShareUrl is now a hardcoded constant — not editable via GUI
                         case "aiName" -> CustomBlocksConfig.aiName = text.replace("&", "§");
                         case "triangleGreenHex" -> {
                             String normalized = normalizeHexInput(text);
@@ -1453,7 +1796,7 @@ public class GuiManager {
         // Row 4: Quick actions
         inv.setStack(31, uiGlint(Items.EMERALD, "§a§l▶ Give All Items", "§7Click to get every magic item at once", "§aIncludes all squares, triangles, and tools"));
         // Bottom row
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back")); // Royal Directive
         return inv;
     }
 
@@ -1520,7 +1863,7 @@ public class GuiManager {
             "§8Affects all imports server-wide"));
 
         // Master ON/OFF toggle (slot 0 area — but 0 is typically Back, so put toggle at 13)
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back", "§8Return to main menu"));
+        inv.setStack(0, uiGlint(Items.ECHO_SHARD, "§c◀ Back", "§8Return to main menu")); // Royal Directive
         inv.setStack(10, toggleItem("YCbCr Math", CustomBlocksConfig.bgRemovalUseYcbcr,
             "Separates brightness from colour to reduce light edge halos"));
         inv.setStack(13, enabled
@@ -1604,7 +1947,7 @@ public class GuiManager {
             "§c§l⚠ §cThis modifies every block's texture"));
 
         // Bottom row Back
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back")); // Royal Directive
         return inv;
     }
 
@@ -1848,10 +2191,10 @@ public class GuiManager {
             "§7These settings affect the entire server.",
             "§7Changing them can impact every player and every block.",
             "§eOnly continue if you mean to edit live server-wide behavior."));
-        inv.setStack(11, uiGlint(Items.RED_CONCRETE, "§c◀ Back",
-            "§7Return without changing server config."));
-        inv.setStack(15, uiGlint(Items.LIME_CONCRETE, "§a§lContinue",
-            "§7Open the advanced server config panel."));
+        inv.setStack(11, uiGlint(Items.TOTEM_OF_UNDYING, "§c◀ Back",
+            "§7Return without changing server config.")); // Royal Directive
+        inv.setStack(15, uiGlint(Items.NETHER_STAR, "§a§lContinue",
+            "§7Open the advanced server config panel.")); // Royal Directive
         return inv;
     }
 
@@ -1878,6 +2221,12 @@ public class GuiManager {
         inv.setStack(11, toggleItem("AI System Ready", CustomBlocksConfig.aiEnabled, "Keep the AI assistant system enabled"));
         inv.setStack(12, toggleItem("AI Status Halo", CustomBlocksConfig.aiHologram, "Show a floating status label above the assistant"));
         inv.setStack(13, toggleItem("Cloud Share", CustomBlocksConfig.cloudShareEnabled, "Upload and fetch share codes from the Cloud Vault"));
+        // 1.29 — Hologram toggle
+        inv.setStack(14, uiGlint(CustomBlocksConfig.hologramEnabled ? Items.LANTERN : Items.SOUL_LANTERN,
+            CustomBlocksConfig.hologramEnabled ? "§a§lHologram §a✔ Enabled" : "§c§lHologram §c✖ Disabled",
+            "§7Show floating names above placed custom blocks",
+            "§8Height: " + CustomBlocksConfig.hologramHeight + " blocks",
+            "§8Click to toggle"));
         // Row 2: Numbers
         inv.setStack(19, numItem("Block Capacity", CustomBlocksConfig.maxSlots, "How many custom blocks this server can hold (restart required)"));
         inv.setStack(20, numItem("Texture Quality", CustomBlocksConfig.defaultTextureSize, "Default resolution used when new textures are processed"));
@@ -1896,10 +2245,10 @@ public class GuiManager {
         inv.setStack(30, colorFillModeButton(CustomBlocksConfig.colorToolBackgroundMode));
         inv.setStack(31, strItem("Green Shade", CustomBlocksConfig.triangleGreenHex, "Edit the built-in Green triangle/square shade"));
         inv.setStack(32, strItem("Voice Mode", CustomBlocksConfig.voiceMode, "Visual style for the assistant AI"));
-        inv.setStack(33, strItem("Cloud Vault URL", truncate(CustomBlocksConfig.normalizedCloudShareUrl(), 30), "Base URL used for cross-server share codes"));
+        // Slot 33 was Cloud Vault URL — removed (URL is now a hardcoded constant, not user-configurable)
         inv.setStack(34, strItem("Yellow Shade", CustomBlocksConfig.triangleYellowHex, "Edit the built-in Yellow triangle/square shade"));
         // Row 5: Back
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back")); // Royal Directive
         return inv;
     }
 
@@ -2014,6 +2363,23 @@ public class GuiManager {
                 send(player, "§a[Config] cloudShareEnabled = " + CustomBlocksConfig.cloudShareEnabled);
                 openConfigGui(player, false);
             }
+            case 14 -> { // 1.29 — Hologram toggle
+                CustomBlocksConfig.hologramEnabled = !CustomBlocksConfig.hologramEnabled;
+                CustomBlocksConfig.save();
+                boolean on = CustomBlocksConfig.hologramEnabled;
+                player.sendMessage(Text.literal(on
+                    ? "§a[CB] Holograms enabled." : "§7[CB] Holograms disabled."), true);
+                if (on && CustomBlocksConfig.hologramHeight <= 0.0f) {
+                    player.sendMessage(Text.literal(
+                        "§e[CB] Hologram height is 0. Set hologram-height above 0 in config for visible holograms."), true);
+                }
+                if (player.getWorld() instanceof net.minecraft.server.world.ServerWorld sw) {
+                    sw.playSound(null, player.getBlockPos(),
+                        net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME,
+                        net.minecraft.sound.SoundCategory.PLAYERS, 0.8f, on ? 1.5f : 0.8f);
+                }
+                openConfigGui(player, false);
+            }
             // Numbers
             case 19 -> configPrompt(player, "maxSlots", "Block Capacity (1-8192):");
             case 20 -> configPrompt(player, "defaultTextureSize", "Texture Quality (16-256):");
@@ -2029,7 +2395,7 @@ public class GuiManager {
             case 30 -> openColorFillModeGui(player);
             case 31 -> configPrompt(player, "triangleGreenHex", "Green Shade Hex (#RRGGBB):");
             case 32 -> configPrompt(player, "voiceMode", "AI Style:");
-            case 33 -> configPrompt(player, "cloudShareUrl", "Cloud Vault URL:");
+            // case 33 was Cloud Vault URL — removed (hardcoded constant)
             case 34 -> configPrompt(player, "triangleYellowHex", "Yellow Shade Hex (#RRGGBB):");
             case 45 -> openMain(player, 0);
         }
@@ -2105,7 +2471,7 @@ public class GuiManager {
         boolean hasMoreRedo = redoSz > offset + perPage;
         if (hasMoreUndo || hasMoreRedo) inv.setStack(52, uiGlint(Items.ARROW, "§7Next Page ▶", "§8Page " + (page + 2)));
 
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back")); // Royal Directive
         return inv;
     }
 
@@ -2208,13 +2574,21 @@ public class GuiManager {
             else openEditorPicker(player, Math.max(0, page-1));
             return;
         }
+        // 1.27 — sort button
+        if (slot == 51 && !brokenOnly) {
+            openSortMenu(player, page);
+            return;
+        }
         if (slot == 53) {
             if (brokenOnly) openBrokenBlocks(player, page+1);
             else openEditorPicker(player, page+1);
             return;
         }
         if (slot >= 18 && slot <= 35) {
-            List<SlotData> blocks = brokenOnly ? brokenBlocks() : sortedBlocks();
+            // 1.23 — broken view uses reason map for up-to-date list
+            List<SlotData> blocks = brokenOnly
+                    ? new java.util.ArrayList<>(com.customblocks.core.SlotManager.brokenBlocksWithReasons().keySet())
+                    : sortedBlocks();
             int idx = page * BLOCKS_PER_PAGE + (slot - 18);
             if (idx < blocks.size()) {
                 String targetId = blocks.get(idx).customId;
@@ -2234,19 +2608,25 @@ public class GuiManager {
                     }
                     return;
                 }
+                // 1.23 — In the broken-blocks view, Shift+click suppresses the warning
+                //         (marks the block as intentionally texture-free so it won't show up here again).
+                if (brokenOnly && (actionType == net.minecraft.screen.slot.SlotActionType.QUICK_MOVE
+                        || actionType == net.minecraft.screen.slot.SlotActionType.QUICK_CRAFT)) {
+                    com.customblocks.core.SlotManager.setSuppressed(targetId, true);
+                    playClick(player);
+                    send(player, "§7[CB] Warning suppressed for §f" + targetId + "§7. Use §f/cb unsuppress " + targetId + " §7to restore.");
+                    refreshScreen(player, buildPicker(player.getUuid(), page, true));
+                    return;
+                }
                 // Category-assign triggers (in priority order):
-                //   • Shift+click  → QUICK_MOVE / QUICK_CRAFT
                 //   • Middle-click → CLONE         (creative only)
                 //   • Drop key (Q) → THROW
                 //   • Right-click  → PICKUP with button == 1
-                // Note: Ctrl+click is not distinguishable from a plain left-click
-                // server-side in 1.21.x, so we rely on right-click as the
-                // primary keyboard-free shortcut for category assignment.
-                boolean assign = actionType == net.minecraft.screen.slot.SlotActionType.QUICK_MOVE
-                    || actionType == net.minecraft.screen.slot.SlotActionType.CLONE
+                boolean assign = actionType == net.minecraft.screen.slot.SlotActionType.CLONE
                     || actionType == net.minecraft.screen.slot.SlotActionType.THROW
-                    || actionType == net.minecraft.screen.slot.SlotActionType.QUICK_CRAFT
                     || (actionType == net.minecraft.screen.slot.SlotActionType.PICKUP && button == 1);
+                if (!brokenOnly && (actionType == net.minecraft.screen.slot.SlotActionType.QUICK_MOVE
+                        || actionType == net.minecraft.screen.slot.SlotActionType.QUICK_CRAFT)) assign = true;
                 if (assign) {
                     openAssignmentDecision(player, targetId, page);
                 } else {
@@ -3586,6 +3966,18 @@ public class GuiManager {
         if (slot == 49) handleEscBack(player);
     }
 
+    // ── Phase 3.1: Color Library Picker (stub — delegates to Color Studio) ────
+
+    public static void openColorPicker(ServerPlayerEntity player, String context) {
+        // Phase 3.1 not yet fully implemented — routes to Color Studio for now
+        openColorStudio(player, context);
+    }
+
+    private static void handleColorPickerClick(ServerPlayerEntity player, GuiState state, int slot) {
+        // Phase 3.1 not yet fully implemented — back/close handled by Color Studio logic
+        handleColorStudioClick(player, state, slot);
+    }
+
     // ── G1: Color Studio ─────────────────────────────────────────────────────
 
     public static void openColorStudio(ServerPlayerEntity player, String customId) {
@@ -3966,6 +4358,12 @@ public class GuiManager {
      * Opens the Cloud Vault market browser. Pass {@code refresh=true} to force-refetch.
      */
     public static void openMarketGui(ServerPlayerEntity player, int page, boolean refresh) {
+        // 8.4 — gate: marketplace can be disabled by the server admin
+        if (!CustomBlocksConfig.marketplaceEnabled) {
+            player.sendMessage(Text.literal("§c[Market] §7Marketplace is disabled by the server admin."), true);
+            playError(player);
+            return;
+        }
         UUID uuid = player.getUuid();
         pushBackStack(uuid);
         if (refresh || !MARKET_CACHE.containsKey(uuid)) {
@@ -3997,7 +4395,7 @@ public class GuiManager {
     }
 
     private static java.util.List<JsonObject> fetchMarketListing(ServerPlayerEntity player) {
-        String base = com.customblocks.CustomBlocksConfig.cloudShareUrl;
+        String base = com.customblocks.CustomBlocksConfig.normalizedCloudShareUrl();
         try {
             java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder()
                 .uri(java.net.URI.create(base + "/market?limit=50"))
@@ -4326,11 +4724,16 @@ public class GuiManager {
 
     private static SimpleInventory buildPicker(UUID playerUuid, int page, boolean brokenOnly) {
         SimpleInventory inv = new SimpleInventory(54);
-        List<SlotData> blocks = brokenOnly ? brokenBlocks() : sortedBlocks();
+        // 1.23 — broken view uses reason map; normal view uses sorted list (1.27 sort-aware)
+        java.util.Map<SlotData, SlotData.TextureReason> brokenMap = brokenOnly
+                ? com.customblocks.core.SlotManager.brokenBlocksWithReasons() : null;
+        List<SlotData> blocks = brokenOnly ? new ArrayList<>(brokenMap.keySet()) : sortedBlocks(playerUuid);
         int total = blocks.size(), maxPage = total==0?0:Math.max(0,(total-1)/BLOCKS_PER_PAGE);
         inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Main Dashboard","§8Return to the main menu"));
         for (int i=1;i<=3;i++) inv.setStack(i,glass());
-        inv.setStack(4, ui(Items.ENCHANTED_BOOK,"§e§lSelect Block to Manage",
+        SortMode activeSortMode = brokenOnly ? null : PLAYER_SORT_PREFS.getOrDefault(playerUuid, SortMode.NAME_ASC);
+        String sortLabel = activeSortMode != null ? " §8— §7sorted: §f" + activeSortMode.label : "";
+        inv.setStack(4, ui(Items.ENCHANTED_BOOK,"§e§lSelect Block to Manage" + sortLabel,
             "§7Manage your creations from the list below",
             "§8"+Math.min(BLOCKS_PER_PAGE,Math.max(0,total-page*BLOCKS_PER_PAGE))+" of §f"+total+" §8blocks  •  Page §f"+(page+1)+"§8/§f"+(maxPage+1),
             "§aUse the arrows at the bottom to flip pages"));
@@ -4351,6 +4754,16 @@ public class GuiManager {
                 if (isFav) ll.add("§6★ Favorite §8— Press §fF §8to unfavorite");
                 else ll.add("§8☆ Press §fF §8to favorite");
                 List<String> tags=new ArrayList<>(); if(d.hasFaces())tags.add("§d⬡faces"); if(d.isAnimated())tags.add("§b⏳anim"); if(d.noCollision)tags.add("§c⊘hitbox"); if(!tags.isEmpty())ll.add(String.join("  ",tags));
+                // 1.23 — show TextureReason tooltip in broken-blocks view
+                if (brokenOnly && brokenMap != null) {
+                    SlotData.TextureReason reason = brokenMap.get(d);
+                    if (reason != null) {
+                        ll.add("§c⚠ " + reason.tooltip);
+                        if (reason == SlotData.TextureReason.NEVER_UPLOADED) {
+                            ll.add("§7Shift-click §8→ suppress this warning");
+                        }
+                    }
+                }
                 s.set(DataComponentTypes.LORE, new LoreComponent(ll.stream().map(l->(Text)lore(l)).toList()));
                 if (isFav) s.set(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE, true);
                 inv.setStack(invSlot, s);
@@ -4360,7 +4773,15 @@ public class GuiManager {
         inv.setStack(45, page>0 ? uiGlint(Items.ARROW,"§7◀ Previous Page","§8Go to page "+page) : ui(Items.GRAY_STAINED_GLASS_PANE,"§8◀ First Page",""));
         for (int i=46;i<=48;i++) inv.setStack(i,glass());
         inv.setStack(49, ui(Items.PAPER,"§ePage §f"+(page+1)+" §7/ §f"+(maxPage+1),"§7Total: §f"+total+" blocks"));
-        for (int i=50;i<=52;i++) inv.setStack(i,glass());
+        inv.setStack(50, glass());
+        // 1.27 — sort button (slot 51); hidden in broken-only view
+        if (!brokenOnly) {
+            SortMode cur = PLAYER_SORT_PREFS.getOrDefault(playerUuid, SortMode.NAME_ASC);
+            inv.setStack(51, uiGlint(Items.HOPPER, "§e⬇ Sort: §f" + cur.label, "§7Click to open the Sort menu", "§8Current: §f" + cur.label));
+        } else {
+            inv.setStack(51, glass());
+        }
+        inv.setStack(52, glass());
         inv.setStack(53, page<maxPage ? uiGlint(Items.ARROW,"§7Next Page ▶","§8Go to page "+(page+2)) : ui(Items.GRAY_STAINED_GLASS_PANE,"§8Last Page ▶",""));
         return inv;
     }
@@ -4836,7 +5257,7 @@ public class GuiManager {
             case "colorToolBackgroundMode" -> Items.BOOK;
             case "triangleGreenHex", "triangleYellowHex" -> Items.LIME_DYE;
             case "voiceMode" -> Items.PAINTING;
-            case "cloudShareUrl" -> Items.ENDER_PEARL;
+            // cloudShareUrl removed — was ENDER_PEARL (now hardcoded constant)
             default -> Items.NAME_TAG;
         };
         return new ItemStack(item);
@@ -4852,7 +5273,7 @@ public class GuiManager {
             case "texturePayloadsPerTick" -> String.valueOf(CustomBlocksConfig.texturePayloadsPerTick);
             case "resourcePackPort" -> String.valueOf(CustomBlocksConfig.resourcePackPort);
             case "reloadDebounceMs" -> String.valueOf(CustomBlocksConfig.reloadDebounceMs);
-            case "cloudShareUrl" -> CustomBlocksConfig.normalizedCloudShareUrl();
+            // cloudShareUrl removed from GUI — hardcoded constant
             case "aiName" -> stripFormattingCodes(CustomBlocksConfig.aiName);
             case "undoMode" -> CustomBlocksConfig.undoMode;
             case "colorToolBackgroundMode" -> CustomBlocksConfig.colorToolBackgroundMode;
@@ -4945,6 +5366,12 @@ public class GuiManager {
         return SlotManager.sortedSlots();
     }
 
+    /** 1.27 — returns blocks sorted according to the given player's sort preference. */
+    private static List<SlotData> sortedBlocks(UUID playerUuid) {
+        SortMode mode = PLAYER_SORT_PREFS.getOrDefault(playerUuid, SortMode.NAME_ASC);
+        return SlotManager.sortedSlots(mode);
+    }
+
     private static String generateVariantId(String base, String face) {
         String c=base+"_"+face; if(!SlotManager.hasId(c))return c;
         for(int i=2;i<=99;i++){String x=c+"_"+i;if(!SlotManager.hasId(x))return x;}
@@ -5015,7 +5442,8 @@ public class GuiManager {
         return new ImageProcessor.ProcessResult(
             ImageProcessor.resizeTo(png, CustomBlocksConfig.defaultTextureSize),
             null,
-            1
+            1,
+            null
         );
     }
 
@@ -5315,7 +5743,7 @@ public class GuiManager {
 
         inv.setStack(49, uiGlint(net.minecraft.item.Items.EMERALD, "§a§lConfirm & Import", "§7Execute the import with these decisions"));
         if (page > 0) inv.setStack(45, uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§d← Previous Page"));
-        else inv.setStack(45, uiGlint(net.minecraft.item.Items.RED_CONCRETE, "§c← Cancel"));
+        else inv.setStack(45, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§c← Cancel")); // Royal Directive
         if (end < conflicting.size()) inv.setStack(53, uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§dNext Page →"));
 
         openScreenFromGuiState(player, GuiState.importConflict(root.getAsJsonObject("category").get("key").getAsString()).withPage(page), inv, Text.translatable("customblocks.gui.import_conflict.title"));
@@ -5474,7 +5902,7 @@ public class GuiManager {
         for (int i = 0; i < 27; i++) inv.setStack(i, glass());
         inv.setStack(11, uiGlint(net.minecraft.item.Items.BOOK, "§e§lAdd to Existing Category"));
         inv.setStack(15, uiGlint(net.minecraft.item.Items.WRITABLE_BOOK, "§a§lCreate New Category"));
-        inv.setStack(22, uiGlint(net.minecraft.item.Items.RED_CONCRETE, "§c§lBack"));
+        inv.setStack(22, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§c§lBack"));
         openScreenFromGuiState(player, GuiState.assignmentDecision(blockId, 0), inv, Text.translatable("customblocks.gui.assign_block.title"));
     }
 
@@ -5534,7 +5962,7 @@ public class GuiManager {
             }
         }
 
-        inv.setStack(45, uiGlint(net.minecraft.item.Items.RED_CONCRETE, "§c← Back"));
+        inv.setStack(45, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§c← Back")); // Royal Directive
         inv.setStack(47, page > 0 ? uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§d← Previous Page") : glass());
         inv.setStack(51, end < (isCustomTab ? customBlocks.size() : vanillaItems.size()) ? uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§dNext Page →") : glass());
 
@@ -5643,7 +6071,7 @@ public class GuiManager {
             inv.setStack(18 + (i - start), stack);
         }
         if (page > 0) inv.setStack(45, uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§d<- Previous Page"));
-        else inv.setStack(45, uiGlint(net.minecraft.item.Items.RED_CONCRETE, "§c<- Back"));
+        else inv.setStack(45, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§c<- Back")); // Royal Directive
         if (end < cats.size()) inv.setStack(53, uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§dNext Page ->"));
         openScreenFromGuiState(player, GuiState.categoryPicker(blockId, page), inv, Text.translatable("customblocks.gui.category_picker.title"));
     }
@@ -5769,7 +6197,7 @@ public class GuiManager {
             inv.setStack(18 + (i - start), stack);
         }
         if (page > 0) inv.setStack(45, uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§d<- Previous Page"));
-        else inv.setStack(45, uiGlint(net.minecraft.item.Items.RED_CONCRETE, "§c<- Back"));
+        else inv.setStack(45, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§c<- Back")); // Royal Directive
         if (end < cats.size()) inv.setStack(53, uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§dNext Page ->"));
         inv.setStack(49, uiGlint(net.minecraft.item.Items.COMMAND_BLOCK, "§d§lCategory Controller", "§7Manage categories"));
         openScreenFromGuiState(player, GuiState.categoryBrowser(page), inv, Text.translatable("customblocks.gui.category_browser.title"));
@@ -5828,7 +6256,7 @@ public class GuiManager {
             inv.setStack(18 + (i - start), stack);
         }
         if (page > 0) inv.setStack(45, uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§d<- Previous Page"));
-        else inv.setStack(45, uiGlint(net.minecraft.item.Items.RED_CONCRETE, "§c<- Back"));
+        else inv.setStack(45, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§c<- Back")); // Royal Directive
         if (end < blocks.size()) inv.setStack(53, uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§dNext Page ->"));
         return inv;
     }
@@ -5875,7 +6303,7 @@ public class GuiManager {
         inv.setStack(11, uiGlint(net.minecraft.item.Items.CRAFTING_TABLE, "§eEdit Block", "§7Open the block editor"));
         inv.setStack(15, uiGlint(net.minecraft.item.Items.FLINT_AND_STEEL, "§cRemove from Category", "§7Take this block out of", "§7this category."));
         
-        inv.setStack(22, uiGlint(net.minecraft.item.Items.RED_CONCRETE, "§c§lBack"));
+        inv.setStack(22, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§c§lBack"));
         openScreenFromGuiState(player, GuiState.categoryBlockContext(categoryKey, blockId, returnPage), inv, Text.translatable("customblocks.gui.block_options.title"));
     }
 
@@ -5933,7 +6361,7 @@ public class GuiManager {
             inv.setStack(i - start, stack);
         }
         if (page > 0) inv.setStack(45, uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§d<- Previous Page"));
-        else inv.setStack(45, uiGlint(net.minecraft.item.Items.RED_CONCRETE, "§c<- Back"));
+        else inv.setStack(45, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§c<- Back")); // Royal Directive
         if (end < cats.size()) inv.setStack(53, uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§dNext Page ->"));
         
         inv.setStack(48, uiGlint(net.minecraft.item.Items.MINECART, "§eMerge Categories", "§7Combine two categories into one"));
@@ -6033,7 +6461,7 @@ public class GuiManager {
             inv.setStack(22, uiGlint(net.minecraft.item.Items.BARRIER, "§c§lDelete Category...", "§7Opens deletion options"));
         }
 
-        inv.setStack(45, uiGlint(net.minecraft.item.Items.RED_CONCRETE, "§c§lBack"));
+        inv.setStack(45, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§c§lBack"));
         openScreenFromGuiState(player, GuiState.categoryEditor(categoryKey, tabIndex), inv, Text.translatable("customblocks.gui.category_editor.title").append(Text.literal(": §f" + cat.displayName())));
     }
 
@@ -6302,7 +6730,7 @@ public class GuiManager {
 
         // Footer controls
         if (page > 0) inv.setStack(45, uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§d← Previous Page"));
-        else inv.setStack(45, uiGlint(net.minecraft.item.Items.RED_CONCRETE, "§c← Back"));
+        else inv.setStack(45, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§c← Back")); // Royal Directive
         if (end < rows.size()) inv.setStack(53, uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§dNext Page →"));
         inv.setStack(49, uiGlint(net.minecraft.item.Items.WRITABLE_BOOK, "§a§l+ New Subcategory",
                 "§7Click to add a subcategory under §f" + parent.displayName()));
@@ -6402,7 +6830,7 @@ public class GuiManager {
         inv.setStack(13, uiGlint(net.minecraft.item.Items.MINECART, "§eMove All to Another", "§7Blocks move to a new category.", "§7Then this category is deleted."));
         inv.setStack(15, uiGlint(net.minecraft.item.Items.HOPPER, "§6Bulk Remove All", "§7Keep the category,", "§7but empty all its blocks."));
         
-        inv.setStack(22, uiGlint(net.minecraft.item.Items.RED_CONCRETE, "§c§lBack"));
+        inv.setStack(22, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§c§lBack"));
         openScreenFromGuiState(player, GuiState.deleteCategoryMenu(categoryKey), inv, Text.translatable("customblocks.gui.delete_category.title", cat.displayName()));
     }
 
@@ -6445,7 +6873,7 @@ public class GuiManager {
             inv.setStack(18 + (i - start), stack);
         }
         if (page > 0) inv.setStack(45, uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§d← Previous Page"));
-        else inv.setStack(45, uiGlint(net.minecraft.item.Items.RED_CONCRETE, "§c← Back"));
+        else inv.setStack(45, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§c← Back")); // Royal Directive
         if (end < cats.size()) inv.setStack(53, uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§dNext Page →"));
         openScreenFromGuiState(player, GuiState.mergeCategoryPickerTarget(sourceKey, page), inv, Text.translatable("customblocks.gui.merge_target.title"));
     }
@@ -6496,7 +6924,7 @@ public class GuiManager {
         String mostRecent = totalBlocks > 0 ? blocks.get(totalBlocks - 1).displayName : "None";
         inv.setStack(15, uiGlint(net.minecraft.item.Items.SPYGLASS, "§eRecent Addition", "§7" + mostRecent));
         
-        inv.setStack(22, uiGlint(net.minecraft.item.Items.RED_CONCRETE, "§c§lBack"));
+        inv.setStack(22, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§c§lBack"));
         openScreenFromGuiState(player, GuiState.categoryStats(categoryKey), inv, Text.translatable("customblocks.gui.category_stats_dyn.title", cat.displayName()));
     }
 
@@ -6511,20 +6939,89 @@ public class GuiManager {
         SimpleInventory inv = new SimpleInventory(27);
         for (int i = 0; i < 27; i++) inv.setStack(i, glass());
         
-        inv.setStack(11, uiGlint(net.minecraft.item.Items.PAPER, "§eAlphabetical (A-Z)"));
+        inv.setStack(11, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§eAlphabetical (A-Z)")); // Royal Directive
         inv.setStack(13, uiGlint(net.minecraft.item.Items.CLOCK, "§eNewest First"));
-        inv.setStack(15, uiGlint(net.minecraft.item.Items.COMPASS, "§eOldest First"));
+        inv.setStack(15, uiGlint(net.minecraft.item.Items.NETHER_STAR, "§eOldest First")); // Royal Directive
         
-        inv.setStack(22, uiGlint(net.minecraft.item.Items.RED_CONCRETE, "§c§lBack"));
+        inv.setStack(22, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§c§lBack"));
         openScreenFromGuiState(player, GuiState.sortBlocksMenu(categoryKey), inv, Text.translatable("customblocks.gui.sort_blocks.title", cat.displayName()));
     }
 
+    // ── 1.27 — Global picker sort menu ────────────────────────────────────────
+
+    /** Maps SortMode ordinal → inventory slot (54-slot grid, rows 1–4 skipping border). */
+    private static final int[] SORT_SLOTS = {19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31};
+
+    private static void openSortMenu(ServerPlayerEntity player, int returnPage) {
+        pushBackStack(player.getUuid());
+        SimpleInventory inv = buildSortMenu(player.getUuid());
+        openScreenFromGuiState(player, GuiState.pickerSort(returnPage), inv,
+                Text.literal("§e§l⬇ Sort Blocks"));
+    }
+
+    private static SimpleInventory buildSortMenu(UUID playerUuid) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        inv.setStack(4, ui(Items.HOPPER, "§e§l⬇ Sort Blocks",
+                "§7Choose how the block list is sorted.",
+                "§7Your preference is kept for this session."));
+        SortMode active = PLAYER_SORT_PREFS.getOrDefault(playerUuid, SortMode.NAME_ASC);
+        SortMode[] values = SortMode.values();
+        for (int i = 0; i < values.length && i < SORT_SLOTS.length; i++) {
+            SortMode m = values[i];
+            boolean isCurrent = m == active;
+            net.minecraft.item.Item icon = switch (m) {
+                case NAME_ASC, NAME_DESC     -> Items.ECHO_SHARD;
+                case INDEX_ASC, INDEX_DESC   -> Items.COMPASS;
+                case RECENTLY_EDITED         -> Items.CLOCK;
+                case ANIMATED_FIRST          -> Items.MUSIC_DISC_CAT;
+                case BROKEN_FIRST            -> Items.BARRIER;
+                case BY_CATEGORY             -> Items.BOOKSHELF;
+                case BY_SIZE                 -> Items.SHULKER_BOX;
+                case LOCKED_FIRST            -> Items.IRON_DOOR;
+                case BY_GLOW                 -> Items.GLOWSTONE;
+                case BY_SOUND                -> Items.NOTE_BLOCK;
+            };
+            if (isCurrent) {
+                ItemStack s = new ItemStack(icon);
+                s.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§a§l✔ " + m.label).styled(st -> st.withItalic(false)));
+                List<String> ll = new ArrayList<>(List.of("§7" + m.description, "§a§l← Currently active"));
+                s.set(DataComponentTypes.LORE, new LoreComponent(ll.stream().map(l -> (Text) lore(l)).toList()));
+                s.set(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE, true);
+                inv.setStack(SORT_SLOTS[i], s);
+            } else {
+                inv.setStack(SORT_SLOTS[i], ui(icon, "§f" + m.label, "§7" + m.description, "§aClick to apply"));
+            }
+        }
+        inv.setStack(49, uiGlint(Items.RED_CONCRETE, "§c◀ Back", "§8Return to block list"));
+        return inv;
+    }
+
     private static void handleSortBlocksMenuClick(net.minecraft.server.network.ServerPlayerEntity player, GuiState state, int slot) {
+        // 1.27 — global picker sort menu
+        if ("__picker_sort__".equals(state.editingId())) {
+            if (slot == 49 || slot == 0) {
+                handleEscBack(player);
+                return;
+            }
+            SortMode[] values = SortMode.values();
+            for (int i = 0; i < values.length && i < SORT_SLOTS.length; i++) {
+                if (SORT_SLOTS[i] == slot) {
+                    SortMode chosen = values[i];
+                    PLAYER_SORT_PREFS.put(player.getUuid(), chosen);
+                    playSuccess(player);
+                    FeedbackHelper.actionBar(player, "§eSorted by: §f" + chosen.label);
+                    // Return to picker at stored return page with new sort applied
+                    int returnPage = state.page();
+                    STATES.put(player.getUuid(), GuiState.picker(returnPage));
+                    refreshScreen(player, buildPicker(player.getUuid(), returnPage, false));
+                    return;
+                }
+            }
+            return;
+        }
+        // Legacy category-sort stub (existing code)
         if (slot == 22) { handleEscBack(player); return; }
-        // The plan asks for Sort Blocks Inside Category.
-        // It's mostly UI option but currently SlotManager/CategoryManager return lists as-is.
-        // Without persistent sorting memory per category, we might need a "blockSortMode" in Category.
-        // We'll just show the menu and play success for now, as real local sorting requires more fields.
         if (slot == 11 || slot == 13 || slot == 15) {
             playSuccess(player);
             send(player, "§aSort preference applied.");
@@ -6561,7 +7058,7 @@ public class GuiManager {
         }
         
         if (page > 0) inv.setStack(45, uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§d← Previous Page"));
-        else inv.setStack(45, uiGlint(net.minecraft.item.Items.RED_CONCRETE, "§c← Back"));
+        else inv.setStack(45, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§c← Back")); // Royal Directive
         inv.setStack(49, uiGlint(net.minecraft.item.Items.EMERALD_BLOCK, "§a§lConfirm Bulk Assign", "§7Assign " + selected.size() + " blocks to a category"));
         if (end < blocks.size()) inv.setStack(53, uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§dNext Page →"));
         
@@ -6637,15 +7134,15 @@ public class GuiManager {
             "§7Step 1: Pick color",
             "§7Step 2: Pick scope",
             "§7Step 3: Preview then Apply"));
-        inv.setStack(11, uiGlint(net.minecraft.item.Items.LIME_DYE, "§aColor: §f" + color,
+        inv.setStack(11, uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§aColor: §f" + color, // Royal Directive
             "§7Click to cycle: green / yellow / black"));
-        inv.setStack(13, uiGlint(net.minecraft.item.Items.COMPASS, "§bScope: §f" + scopeLabel,
+        inv.setStack(13, uiGlint(net.minecraft.item.Items.NETHER_STAR, "§bScope: §f" + scopeLabel, // Royal Directive
             "§7" + bulkRecolorScopeDescription(scopeKey),
             "§8Click to cycle scope type"));
         inv.setStack(15, uiGlint(net.minecraft.item.Items.NAME_TAG, "§dScope Value",
             "§7Current: §f" + (scopeValue == null || scopeValue.isBlank() ? "(none)" : scopeValue),
             "§8Click to edit value for category/query/ids/range"));
-        inv.setStack(16, uiGlint(net.minecraft.item.Items.BARRIER, "§cExclude List",
+        inv.setStack(16, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§cExclude List", // Royal Directive
             "§7Current: §f" + (exclude == null || exclude.isBlank() ? "(none)" : exclude),
             "§8Supports same format as scope (example: ids:old_1,old_2)"));
         inv.setStack(22, uiGlint(net.minecraft.item.Items.SPYGLASS, "§ePreview",
@@ -6660,7 +7157,7 @@ public class GuiManager {
             "§7Open final confirmation screen",
             "§7Scope: §f" + scopeLabel,
             "§7Selected IDs: §f" + selectedCount));
-        inv.setStack(45, uiGlint(net.minecraft.item.Items.RED_CONCRETE, "§c← Back"));
+        inv.setStack(45, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§c← Back")); // Royal Directive
 
         java.util.List<com.customblocks.core.SlotData> blocks = sortedBlocks();
         int start = page * BLOCKS_PER_PAGE;
@@ -6834,8 +7331,8 @@ public class GuiManager {
         inv.setStack(15, uiGlint(net.minecraft.item.Items.EMERALD_BLOCK, "§a§lApply Now",
             "§7Creates new recolored variants",
             "§7Old blocks remain unchanged"));
-        inv.setStack(18, uiGlint(net.minecraft.item.Items.RED_CONCRETE, "§c← Back to Wizard"));
-        inv.setStack(26, uiGlint(net.minecraft.item.Items.BARRIER, "§8Cancel"));
+        inv.setStack(18, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§c← Back to Wizard")); // Royal Directive
+        inv.setStack(26, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§8Cancel")); // Royal Directive
 
         openScreenFromGuiState(player, GuiState.bulkRecolorConfirm(returnPage), inv, Text.translatable("customblocks.gui.bulk_recolor_confirm.title"));
     }
@@ -7046,6 +7543,409 @@ public class GuiManager {
 
     public static java.util.Set<String> getBulkRecolorSelected(java.util.UUID playerUuid) {
         return new java.util.HashSet<>(BULK_RECOLOR_SELECTED.getOrDefault(playerUuid, java.util.Collections.emptySet()));
+    }
+
+    // ── Phase 2 — Bulk Selection helpers ────────────────────────────────────
+
+    private static Set<String> bulkSel(UUID uuid) {
+        return BULK_SELECTIONS.computeIfAbsent(uuid, k -> ConcurrentHashMap.newKeySet());
+    }
+
+    public static Set<String> getBulkSelection(UUID uuid) {
+        return java.util.Collections.unmodifiableSet(bulkSel(uuid));
+    }
+
+    private static void bulkToggle(UUID uuid, String id) {
+        Set<String> sel = bulkSel(uuid);
+        if (!sel.remove(id)) sel.add(id);
+    }
+
+    private static void bulkSelectAll(UUID uuid, java.util.List<SlotData> pool) {
+        Set<String> sel = bulkSel(uuid);
+        pool.forEach(d -> sel.add(d.customId));
+    }
+
+    private static void bulkClear(UUID uuid) {
+        bulkSel(uuid).clear();
+    }
+
+    // ── Phase 2 — Bulk Hub ───────────────────────────────────────────────────
+
+    /** Phase 2 — open the bulk operations hub. */
+    public static void openBulkHub(ServerPlayerEntity player) {
+        pushBackStack(player.getUuid());
+        openScreenFromGuiState(player, GuiState.bulkHub(),
+                buildBulkHub(player.getUuid()), "§5§lBulk Operations");
+    }
+
+    private static SimpleInventory buildBulkHub(UUID uuid) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+
+        // Title row
+        inv.setStack(4, ui(Items.COMMAND_BLOCK, "§5§lBulk Operations Hub",
+                "§7Select an operation to get started.",
+                "§7Your selection: §e" + bulkSel(uuid).size() + " blocks"));
+
+        // Row 1 — operations 1-4
+        inv.setStack(10, uiGlint(Items.TNT,            "§c§lDelete",       "§7Permanently remove selected blocks", "§8Shift+click in picker to select all"));
+        inv.setStack(11, uiGlint(Items.MAGMA_CREAM,    "§6Recolor",        "§7Apply a color tint to selected blocks"));
+        inv.setStack(12, uiGlint(Items.NAME_TAG,       "§eRename",         "§7Change display names: prefix, suffix, or replace"));
+        inv.setStack(13, uiGlint(Items.PAPER,          "§eRe-ID",          "§7Change block IDs — updates all references"));
+
+        // Row 2 — operations 5-8
+        inv.setStack(19, uiGlint(Items.COMPARATOR,     "§aProperties",     "§7Set sound, glow, hardness, or collision"));
+        inv.setStack(20, uiGlint(Items.ENDER_PEARL,    "§bMove Category",  "§7Move selected blocks to another category"));
+        inv.setStack(21, uiGlint(Items.WRITTEN_BOOK,   "§3Export",         "§7Export selected blocks as a shareable ZIP"));
+        inv.setStack(22, uiGlint(Items.BOOK,           "§dDuplicate",      "§7Clone selected blocks with new IDs"));
+
+        // Row 3 — operations 9-12
+        inv.setStack(28, uiGlint(Items.CHAIN,          "§7Lock / Unlock",  "§7Protect or unprotect blocks from editing"));
+        inv.setStack(29, uiGlint(Items.HEART_OF_THE_SEA, "§dFavorite",     "§7Star or un-star selected blocks"));
+        inv.setStack(30, uiGlint(Items.BRICK,          "§bShape",          "§7Apply a shape preset to selected blocks"));
+        inv.setStack(31, uiGlint(Items.NOTE_BLOCK,     "§aSound",          "§7Set sound type for selected blocks"));
+
+        // Bottom row — selection controls
+        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back", "§8Return to main menu"));
+        inv.setStack(46, uiGlint(Items.LIME_DYE,     "§aSelect All",    "§7Selects every block"));
+        inv.setStack(47, ui(Items.ORANGE_DYE,         "§6Deselect All",  "§7Clears current selection"));
+        inv.setStack(49, ui(Items.GLOWSTONE_DUST,     "§e" + bulkSel(uuid).size() + " §7block(s) selected",
+                "§7Click an operation above to continue."));
+
+        return inv;
+    }
+
+    private static void handleBulkHubClick(ServerPlayerEntity player, GuiState state, int slot) {
+        UUID uuid = player.getUuid();
+        switch (slot) {
+            case 45 -> openMain(player, 0);
+            case 46 -> {
+                bulkSelectAll(uuid, sortedBlocks());
+                refreshScreen(player, buildBulkHub(uuid));
+            }
+            case 47 -> {
+                bulkClear(uuid);
+                refreshScreen(player, buildBulkHub(uuid));
+            }
+            // Operation tiles → open op picker
+            case 10 -> openBulkOpPicker(player, "delete",    0);
+            case 11 -> openBulkOpPicker(player, "recolor",   0);
+            case 12 -> openBulkOpPicker(player, "rename",    0);
+            case 13 -> openBulkOpPicker(player, "reid",      0);
+            case 19 -> openBulkOpPicker(player, "property",  0);
+            case 20 -> openBulkOpPicker(player, "movecat",   0);
+            case 21 -> openBulkOpPicker(player, "export",    0);
+            case 22 -> openBulkOpPicker(player, "duplicate", 0);
+            case 28 -> openBulkOpPicker(player, "lock",      0);
+            case 29 -> openBulkOpPicker(player, "favorite",  0);
+            case 30 -> openBulkOpPicker(player, "shape",     0);
+            case 31 -> openBulkOpPicker(player, "sound",     0);
+        }
+    }
+
+    // ── Phase 2 — Bulk Op Picker ─────────────────────────────────────────────
+
+    private static final int BULK_PICKER_PAGE_SIZE = 36;
+
+    /** Phase 2 — open the shared bulk-op block picker. */
+    public static void openBulkOpPicker(ServerPlayerEntity player, String opId, int page) {
+        STATES.put(player.getUuid(), GuiState.bulkOpPicker(opId, page));
+        openScreen(player, new SimpleNamedScreenHandlerFactory(
+                (s, pi, p) -> new CbScreenHandler(s, pi, buildBulkOpPicker(player.getUuid(), opId, page)),
+                Text.literal(normalizeFormattingCodes(bulkOpTitle(opId)))));
+    }
+
+    private static String bulkOpTitle(String opId) {
+        return switch (opId) {
+            case "delete"    -> "§c§lBulk Delete — Select Blocks";
+            case "recolor"   -> "§6Bulk Recolor — Select Blocks";
+            case "rename"    -> "§eBulk Rename — Select Blocks";
+            case "reid"      -> "§eBulk Re-ID — Select Blocks";
+            case "property"  -> "§aBulk Properties — Select Blocks";
+            case "movecat"   -> "§bBulk Move Category — Select Blocks";
+            case "export"    -> "§3Bulk Export — Select Blocks";
+            case "duplicate" -> "§dBulk Duplicate — Select Blocks";
+            case "lock"      -> "§7Bulk Lock/Unlock — Select Blocks";
+            case "favorite"  -> "§dBulk Favorite — Select Blocks";
+            case "shape"     -> "§bBulk Shape — Select Blocks";
+            case "sound"     -> "§aBulk Sound — Select Blocks";
+            default          -> "§5Bulk Op — Select Blocks";
+        };
+    }
+
+    private static SimpleInventory buildBulkOpPicker(UUID uuid, String opId, int page) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+
+        Set<String>     sel     = bulkSel(uuid);
+        String          catFilt = BULK_OP_CAT_FILTER.get(uuid);
+        java.util.List<SlotData> pool   = catFilt != null
+                ? com.customblocks.core.CategoryManager.getBlocksInCategory(catFilt)
+                : sortedBlocks();
+        int total   = pool.size();
+        int maxPage = total == 0 ? 0 : Math.max(0, (total - 1) / BULK_PICKER_PAGE_SIZE);
+        page = Math.max(0, Math.min(page, maxPage));
+
+        // Top bar
+        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Hub", "§8Return to bulk operations hub"));
+        inv.setStack(6, uiGlint(Items.LIME_DYE, "§aSelect All",
+                "§7Selects all " + pool.size() + " matching blocks"));
+        inv.setStack(7, ui(Items.ORANGE_DYE, "§6Deselect All", "§7Clears current selection"));
+        inv.setStack(8, uiGlint(bulkOpConfirmItem(opId),
+                "§a§l▶ Execute: " + bulkOpLabel(opId),
+                "§7Selected: §e" + sel.size() + " §7blocks",
+                sel.isEmpty() ? "§cSelect at least one block first" : "§aClick to proceed"));
+
+        // Category filter button (row 1 slot 4)
+        String catLabel = catFilt != null ? "§bCategory: §f" + catFilt : "§7Category: §fAll";
+        inv.setStack(4, ui(Items.ENDER_PEARL, catLabel, "§8Click to cycle category filter"));
+
+        // Block grid (slots 9–44, 4 rows × 9)
+        int start = page * BULK_PICKER_PAGE_SIZE;
+        for (int i = 0; i < BULK_PICKER_PAGE_SIZE; i++) {
+            int gridSlot = 9 + i;
+            int dataIdx  = start + i;
+            if (dataIdx < pool.size()) {
+                SlotData d = pool.get(dataIdx);
+                boolean selected = sel.contains(d.customId);
+                boolean locked   = com.customblocks.core.LockManager.isLocked(d.customId);
+                ItemStack s = selected
+                        ? uiGlint(Items.LIME_STAINED_GLASS_PANE,
+                                "§a§l✔ " + d.displayName,
+                                "§7ID: §b" + d.customId,
+                                locked ? "§6⚿ Locked" : "",
+                                "§aClick to deselect")
+                        : (CustomBlocksMod.safeSlotItem(d.index) != null
+                                ? new ItemStack(CustomBlocksMod.safeSlotItem(d.index))
+                                : new ItemStack(Items.GRAY_DYE));
+                if (!selected) {
+                    s.set(net.minecraft.component.DataComponentTypes.CUSTOM_NAME,
+                            Text.literal("§f" + d.displayName).styled(st -> st.withItalic(false)));
+                    List<Text> loreLines = new ArrayList<>();
+                    loreLines.add(lore("§7ID: §b" + d.customId));
+                    if (locked) loreLines.add(lore("§6⚿ Locked"));
+                    loreLines.add(lore("§8Click to select"));
+                    s.set(net.minecraft.component.DataComponentTypes.LORE, new LoreComponent(loreLines));
+                }
+                inv.setStack(gridSlot, s);
+            }
+        }
+
+        // Navigation row
+        inv.setStack(45, page > 0
+                ? uiGlint(Items.ARROW, "§7◀ Previous Page", "§8Page " + page)
+                : ui(Items.GRAY_STAINED_GLASS_PANE, "§8First Page", ""));
+        inv.setStack(49, ui(Items.PAPER,
+                "§ePage §f" + (page + 1) + " §7/ §f" + (maxPage + 1),
+                "§7Selected: §e" + sel.size() + " §7/ §f" + total));
+        inv.setStack(53, page < maxPage
+                ? uiGlint(Items.ARROW, "§7Next Page ▶", "§8Page " + (page + 2))
+                : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Last Page ▶", ""));
+        return inv;
+    }
+
+    private static Item bulkOpConfirmItem(String opId) {
+        return switch (opId) {
+            case "delete"    -> Items.BARRIER;
+            case "recolor"   -> Items.MAGMA_CREAM;
+            case "rename"    -> Items.NAME_TAG;
+            case "reid"      -> Items.PAPER;
+            case "property"  -> Items.COMPARATOR;
+            case "movecat"   -> Items.ENDER_PEARL;
+            case "export"    -> Items.WRITTEN_BOOK;
+            case "duplicate" -> Items.BOOK;
+            case "lock"      -> Items.CHAIN;
+            case "favorite"  -> Items.HEART_OF_THE_SEA;
+            case "shape"     -> Items.BRICK;
+            case "sound"     -> Items.NOTE_BLOCK;
+            default          -> Items.NETHER_STAR;
+        };
+    }
+
+    private static String bulkOpLabel(String opId) {
+        return switch (opId) {
+            case "delete"    -> "Delete";
+            case "recolor"   -> "Recolor";
+            case "rename"    -> "Rename";
+            case "reid"      -> "Re-ID";
+            case "property"  -> "Properties";
+            case "movecat"   -> "Move Category";
+            case "export"    -> "Export";
+            case "duplicate" -> "Duplicate";
+            case "lock"      -> "Lock/Unlock";
+            case "favorite"  -> "Favorite";
+            case "shape"     -> "Shape";
+            case "sound"     -> "Sound";
+            default          -> opId;
+        };
+    }
+
+    private static void handleBulkOpPickerClick(ServerPlayerEntity player, GuiState state, int slot) {
+        UUID   uuid  = player.getUuid();
+        String opId  = state.editingId();
+        int    page  = state.page();
+
+        String catFilt = BULK_OP_CAT_FILTER.get(uuid);
+        java.util.List<SlotData> pool = catFilt != null
+                ? com.customblocks.core.CategoryManager.getBlocksInCategory(catFilt)
+                : sortedBlocks();
+        int total   = pool.size();
+        int maxPage = total == 0 ? 0 : Math.max(0, (total - 1) / BULK_PICKER_PAGE_SIZE);
+
+        if (slot == 0) { openBulkHub(player); return; }
+
+        if (slot == 6) { // Select all
+            bulkSelectAll(uuid, pool);
+            refreshScreen(player, buildBulkOpPicker(uuid, opId, page));
+            return;
+        }
+        if (slot == 7) { // Deselect all
+            bulkClear(uuid);
+            refreshScreen(player, buildBulkOpPicker(uuid, opId, page));
+            return;
+        }
+        if (slot == 4) { // Category filter cycle
+            cycleBulkCatFilter(uuid);
+            STATES.put(uuid, GuiState.bulkOpPicker(opId, 0));
+            refreshScreen(player, buildBulkOpPicker(uuid, opId, 0));
+            return;
+        }
+        if (slot == 8) { // Execute
+            executeBulkOpFromGui(player, opId);
+            return;
+        }
+        if (slot == 45 && page > 0) {
+            STATES.put(uuid, GuiState.bulkOpPicker(opId, page - 1));
+            refreshScreen(player, buildBulkOpPicker(uuid, opId, page - 1));
+            return;
+        }
+        if (slot == 53 && page < maxPage) {
+            STATES.put(uuid, GuiState.bulkOpPicker(opId, page + 1));
+            refreshScreen(player, buildBulkOpPicker(uuid, opId, page + 1));
+            return;
+        }
+        // Block grid toggle (slots 9–44)
+        if (slot >= 9 && slot <= 44) {
+            int dataIdx = page * BULK_PICKER_PAGE_SIZE + (slot - 9);
+            if (dataIdx < pool.size()) {
+                bulkToggle(uuid, pool.get(dataIdx).customId);
+                refreshScreen(player, buildBulkOpPicker(uuid, opId, page));
+            }
+        }
+    }
+
+    private static void cycleBulkCatFilter(UUID uuid) {
+        java.util.List<com.customblocks.core.Category> cats =
+                new java.util.ArrayList<>(com.customblocks.core.CategoryManager.getAllCategories());
+        if (cats.isEmpty()) { BULK_OP_CAT_FILTER.remove(uuid); return; }
+        String current = BULK_OP_CAT_FILTER.get(uuid);
+        if (current == null) {
+            BULK_OP_CAT_FILTER.put(uuid, cats.get(0).key());
+        } else {
+            int idx = -1;
+            for (int i = 0; i < cats.size(); i++) if (cats.get(i).key().equals(current)) { idx = i; break; }
+            if (idx < 0 || idx >= cats.size() - 1) BULK_OP_CAT_FILTER.remove(uuid);
+            else BULK_OP_CAT_FILTER.put(uuid, cats.get(idx + 1).key());
+        }
+    }
+
+    /**
+     * Execute a bulk operation on the player's current BULK_SELECTIONS set.
+     * Simple no-config operations are executed directly; config-required ones
+     * close the GUI and prompt the player to use the matching command.
+     */
+    private static void executeBulkOpFromGui(ServerPlayerEntity player, String opId) {
+        UUID        uuid = player.getUuid();
+        Set<String> sel  = new java.util.HashSet<>(bulkSel(uuid));
+        if (sel.isEmpty()) {
+            playError(player);
+            FeedbackHelper.actionBar(player, "§cSelect at least one block first.");
+            return;
+        }
+        MinecraftServer server = player.getServer();
+        switch (opId) {
+            case "delete" -> {
+                int threshold = com.customblocks.CustomBlocksConfig.bulkConfirmThreshold;
+                if (sel.size() > threshold) {
+                    // Re-use the armed mechanism from bulk delete
+                    Long armedAt = BULK_DELETE_CONFIRM_ARMED.get(uuid);
+                    boolean confirmed = armedAt != null && (System.currentTimeMillis() - armedAt) < 5000L;
+                    if (!confirmed) {
+                        BULK_DELETE_CONFIRM_ARMED.put(uuid, System.currentTimeMillis());
+                        playError(player);
+                        FeedbackHelper.actionBar(player, "§c§l⚠ " + sel.size() + " blocks! Click again within 5s to confirm.");
+                        return;
+                    }
+                }
+                BULK_DELETE_CONFIRM_ARMED.remove(uuid);
+                com.customblocks.core.UndoManager.pushCategoryUndo(
+                        com.customblocks.core.UndoManager.captureCategorySnapshot("bulk-delete " + sel.size(), uuid));
+                int count = 0;
+                for (String id : sel) {
+                    if (com.customblocks.core.SlotManager.remove(id) != null) {
+                        com.customblocks.core.LockManager.onBlockDeleted(id);
+                        new java.util.HashSet<>(com.customblocks.core.CategoryManager.getCategoriesForBlock(id))
+                                .forEach(cat -> com.customblocks.core.CategoryManager.unassignBlock(id, cat));
+                        if (server != null) server.execute(() ->
+                                com.customblocks.network.NetworkManager.broadcastUpdate(server,
+                                        new com.customblocks.network.SlotUpdatePayload("delete", -1, id, null, null, 0, 0, "")));
+                        count++;
+                    }
+                }
+                if (server != null) com.customblocks.ResourcePackManager.scheduleRebuild(server);
+                bulkClear(uuid);
+                FeedbackHelper.actionBar(player, "§c§l✗ §r§cDeleted §f" + count + " §cblocks");
+                openBulkHub(player);
+            }
+            case "lock" -> {
+                int locked = 0, unlocked = 0;
+                for (String id : sel) {
+                    if (com.customblocks.core.LockManager.isLocked(id)) {
+                        com.customblocks.core.LockManager.unlock(id); unlocked++;
+                    } else {
+                        com.customblocks.core.LockManager.lock(id); locked++;
+                    }
+                }
+                bulkClear(uuid);
+                FeedbackHelper.actionBar(player, "§7Locked §f" + locked + " §7/ Unlocked §f" + unlocked + " §7blocks");
+                openBulkHub(player);
+            }
+            case "favorite" -> {
+                int added = 0, removed = 0;
+                for (String id : sel) {
+                    boolean nowFav = com.customblocks.core.FavoritesManager.toggle(uuid, id, server);
+                    if (nowFav) added++; else removed++;
+                }
+                bulkClear(uuid);
+                FeedbackHelper.actionBar(player, "§dStarred §f" + added + " §7/ Unstarred §f" + removed + " §7blocks");
+                openBulkHub(player);
+            }
+            // Config-required operations: close GUI, prompt command
+            default -> {
+                player.closeHandledScreen();
+                String example = buildBulkCommandHint(opId, sel);
+                send(player, "§e" + sel.size() + " §7block(s) selected. Use command to configure:");
+                send(player, "§b" + example);
+                send(player, "§8(Tip: use §bids:<id1>,<id2>,...§8 to target specific blocks)");
+            }
+        }
+    }
+
+    private static String buildBulkCommandHint(String opId, Set<String> sel) {
+        String ids = sel.stream().limit(3).collect(java.util.stream.Collectors.joining(","))
+                + (sel.size() > 3 ? ",..." : "");
+        return switch (opId) {
+            case "rename"    -> "/cb bulkrename " + ids + " --prefix \"New \"";
+            case "reid"      -> "/cb bulkreid " + ids + " --replace old_ new_";
+            case "property"  -> "/cb bulkproperty " + ids + " sound wood";
+            case "movecat"   -> "/cb bulkmove " + ids + " <category>";
+            case "export"    -> "/cb bulkexport " + ids;
+            case "duplicate" -> "/cb bulkduplicate " + ids + " --suffix _copy";
+            case "shape"     -> "/cb bulkshape " + ids + " slab";
+            case "sound"     -> "/cb bulksound " + ids + " wood";
+            case "recolor"   -> "/cb bulkrecolor green " + ids;
+            default          -> "/cb bulk" + opId + " " + ids;
+        };
     }
 }
 
