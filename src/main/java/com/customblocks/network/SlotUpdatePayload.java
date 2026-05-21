@@ -1,5 +1,6 @@
 package com.customblocks.network;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.packet.CustomPayload;
@@ -11,6 +12,7 @@ import net.minecraft.util.Identifier;
  * Actions: add, retexture, remove, rename, setprop, setface, clearface,
  * clearfaces, setshape, setcollision, tabicon, animsettings
  */
+@SuppressFBWarnings({"EI_EXPOSE_REP", "EI_EXPOSE_REP2"})
 public record SlotUpdatePayload(
         String action,
         int    slotIndex,

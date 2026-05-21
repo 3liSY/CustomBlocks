@@ -5,6 +5,7 @@ package com.customblocks.client;
 import com.customblocks.CustomBlocksMod;
 
 import com.customblocks.core.SlotData;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 import com.customblocks.core.SlotManager;
 
@@ -72,6 +73,7 @@ public class ResourcePackGenerator {
 
 
 
+    @SuppressFBWarnings("RV_RETURN_VALUE_IGNORED_BAD_PRACTICE")
     public static void generate(MinecraftClient client) {
 
         try {
@@ -118,6 +120,9 @@ public class ResourcePackGenerator {
 
             int effectiveMax = CustomBlocksClient.effectiveMaxSlots();
 
+            // 1.8 — shared empty-slot model written at most once per generate pass
+            boolean emptySlotSharedWritten = false;
+
             for (int i = 0; i < effectiveMax; i++) {
 
                 String slotKey  = "slot_" + i;
@@ -126,9 +131,34 @@ public class ResourcePackGenerator {
 
                 SlotData data = SlotManager.getBySlot(slotKey);
 
-                // Skip empty slots — no texture, no model, no blockstate needed.
-                // cleanupStaleSlotFiles() above already removed any orphaned files.
-                if (data == null) continue;
+                // 1.8 — write placeholder files for registered-but-empty slots so the client
+                // never logs "missing model" errors for slot_N blocks that exist in the world.
+                if (data == null) {
+                    if (!emptySlotSharedWritten) {
+                        // Shared invisible block model — empty elements[], no geometry
+                        JsonObject emptyModel = new JsonObject();
+                        emptyModel.add("elements", new com.google.gson.JsonArray());
+                        writeJson(emptyModel, new File(assets, "models/block/empty_slot.json"));
+                        // Shared transparent placeholder texture
+                        Files.write(
+                            new File(assets, "textures/block/empty_slot_tex.png").toPath(),
+                            PLACEHOLDER_PNG);
+                        emptySlotSharedWritten = true;
+                    }
+                    // Per-slot blockstate — points to shared empty model (invisible)
+                    JsonObject emptyBs = new JsonObject();
+                    JsonObject emptyVariant = new JsonObject();
+                    emptyVariant.addProperty("model", MOD_ID + ":block/empty_slot");
+                    JsonObject emptyVariantsObj = new JsonObject();
+                    emptyVariantsObj.add("", emptyVariant);
+                    emptyBs.add("variants", emptyVariantsObj);
+                    writeJson(emptyBs, new File(assets, "blockstates/" + slotKey + ".json"));
+                    // Per-slot item model — also points to shared empty model
+                    JsonObject emptyIm = new JsonObject();
+                    emptyIm.addProperty("parent", MOD_ID + ":block/empty_slot");
+                    writeJson(emptyIm, new File(assets, "models/item/" + slotKey + ".json"));
+                    continue;
+                }
 
                 // ── Default (all-faces) texture ────────────────────────────────
 
@@ -142,10 +172,6 @@ public class ResourcePackGenerator {
 
                     // NativeImage re-encoding changes file size unpredictably.
 
-                    writePng(data.texture, texDest);
-
-
-
                     // Use ACTUAL TEXTURE DIMENSIONS as source of truth for "is this
 
                     // an animation strip?" - more reliable than data.isAnimated()
@@ -155,6 +181,12 @@ public class ResourcePackGenerator {
                     // lost packet, stale save file, or legacy broken-build data.
 
                     int frames = com.customblocks.ImageProcessor.getVerticalFrames(data.texture);
+
+                    // R.29 — enforce power-of-2 on single-frame textures to prevent mipmap degradation.
+                    byte[] texToWrite = (frames == 1)
+                        ? com.customblocks.ImageProcessor.ensurePowerOf2(data.texture)
+                        : data.texture;
+                    writePng(texToWrite, texDest);
 
                     if (frames > 1) {
 
@@ -226,7 +258,7 @@ public class ResourcePackGenerator {
 
                 // ── Per-face textures ─────────────────────────────────────────
 
-                if (data != null && data.hasFaces()) {
+                if (data.hasFaces()) {
 
                     for (Map.Entry<String, byte[]> face : data.faceTextures.entrySet()) {
 
@@ -288,7 +320,7 @@ public class ResourcePackGenerator {
 
                             }
 
-                        } catch (Exception ignored) {
+                        } catch (IOException | RuntimeException ignored) {
 
                             if (faceMcmeta.exists()) faceMcmeta.delete();
 
@@ -367,7 +399,7 @@ public class ResourcePackGenerator {
 
                 JsonObject bm = new JsonObject();
 
-                if (data != null && data.isShaped()) {
+                if (data.isShaped()) {
 
                     // Shaped block — use explicit elements[], no parent
 
@@ -459,7 +491,7 @@ public class ResourcePackGenerator {
 
                     bm.add("elements", elements);
 
-                } else if (data != null && data.hasFaces()) {
+                } else if (data.hasFaces()) {
 
                     // cube — explicit texture ref per face; legacy stitching ensures every
 
@@ -530,6 +562,14 @@ public class ResourcePackGenerator {
                 Files.write(tabDest.toPath(), PLACEHOLDER_PNG);
 
             }
+
+            // 1.19 — Generate models/item/tab_icon.json so Minecraft can render the item
+            JsonObject tabTex = new JsonObject();
+            tabTex.addProperty("layer0", MOD_ID + ":item/tab_icon");
+            JsonObject tabModel = new JsonObject();
+            tabModel.addProperty("parent", "minecraft:item/generated");
+            tabModel.add("textures", tabTex);
+            writeJson(tabModel, new File(assets, "models/item/tab_icon.json"));
 
 
 
@@ -653,7 +693,7 @@ public class ResourcePackGenerator {
 
             CustomBlocksMod.LOGGER.info("[CustomBlocks] Resource pack generated.");
 
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
 
             CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to generate resource pack", e);
 
@@ -673,6 +713,7 @@ public class ResourcePackGenerator {
 
      */
 
+    @SuppressFBWarnings("RV_RETURN_VALUE_IGNORED_BAD_PRACTICE")
     public static void generateSingleSlot(MinecraftClient client, int slotIndex) {
 
         try {
@@ -691,7 +732,9 @@ public class ResourcePackGenerator {
 
             new File(assets, "textures/block").mkdirs();
 
-
+            // R.28 — Delete all existing files for this slot before writing new ones.
+            // Prevents stale per-face and variant files from accumulating when config changes.
+            cleanupSingleSlotFiles(assets, slotIndex);
 
             // ── Default (all-faces) texture ──────────────────────────────────
 
@@ -701,9 +744,12 @@ public class ResourcePackGenerator {
 
             if (data != null && data.texture != null && data.texture.length > 0) {
 
-                writePng(data.texture, texDest);
-
+                // R.29 — enforce power-of-2 on single-frame textures to match server-side behaviour.
                 int frames = com.customblocks.ImageProcessor.getVerticalFrames(data.texture);
+                byte[] texToWrite = (frames == 1)
+                    ? com.customblocks.ImageProcessor.ensurePowerOf2(data.texture)
+                    : data.texture;
+                writePng(texToWrite, texDest);
 
                 if (frames > 1) {
 
@@ -779,7 +825,7 @@ public class ResourcePackGenerator {
 
                         }
 
-                    } catch (Exception ignored) {
+                    } catch (IOException | RuntimeException ignored) {
 
                         if (faceMcmeta.exists()) faceMcmeta.delete();
 
@@ -970,7 +1016,7 @@ public class ResourcePackGenerator {
 
             CustomBlocksMod.LOGGER.info("[CustomBlocks] Single-slot generate for slot_{} complete.", slotIndex);
 
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
 
             CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to generate single slot_{}", slotIndex, e);
 
@@ -988,6 +1034,7 @@ public class ResourcePackGenerator {
 
      */
 
+    @SuppressFBWarnings("RV_RETURN_VALUE_IGNORED_BAD_PRACTICE")
     private static void cleanupStaleSlotFiles(File assets) {
 
         int deleted = 0;
@@ -1055,9 +1102,32 @@ public class ResourcePackGenerator {
 
 
 
+    /** Deletes all resource-pack files for a single slot before a targeted regeneration.
+     *  Prevents stale per-face and variant files from accumulating when a slot's config changes. */
+    @SuppressFBWarnings("RV_RETURN_VALUE_IGNORED_BAD_PRACTICE")
+    private static void cleanupSingleSlotFiles(File assets, int slotIndex) {
+        String slotKey = "slot_" + slotIndex;
+        String[] dirNames = {"textures/block", "models/block", "models/item", "blockstates"};
+        for (String dirName : dirNames) {
+            File dir = new File(assets, dirName);
+            if (!dir.exists()) continue;
+            File[] files = dir.listFiles(f -> {
+                String n = f.getName();
+                return n.equals(slotKey + ".json")
+                    || n.equals(slotKey + ".png")
+                    || n.equals(slotKey + ".png.mcmeta")
+                    || n.startsWith(slotKey + "_");
+            });
+            if (files != null) {
+                for (File f : files) f.delete();
+            }
+        }
+    }
+
     /** Writes image bytes as PNG. If already valid PNG, writes raw bytes directly
      *  (skips decode+re-encode cycle). Falls back to NativeImage for non-PNG (JPEG etc). */
 
+    @SuppressFBWarnings("RV_RETURN_VALUE_IGNORED_BAD_PRACTICE")
     private static void writePng(byte[] imageBytes, File dest) {
 
         try {
@@ -1072,8 +1142,7 @@ public class ResourcePackGenerator {
             }
 
             // PNG signature: 0x89 0x50 0x4E 0x47 (first 4 bytes)
-            if (imageBytes.length >= 4
-                    && imageBytes[0] == (byte) 0x89
+            if (imageBytes[0] == (byte) 0x89
                     && imageBytes[1] == (byte) 0x50
                     && imageBytes[2] == (byte) 0x4E
                     && imageBytes[3] == (byte) 0x47) {
@@ -1086,11 +1155,11 @@ public class ResourcePackGenerator {
                 }
             }
 
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
 
             try { Files.write(dest.toPath(), PLACEHOLDER_PNG); }
 
-            catch (Exception ignored) {}
+            catch (IOException | RuntimeException ignored) {}
 
             CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not decode image for {}, wrote placeholder PNG", dest.getName());
 
@@ -1100,6 +1169,7 @@ public class ResourcePackGenerator {
 
 
 
+    @SuppressFBWarnings("RV_RETURN_VALUE_IGNORED_BAD_PRACTICE")
     private static void writeJson(JsonObject json, File dest) throws IOException {
 
         dest.getParentFile().mkdirs();

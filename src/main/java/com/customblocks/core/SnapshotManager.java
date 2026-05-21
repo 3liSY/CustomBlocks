@@ -104,7 +104,7 @@ public final class SnapshotManager {
                             : stem;
                         String rsn = stem.length() > 20 ? stem.substring(20) : "unknown";
                         long sz = 0;
-                        try { sz = Files.size(p); } catch (Exception ignored) {}
+                        try { sz = Files.size(p); } catch (Exception e) { LOGGER.debug("[CB] Could not stat snapshot {}: {}", p, e.getMessage()); }
                         return new SnapshotMeta(name, ts, rsn, sz);
                     })
                     .toList();

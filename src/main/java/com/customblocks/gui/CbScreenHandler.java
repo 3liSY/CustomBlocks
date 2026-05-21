@@ -1,5 +1,7 @@
 package com.customblocks.gui;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import com.customblocks.CustomBlocksMod;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.inventory.Inventory;
@@ -9,6 +11,7 @@ import net.minecraft.screen.GenericContainerScreenHandler;
 import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.text.Text;
 
 /**
  * Custom screen handler for all CB GUI screens.
@@ -19,6 +22,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
  *    which prevents the cursor from snapping to the centre of the screen on every click.
  * 3. We NEVER call clearState() from onClosed().
  */
+@SuppressFBWarnings("EI_EXPOSE_REP2")
 public class CbScreenHandler extends GenericContainerScreenHandler {
 
     private final Inventory inventory;
@@ -53,7 +57,15 @@ public class CbScreenHandler extends GenericContainerScreenHandler {
     @Override
     public void onSlotClick(int slotIndex, int button, SlotActionType actionType, PlayerEntity player) {
         if (slotIndex >= 0 && slotIndex < inventory.size() && player instanceof ServerPlayerEntity sp) {
-            GuiManager.handleClick(sp, slotIndex, button, actionType);
+            try {
+                GuiManager.handleClick(sp, slotIndex, button, actionType);
+            } catch (Exception e) {
+                CustomBlocksMod.LOGGER.error("[CustomBlocks] GUI click error in slot {}", slotIndex, e);
+                sp.sendMessage(Text.literal("§c[CB] Something went wrong. The action was not applied."), true);
+                // Force-close so client and server agree the screen is closed
+                sp.closeHandledScreen();
+                return;
+            }
         }
         this.syncState();
     }
@@ -75,6 +87,8 @@ public class CbScreenHandler extends GenericContainerScreenHandler {
         if (GuiManager.isReopeningScreen(sp.getUuid())) return;
         if (GuiManager.hasPending(sp)) return;
 
-        sp.getServer().execute(() -> GuiManager.handleEscBack(sp));
+        net.minecraft.server.MinecraftServer cbSrv = sp.getServer();
+        if (cbSrv == null) return;
+        cbSrv.execute(() -> GuiManager.handleEscBack(sp));
     }
 }

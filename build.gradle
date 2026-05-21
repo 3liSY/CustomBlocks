@@ -1,5 +1,7 @@
 plugins {
     id 'fabric-loom' version '1.7.4'
+    // 8.3 — SpotBugs 6.x: supports Java 21 bytecode (SpotBugs 4.8+ bundled)
+    id 'com.github.spotbugs' version '6.0.18'
 }
 
 version = '1.0.0'
@@ -22,6 +24,9 @@ dependencies {
     include "net.fabricmc.fabric-api:fabric-api:0.104.0+1.21.1"
 
     modImplementation("me.lucko:fabric-permissions-api:0.3.1") { transitive = false }
+
+    // 8.3 — SpotBugs annotations (compileOnly — not shipped in the mod JAR)
+    compileOnly 'com.github.spotbugs:spotbugs-annotations:4.8.6'
 
     // Phase 6: TwelveMonkeys removed. WebP handled via URL rewriting + wsrv.nl proxy.
 
@@ -177,4 +182,15 @@ tasks.register('verifySound') {
 tasks.named('build').configure {
     dependsOn tasks.named('verifyMojibake')
     dependsOn tasks.named('verifySound')
+}
+
+// 8.3 — SpotBugs 6.x static analysis (Java 21 compatible via SpotBugs 4.8+ bundled)
+// ignoreFailures=true for the initial pass; tighten to false after cleanup
+tasks.withType(com.github.spotbugs.snom.SpotBugsTask).configureEach {
+    ignoreFailures = true
+    excludeFilter = file('config/spotbugs/exclude.xml')
+    reports {
+        html { required = true }
+        xml  { required = false }
+    }
 }

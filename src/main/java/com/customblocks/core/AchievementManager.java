@@ -1,5 +1,6 @@
 package com.customblocks.core;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import com.google.gson.*;
 import net.minecraft.server.network.ServerPlayerEntity;
 import org.slf4j.Logger;
@@ -55,6 +56,14 @@ public final class AchievementManager {
     private static final ConcurrentHashMap<UUID, Set<String>> UNLOCKED = new ConcurrentHashMap<>();
     /** Per-player block creation counter (for BLOCK_10/50/100). */
     private static final ConcurrentHashMap<UUID, Integer> BLOCK_COUNT = new ConcurrentHashMap<>();
+    /** Achievements earned while offline, delivered on next join. */
+    private static final ConcurrentHashMap<UUID, List<Achievement>> PENDING_OFFLINE = new ConcurrentHashMap<>();
+
+    /**
+     * Optional server-wide broadcast callback.
+     * Set by CustomBlocksMod once server is running. Receives (playerName, achievement).
+     */
+    public static volatile java.util.function.BiConsumer<String, Achievement> onBroadcast = null;
 
     private static volatile boolean dirty = false;
 
@@ -97,6 +106,36 @@ public final class AchievementManager {
         grant(player, Achievement.FIRST_CATEGORY);
     }
 
+    // ── Query helpers ─────────────────────────────────────────────────────────
+
+    public static boolean isUnlocked(UUID uuid, Achievement achievement) {
+        Set<String> set = UNLOCKED.get(uuid);
+        return set != null && set.contains(achievement.id);
+    }
+
+    public static Set<String> getUnlocked(UUID uuid) {
+        Set<String> set = UNLOCKED.get(uuid);
+        return set != null ? Collections.unmodifiableSet(set) : Collections.emptySet();
+    }
+
+    public static int getBlockCount(UUID uuid) {
+        return BLOCK_COUNT.getOrDefault(uuid, 0);
+    }
+
+    // ── Join hook ─────────────────────────────────────────────────────────────
+
+    /** Call when a player joins; delivers any queued offline achievements. */
+    public static void onJoin(ServerPlayerEntity player) {
+        if (player == null) return;
+        UUID uuid = player.getUuid();
+        List<Achievement> pending = PENDING_OFFLINE.remove(uuid);
+        if (pending == null) return;
+        for (Achievement a : pending) {
+            LOGGER.info("[CustomBlocks] Delivering offline achievement to {}: {}", player.getName().getString(), a.id);
+            notify(player, a);
+        }
+    }
+
     // ── Core grant logic ─────────────────────────────────────────────────────
 
     private static void grant(ServerPlayerEntity player, Achievement achievement) {
@@ -106,6 +145,11 @@ public final class AchievementManager {
         dirty = true;
         LOGGER.info("[CustomBlocks] Achievement unlocked for {}: {}", player.getName().getString(), achievement.id);
         notify(player, achievement);
+        // Server-wide broadcast
+        java.util.function.BiConsumer<String, Achievement> bc = onBroadcast;
+        if (bc != null) {
+            bc.accept(player.getName().getString(), achievement);
+        }
     }
 
     private static void notify(ServerPlayerEntity player, Achievement achievement) {
@@ -142,11 +186,12 @@ public final class AchievementManager {
             }
             dirty = false;
             LOGGER.info("[CustomBlocks] AchievementManager loaded ({} players tracked).", UNLOCKED.size());
-        } catch (Exception ex) {
+        } catch (IOException | RuntimeException ex) {
             LOGGER.warn("[CustomBlocks] Could not load achievements.json.gz: {}", ex.getMessage());
         }
     }
 
+    @SuppressFBWarnings("NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE")
     public static void save() {
         if (!dirty) return;
         Path path = Path.of(DATA_FILE);

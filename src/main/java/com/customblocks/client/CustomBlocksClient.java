@@ -1,5 +1,7 @@
 package com.customblocks.client;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+
 
 
 import com.customblocks.client.gui.AnimBlockScreen;
@@ -99,18 +101,23 @@ public class CustomBlocksClient implements ClientModInitializer {
 
 
 
-    // Set to true when the server's "sync_done" sentinel arrives, signalling that all
-
-    // join textures have been enqueued. The waiting debounce thread breaks immediately
-
-    // on this flag rather than waiting out a fixed timer that can fire mid-burst on
-
-    // slow internet connections and cause cascading resource-pack reloads / disconnect.
+    // Set to true when SyncCompletePayload (or legacy "sync_done") arrives, signalling
+    // that all join textures have been enqueued. The waiting thread breaks immediately.
 
     private static volatile boolean syncDoneReceived = false;
 
+    // 1.20 — Count-verified sync fields (set by SyncCompletePayload).
+    // expectedPayloadCount == -1 means not yet received (legacy server without count support).
+    private static volatile int expectedPayloadCount = -1;
+    private static final java.util.concurrent.atomic.AtomicInteger receivedPayloadCount =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+
+    // 1.22 — Set on disconnect if sync was incomplete; cleared after warning is shown on next join.
+    private static volatile boolean syncIncompleteWarningPending = false;
 
 
+
+    @SuppressFBWarnings("PA_PUBLIC_PRIMITIVE_ATTRIBUTE")
     public static volatile boolean pendingCreativeRefresh = false;
 
     /** When true, texture writes happen but visible reload is deferred until resume. */
@@ -207,8 +214,12 @@ public class CustomBlocksClient implements ClientModInitializer {
 
 
 
-        ChunkBuffer(int totalChunks) {
+        // 7.13 — max 200 chunks (200 × 512 KB = 100 MB); prevents OOM from corrupted packets
+        static final int MAX_CHUNKS = 200;
 
+        ChunkBuffer(int totalChunks) {
+            if (totalChunks <= 0 || totalChunks > MAX_CHUNKS)
+                throw new IllegalArgumentException("Invalid totalChunks: " + totalChunks);
             this.totalChunks = totalChunks;
 
             this.chunks = new byte[totalChunks][];
@@ -264,7 +275,7 @@ public class CustomBlocksClient implements ClientModInitializer {
     private static KeyBinding devConsoleKey;
 
     @Override
-
+    @SuppressFBWarnings("ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
     public void onInitializeClient() {
 
         devConsoleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
@@ -433,9 +444,23 @@ public class CustomBlocksClient implements ClientModInitializer {
 
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
 
+            // 1.22 — Detect incomplete sync before resetting state
+            boolean wasIncomplete = joinBurst && (!syncDoneReceived
+                    || (expectedPayloadCount > 0 && receivedPayloadCount.get() < expectedPayloadCount));
+            if (wasIncomplete) {
+                syncIncompleteWarningPending = true;
+                CustomBlocksMod.LOGGER.warn(
+                        "[CustomBlocks] 1.22 Sync incomplete at disconnect: received={} expected={}",
+                        receivedPayloadCount.get(), expectedPayloadCount);
+            }
+
             joinBurst        = false;
 
             syncDoneReceived = false;
+
+            expectedPayloadCount = -1;
+
+            receivedPayloadCount.set(0);
 
             reloadInFlight.set(false);
 
@@ -463,7 +488,21 @@ public class CustomBlocksClient implements ClientModInitializer {
 
                 syncDoneReceived = false;
 
+                expectedPayloadCount = -1;
+
+                receivedPayloadCount.set(0);
+
                 joinBurst        = true;
+
+                // 1.22 — Warn player if previous connection's sync was incomplete
+                if (syncIncompleteWarningPending) {
+                    syncIncompleteWarningPending = false;
+                    if (client.player != null) {
+                        client.player.sendMessage(net.minecraft.text.Text.literal(
+                                "§c[CB] §7Previous sync was incomplete — some blocks may be invisible."
+                                + " §7Type §f/cb sync §7if blocks look broken."), false);
+                    }
+                }
 
 
 
@@ -551,21 +590,12 @@ public class CustomBlocksClient implements ClientModInitializer {
 
 
 
-                // Start the debounce thread. The sync_done sentinel (sent by the server
+                // 1.20 — Start the sync-wait thread. The SyncCompletePayload (sent by the
+                // server after all textures are enqueued) will wake this thread early via
+                // syncDoneReceived. A 30-second hard timeout prevents hanging if the server
+                // is old and never sends SyncCompletePayload.
 
-                // after all textures are enqueued) will wake this thread early via the
-
-                // syncDoneReceived flag. The joinDebounceMs window acts as a fallback in
-
-                // case the client is connected to an older server build that does not send
-
-                // sync_done — so the join reload still fires eventually without getting stuck.
-
-                long fallbackDebounce = com.customblocks.CustomBlocksConfig.joinDebounceMs > 0
-
-                        ? com.customblocks.CustomBlocksConfig.joinDebounceMs : 4000L;
-
-                scheduleGenerateAndReload(client, fallbackDebounce);
+                scheduleGenerateAndReload(client, 30_000L);
 
             });
 
@@ -650,6 +680,12 @@ public class CustomBlocksClient implements ClientModInitializer {
                 }
 
 
+
+                // 7.13 — validate totalChunks before allocation (prevents OOM from bad packet)
+                if (payload.totalChunks() <= 0 || payload.totalChunks() > ChunkBuffer.MAX_CHUNKS) {
+                    CustomBlocksMod.LOGGER.warn("[CustomBlocks] Rejected chunk packet — invalid totalChunks: {}", payload.totalChunks());
+                    return;
+                }
 
                 // Validate chunk index
 
@@ -753,6 +789,29 @@ public class CustomBlocksClient implements ClientModInitializer {
 
 
 
+        // ── SyncCompletePayload — 1.20 count-verified sync ───────────────────
+        ClientPlayNetworking.registerGlobalReceiver(
+                com.customblocks.network.SyncCompletePayload.ID, (payload, context) -> {
+            context.client().execute(() -> {
+                expectedPayloadCount = payload.payloadCount();
+                // Save server hash for next join
+                if (payload.serverHash() != null && !payload.serverHash().isEmpty()) {
+                    saveServerHash(context.client().runDirectory, payload.serverHash());
+                }
+                // Save SHA-256 manifest to disk so we can verify integrity on next join
+                if (payload.manifestJson() != null && !payload.manifestJson().isEmpty()
+                        && !payload.manifestJson().equals("{}")) {
+                    savePackManifest(context.client().runDirectory, payload.manifestJson());
+                }
+                CustomBlocksMod.LOGGER.info(
+                        "[CustomBlocks] 1.20 SyncComplete: expected={} received={} hash={}",
+                        payload.payloadCount(), receivedPayloadCount.get(),
+                        payload.serverHash() != null && payload.serverHash().length() >= 8
+                                ? payload.serverHash().substring(0, 8) : payload.serverHash());
+                syncDoneReceived = true;
+            });
+        });
+
         // ── RpPausePayload — server says pause/resume reloads ────────────────
 
         ClientPlayNetworking.registerGlobalReceiver(com.customblocks.network.RpPausePayload.ID, (payload, context) -> {
@@ -814,7 +873,7 @@ public class CustomBlocksClient implements ClientModInitializer {
                                 String colorHex = category.badgeColor() != null ? category.badgeColor() : category.color();
                                 if (colorHex == null || !colorHex.startsWith("#")) colorHex = "#FFFFFF";
                                 int colorIntVal = 0xFFFFFF;
-                                try { colorIntVal = (int)(Long.parseLong(colorHex.replace("#", ""), 16) | 0xFF000000); } catch (Exception ignored) {}
+                                try { colorIntVal = (int)(Long.parseLong(colorHex.replace("#", ""), 16) | 0xFF000000); } catch (NumberFormatException ignored) {}
                                 final int colorInt = colorIntVal;
                                 
                                 String ind = category.parentKey() != null && category.subcategoryIndicator() != null ? category.subcategoryIndicator() : "";
@@ -1008,6 +1067,9 @@ public class CustomBlocksClient implements ClientModInitializer {
 
 
             case "add" -> {
+
+                // 1.20 — count every texture payload received for count-verified sync
+                if (joinBurst) receivedPayloadCount.incrementAndGet();
 
                 if (SlotManager.getById(payload.customId()) != null)
 
@@ -1367,13 +1429,20 @@ public class CustomBlocksClient implements ClientModInitializer {
 
             Thread t = new Thread(() -> {
 
-                // Wait for sync_done signal OR debounce silence (capped poll at 200ms
-
-                // so we check syncDoneReceived frequently even with a long debounceMs).
-
+                // 1.20 — Wait for SyncCompletePayload (count-verified) OR debounce silence
+                // (fallback for live edits where no SyncCompletePayload is sent).
                 while (true) {
-
-                    if (syncDoneReceived) break;
+                    if (syncDoneReceived) {
+                        // Count-verified: both SyncComplete received AND all "add" payloads received.
+                        // expectedPayloadCount == -1 means legacy server without count support — proceed.
+                        if (expectedPayloadCount < 0
+                                || receivedPayloadCount.get() >= expectedPayloadCount) break;
+                        // Counts don't match yet — "add" payloads still in flight, wait briefly
+                        try { Thread.sleep(50); } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt(); break;
+                        }
+                        continue;
+                    }
 
                     long remaining = debounceMs - (System.currentTimeMillis() - lastPacketTime.get());
 
@@ -1402,13 +1471,11 @@ public class CustomBlocksClient implements ClientModInitializer {
 
                 String cachedHash  = loadCachedHash(client.runDirectory);
 
-                boolean packExists = new File(client.runDirectory,
+                // 1.20 — SHA-256 manifest verification replaces the folder-exists check.
+                // Every PNG in the manifest must exist on disk with a matching hash.
+                boolean packIntact = verifyPackManifest(client.runDirectory);
 
-                        "resourcepacks/CustomBlocks/assets").isDirectory();
-
-
-
-                if (currentHash.equals(cachedHash) && packExists) {
+                if (currentHash.equals(cachedHash) && packIntact) {
 
                     // CACHE HIT — textures unchanged, pack on disk is valid
 
@@ -1448,13 +1515,13 @@ public class CustomBlocksClient implements ClientModInitializer {
 
                     CustomBlocksMod.LOGGER.info(
 
-                            "[CustomBlocks] Texture cache MISS (cur={}, cached={}, packExists={}). Regenerating.",
+                            "[CustomBlocks] Texture cache MISS (cur={}, cached={}, packIntact={}). Regenerating.",
 
                             currentHash.substring(0, Math.min(12, currentHash.length())),
 
                             cachedHash  != null ? cachedHash.substring(0, Math.min(12, cachedHash.length())) : "null",
 
-                            packExists);
+                            packIntact);
 
                     saveCachedHash(client.runDirectory, currentHash);
 
@@ -1562,6 +1629,7 @@ public class CustomBlocksClient implements ClientModInitializer {
 
      */
 
+    @SuppressFBWarnings("RV_RETURN_VALUE_IGNORED_BAD_PRACTICE")
     private static void scheduleAnimMetaReload(MinecraftClient client, int slotIndex, String animMeta) {
 
         File packRoot = new File(client.runDirectory, "resourcepacks/CustomBlocks");
@@ -1807,6 +1875,67 @@ public class CustomBlocksClient implements ClientModInitializer {
             Files.deleteIfExists(runDir.toPath().resolve(CACHE_HASH_FILE));
         } catch (IOException e) {
             CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not clear cache hash: {}", e.getMessage());
+        }
+    }
+
+    // ── 1.20 SHA-256 pack manifest helpers ─────────────────────────────────
+
+    private static final String PACK_MANIFEST_FILE = "customblocks_pack_manifest.json";
+
+    /** Save the server's SHA-256 manifest to disk after a successful sync. */
+    private static void savePackManifest(File runDir, String manifestJson) {
+        try {
+            Path f = runDir.toPath().resolve(PACK_MANIFEST_FILE);
+            Files.writeString(f, manifestJson, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            CustomBlocksMod.LOGGER.warn("[CustomBlocks] Could not save pack manifest: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 1.20 — Verify that every texture in the stored SHA-256 manifest matches
+     * the corresponding PNG file on disk. Returns true if all textures are intact
+     * (or if no manifest exists — treat as first join).
+     */
+    private static boolean verifyPackManifest(File runDir) {
+        Path manifestPath = runDir.toPath().resolve(PACK_MANIFEST_FILE);
+        if (!java.nio.file.Files.exists(manifestPath)) {
+            // No manifest yet (first install or manifest was deleted) — treat as intact
+            // so the existing hash-based check still triggers a full sync if needed.
+            File assetsDir = new File(runDir, "resourcepacks/CustomBlocks/assets");
+            return assetsDir.isDirectory();
+        }
+        try {
+            String json = Files.readString(manifestPath, StandardCharsets.UTF_8);
+            com.google.gson.JsonObject manifest =
+                    com.google.gson.JsonParser.parseString(json).getAsJsonObject();
+            if (manifest.size() == 0) return true;
+
+            java.security.MessageDigest sha256 = java.security.MessageDigest.getInstance("SHA-256");
+            File assetsDir = new File(runDir, "resourcepacks/CustomBlocks/assets/customblocks/textures/block");
+
+            for (java.util.Map.Entry<String, com.google.gson.JsonElement> entry : manifest.entrySet()) {
+                String customId      = entry.getKey();
+                String expectedHash  = entry.getValue().getAsString();
+
+                // Resolve PNG by looking up slot index from customId
+                com.customblocks.core.SlotData slot = SlotManager.getById(customId);
+                if (slot == null) return false; // slot missing from client — needs sync
+
+                File png = new File(assetsDir, "slot_" + slot.index + ".png");
+                if (!png.exists()) return false;
+
+                sha256.reset();
+                byte[] fileBytes = Files.readAllBytes(png.toPath());
+                byte[] hashBytes = sha256.digest(fileBytes);
+                StringBuilder sb = new StringBuilder();
+                for (byte b : hashBytes) sb.append(String.format("%02x", b));
+                if (!sb.toString().equals(expectedHash)) return false;
+            }
+            return true;
+        } catch (Exception e) {
+            CustomBlocksMod.LOGGER.warn("[CustomBlocks] Pack manifest verification failed: {}", e.getMessage());
+            return false; // on any error, force rebuild
         }
     }
 

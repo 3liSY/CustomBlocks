@@ -67,7 +67,47 @@ public enum GuiMode {
     /** J2 — AI smart suggest: 18 curated one-click texture presets. */
     AI_SUGGEST_GUI,
     /** L3 — Cloud Vault market browser: browse + import shared blocks. */
-    MARKET_GUI
+    MARKET_GUI,
+    /** Phase 2 — Bulk operations hub: 12 operation tiles, shared selection display. */
+    BULK_HUB,
+    /** Phase 2 — Shared block picker for any bulk operation. editingId = operation key. */
+    BULK_OP_PICKER,
+    /** 5.25 — Voice mode picker: one legendary item per voice style, active mode glows. */
+    VOICE_PICKER,
+    /** Feature Menu shortcut — paginated list of a player's favorited blocks. */
+    FAVORITES_GUI,
+    /** Feature Menu shortcut — up to 3 recently-edited blocks, no pagination. */
+    RECENT_GUI,
+    /** Phase 3.3 — Dress & Effects overlay GUI for a single block. editingId = customId. */
+    DRESS_GUI,
+    /** Phase 3.4 — Gradient Generator GUI. editingId = blockId for Block A. */
+    GRADIENT_GUI,
+    /** Phase 4A.6 — Import wizard: preview + background/fringe/size settings before creating a block. */
+    IMPORT_WIZARD,
+    /** Phase 4A.6 — Retexture wizard: same as import wizard but updating an existing block. */
+    RETEXTURE_WIZARD,
+    /** Phase 9.2 — Safety Center: snapshot, panic, undo, backup summary. */
+    SAFETY_CENTER,
+    /** Phase 9.3 — History GUI: paginated mutation log with filter. */
+    HISTORY_GUI,
+    /** Phase 10.1 — Script GUI: manage saved scripts (formerly macros). */
+    SCRIPT_GUI,
+    /** Phase 10.1 — Script summary shown after a script completes (5-second countdown). */
+    SCRIPT_SUMMARY,
+    /** Phase 10.3 — Cache & Server Health Dashboard (5 tabs). */
+    CACHE_DASHBOARD,
+    /** Phase 10.4 — Audit GUI: Royal Directive compliance scanner results. */
+    AUDIT_GUI,
+    /** Phase 11.1 — AI description prompt: player enters block description, then picks variation. */
+    AI_GEN,
+    /** Phase 11.1 — AI variation picker: shows generated texture previews to select from. */
+    AI_PICKER,
+    /** Phase 11.2 — Custom Color Studio: hex picker + HSB sliders for /cb customcolor GUI. */
+    CUSTOM_COLOR_STUDIO,
+    /** Phase 12.1 — Achievements GUI: shows all achievements, locked/unlocked with progress. */
+    ACHIEVEMENTS_GUI,
+    /** Phase 12.2 — Drop Config GUI: configure what a custom block drops when broken. */
+    DROP_CONFIG
 }
 
 

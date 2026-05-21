@@ -1,7 +1,10 @@
 package com.customblocks;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 
+
+import com.customblocks.block.ShowcaseBlock;
 import com.customblocks.block.SlotBlock;
 
 import com.customblocks.command.CustomBlockCommand;
@@ -14,6 +17,7 @@ import com.customblocks.core.UndoManager;
 
 import com.customblocks.gui.ChatHelper;
 import com.customblocks.gui.GuiManager;
+import com.customblocks.gui.ShowcaseManager;
 
 import com.customblocks.item.ColorSquareItem;
 
@@ -59,7 +63,11 @@ import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 
 import net.minecraft.block.AbstractBlock;
 
+import net.minecraft.block.MapColor;
+
 import net.minecraft.entity.ItemEntity;
+
+import net.minecraft.item.BlockItem;
 
 import net.minecraft.item.Item;
 
@@ -101,6 +109,7 @@ import org.slf4j.LoggerFactory;
 
  */
 
+@SuppressFBWarnings("PA_PUBLIC_PRIMITIVE_ATTRIBUTE")
 public class CustomBlocksMod implements ModInitializer {
 
 
@@ -111,11 +120,11 @@ public class CustomBlocksMod implements ModInitializer {
 
 
 
-    // Block and item registries — sized at startup from config
+    // Block and item registries — sized at startup from config (private; use safeSlotBlock/safeSlotItem)
 
-    public static SlotBlock[]          SLOT_BLOCKS;
+    private static SlotBlock[]          SLOT_BLOCKS;
 
-    public static SlotBlock.SlotItem[] SLOT_ITEMS;
+    private static SlotBlock.SlotItem[] SLOT_ITEMS;
 
     /** X4 — set by async update-check on SERVER_STARTED; null = up-to-date or check pending. */
     public static volatile String UPDATE_AVAILABLE_VERSION = null;
@@ -126,10 +135,20 @@ public class CustomBlocksMod implements ModInitializer {
 
             RegistryKey.of(RegistryKeys.ITEM_GROUP, Identifier.of(MOD_ID, "blocks"));
 
+    // Tab icon — a flat item whose texture is the server-chosen tab image.
+    // Registered once at startup; texture is swapped via resource pack reload.
+    @SuppressFBWarnings("MS_PKGPROTECT")
+    public static Item TAB_ICON_ITEM;
+
+    // Phase 4C — Showcase Display Block
+    @SuppressFBWarnings("MS_PKGPROTECT")
+    public static ShowcaseBlock SHOWCASE_BLOCK;
+    public static BlockItem SHOWCASE_ITEM;
+
 
 
     @Override
-
+    @SuppressFBWarnings("ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
     public void onInitialize() {
 
 
@@ -288,6 +307,27 @@ public class CustomBlocksMod implements ModInitializer {
 
 
 
+        // ── Tab icon item ────────────────────────────────────────────────────
+        TAB_ICON_ITEM = Registry.register(
+                Registries.ITEM,
+                Identifier.of(MOD_ID, "tab_icon"),
+                new net.minecraft.item.Item(new Item.Settings()));
+
+        // ── Phase 4C: Showcase Display Block ─────────────────────────────────
+        SHOWCASE_BLOCK = Registry.register(
+                Registries.BLOCK,
+                Identifier.of(MOD_ID, "showcase"),
+                new ShowcaseBlock(AbstractBlock.Settings.create()
+                        .mapColor(MapColor.PURPLE)
+                        .strength(1.5f, 6.0f)
+                        .requiresTool()));
+        SHOWCASE_ITEM = Registry.register(
+                Registries.ITEM,
+                Identifier.of(MOD_ID, "showcase"),
+                new BlockItem(SHOWCASE_BLOCK, new Item.Settings()));
+
+
+
         // ── Chat intercept ───────────────────────────────────────────────────
 
         ServerMessageEvents.ALLOW_CHAT_MESSAGE.register((message, sender, params) -> {
@@ -308,6 +348,10 @@ public class CustomBlocksMod implements ModInitializer {
         PayloadTypeRegistry.playS2C().register(FullSyncPayload.ID, FullSyncPayload.CODEC);
 
         PayloadTypeRegistry.playS2C().register(SlotUpdatePayload.ID, SlotUpdatePayload.CODEC);
+
+        PayloadTypeRegistry.playS2C().register(
+                com.customblocks.network.SyncCompletePayload.ID,
+                com.customblocks.network.SyncCompletePayload.CODEC);
 
         PayloadTypeRegistry.playS2C().register(
                 com.customblocks.network.ChunkedTexturePayload.ID,
@@ -337,6 +381,13 @@ public class CustomBlocksMod implements ModInitializer {
                 com.customblocks.network.AnimSettingsPayload.ID,
 
                 (payload, context) -> {
+                    // 1.26 — rate-limit: silently discard if player is spamming
+                    if (!com.customblocks.network.NetworkManager.checkAnimSettingsCooldown(
+                            context.player().getUuid())) {
+                        return;
+                    }
+                    // 7.27 — permission check (C2S packets bypass command-level guards)
+                    if (!com.customblocks.command.PermissionHelper.canEdit(context.player().getCommandSource())) return;
 
                     context.server().execute(() -> {
 
@@ -345,6 +396,8 @@ public class CustomBlocksMod implements ModInitializer {
                         String meta = payload.animMeta();
 
                         if (cid == null || meta == null || meta.isEmpty()) return;
+                        // 7.27 — size cap: 8 KB is far more than any real mcmeta needs
+                        if (meta.length() > 8192) { LOGGER.warn("[CustomBlocks] Rejected oversized animMeta from {}: {} chars", context.player().getName().getString(), meta.length()); return; }
 
                         if (!SlotManager.hasId(cid)) return;
 
@@ -411,23 +464,18 @@ public class CustomBlocksMod implements ModInitializer {
                         .displayName(Text.translatable("itemGroup.customblocks.blocks"))
 
                         .icon(() -> {
-
-                            SlotData icon = SlotManager.getById("tab_icon");
-
-                            if (icon != null && safeSlotItem(icon.index) != null)
-
-                                return new ItemStack(safeSlotItem(icon.index));
-
-                            for (SlotData d : SlotManager.allSlots())
-
-                                if (!"tab_icon".equals(d.customId))
-
-                                    return safeSlotItem(d.index) != null
-
-                                            ? new ItemStack(safeSlotItem(d.index)) : ItemStack.EMPTY;
-
+                            // If a tab icon texture has been uploaded, use the dedicated item.
+                            // Its texture is backed by the resource pack — no slot lookup needed.
+                            if (SlotManager.getTabIconTexture() != null
+                                    && SlotManager.getTabIconTexture().length > 0) {
+                                return new ItemStack(TAB_ICON_ITEM);
+                            }
+                            // Fallback: first available slot block
+                            for (SlotData d : SlotManager.allSlots()) {
+                                Item si = safeSlotItem(d.index);
+                                if (si != null) return new ItemStack(si);
+                            }
                             return new ItemStack(Items.BOOKSHELF);
-
                         })
 
                         .entries((ctx, entries) -> {
@@ -497,6 +545,7 @@ public class CustomBlocksMod implements ModInitializer {
             try {
                 NetworkManager.onPlayerJoin(handler.player);
                 com.customblocks.core.WelcomeManager.checkAndWelcome(handler.player);
+                com.customblocks.core.AchievementManager.onJoin(handler.player); // R1 offline delivery
                 // X4 — notify admins about pending update on join
                 String pending = UPDATE_AVAILABLE_VERSION;
                 if (pending != null && handler.player.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin)) {
@@ -506,6 +555,11 @@ public class CustomBlocksMod implements ModInitializer {
             } catch (Exception e) {
                 LOGGER.error("[CustomBlocks] Error during player join for {}",
                         handler.player.getName().getString(), e);
+                // 1.22 — Notify the player so they know why blocks may be invisible
+                try {
+                    com.customblocks.gui.ChatHelper.warn(handler.player,
+                            "§c[CB] Block sync incomplete — some blocks may be invisible. §7Type §f/cb sync §7to retry.");
+                } catch (Exception ignored) {}
             }
         });
 
@@ -527,12 +581,17 @@ public class CustomBlocksMod implements ModInitializer {
 
             com.customblocks.core.DraftManager.drop(handler.player.getUuid());
 
+            com.customblocks.command.DidYouMean.onPlayerDisconnect(handler.player.getUuid());
+
+            com.customblocks.core.MacroManager.onPlayerDisconnect(handler.player.getUuid());
+
+            com.customblocks.core.SnapshotManager.clearPanic(handler.player.getUuid());
+
         });
 
 
 
         ServerTickEvents.END_SERVER_TICK.register(server -> {
-
 
             NetworkManager.onServerTick(server);
             SlotManager.tickStartupLoad();
@@ -540,6 +599,12 @@ public class CustomBlocksMod implements ModInitializer {
             RectangleToolItem.tickSessionCleanup();
 
             GuiManager.checkPendingFaceImports(server);
+
+            // 1.32 — flush deferred pack pushes for players who closed their GUI
+            com.customblocks.network.ResourcePackServer.tickPendingPackPushes(server);
+
+            // Phase 4C — advance showcase block displays
+            ShowcaseManager.tick(server);
 
         });
 
@@ -551,18 +616,43 @@ public class CustomBlocksMod implements ModInitializer {
             SlotManager.flushSave();
             com.customblocks.core.PlacementStats.save(); // K1
             com.customblocks.core.AchievementManager.save(); // R1
+            com.customblocks.core.DropConfigManager.save(); // Phase 12.2
             com.customblocks.core.FavoritesManager.flushSave();
             com.customblocks.core.CategoryManager.saveAll();
             com.customblocks.core.AutoCategorizeManager.saveAll();
             com.customblocks.core.CategoryDisplayBlockManager.saveAll();
             com.customblocks.core.LockManager.save();
             com.customblocks.core.BlockNotesManager.save();
+            com.customblocks.core.TemplateManager.save();
             com.customblocks.core.WelcomeManager.save();
             com.customblocks.core.SnapshotManager.stop();
             com.customblocks.core.DraftManager.dropAll();
         });
 
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+            // Phase 9.1 — register action-bar flash + 80% warning callback for undo pushes
+            com.customblocks.core.UndoManager.onUndoPushed = (uuid, description) -> {
+                ServerPlayerEntity p = server.getPlayerManager().getPlayer(uuid);
+                if (p == null) return;
+                int size = com.customblocks.core.UndoManager.undoSize(uuid);
+                int max  = com.customblocks.CustomBlocksConfig.maxUndoDepth;
+                String bar = "§a↩ §fUndoable: §e" + description + " §8(" + size + "/" + max + ")";
+                server.execute(() -> p.sendMessage(net.minecraft.text.Text.literal(bar), true));
+                // 80% capacity warning (only send once — when size crosses the threshold upward)
+                if (max > 0 && size == (int) (max * 0.8)) {
+                    server.execute(() -> com.customblocks.gui.ChatHelper.warn(p,
+                        "Undo stack is 80% full (" + size + "/" + max + "). Oldest entries will be dropped soon."));
+                }
+            };
+            // Phase 12.1 — broadcast achievement unlocks to all online players
+            com.customblocks.core.AchievementManager.onBroadcast = (playerName, achievement) -> {
+                String msg = "§6§l🏆 §r§e" + playerName + " §7unlocked: §f" + achievement.title;
+                server.execute(() -> {
+                    for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                        com.customblocks.gui.ChatHelper.info(p, msg);
+                    }
+                });
+            };
             ResourcePackServer.setServer(server);
             com.customblocks.core.SampleBlocksLoader.maybeLoadSamples(server); // X7/D1
             // Phase A6: one-time migration nudge so admins review hardened permission gates.
@@ -634,14 +724,27 @@ public class CustomBlocksMod implements ModInitializer {
 
         SlotManager.loadAll();
         SlotManager.initLightCache(maxSlots); // O7 — prime flat luminance cache
+
+        // 1.16 Guard 4 — startup registry integrity check
+        LOGGER.info("[CustomBlocks] Registered {} block slots (slot_0 to slot_{}).", maxSlots, maxSlots - 1);
+        int orphaned = SlotManager.countOrphanedBlocks();
+        if (orphaned > 0) {
+            int needed = SlotManager.highestUsedSlotIndex() + 1;
+            LOGGER.warn("[CustomBlocks] ⚠ WARNING: {} block definition(s) have indices above maxSlots ({}). "
+                + "These blocks exist in config but cannot be placed or seen. "
+                + "Raise maxSlots to at least {} in config.json and restart to restore them.",
+                orphaned, maxSlots, needed);
+        }
         com.customblocks.core.PlacementStats.load(); // K1
         com.customblocks.core.AchievementManager.load(); // R1
+        com.customblocks.core.DropConfigManager.load(); // Phase 12.2
         com.customblocks.core.FavoritesManager.load();
         com.customblocks.core.CategoryManager.loadAll();
         com.customblocks.core.AutoCategorizeManager.loadAll();
         com.customblocks.core.CategoryDisplayBlockManager.loadAll();
         com.customblocks.core.LockManager.load();
         com.customblocks.core.BlockNotesManager.load();
+        com.customblocks.core.TemplateManager.load();
         com.customblocks.core.WelcomeManager.load();
         com.customblocks.core.SnapshotManager.start(CustomBlocksConfig.autoSnapshotMinutes);
 
@@ -730,6 +833,17 @@ public class CustomBlocksMod implements ModInitializer {
 
         return SLOT_ITEMS[index];
 
+    }
+
+    /** Safe SLOT_BLOCKS accessor — returns null if index is out of range. */
+    public static SlotBlock safeSlotBlock(int index) {
+        if (SLOT_BLOCKS == null || index < 0 || index >= SLOT_BLOCKS.length || SLOT_BLOCKS[index] == null) return null;
+        return SLOT_BLOCKS[index];
+    }
+
+    /** Returns the registered SLOT_ITEMS length (0 if not yet initialised). */
+    public static int slotRegistrySize() {
+        return SLOT_ITEMS == null ? 0 : SLOT_ITEMS.length;
     }
 
 

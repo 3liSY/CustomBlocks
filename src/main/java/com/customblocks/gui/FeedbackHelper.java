@@ -7,10 +7,13 @@ import net.minecraft.entity.boss.ServerBossBar;
 import net.minecraft.network.packet.s2c.play.SubtitleS2CPacket;
 import net.minecraft.network.packet.s2c.play.TitleFadeS2CPacket;
 import net.minecraft.network.packet.s2c.play.TitleS2CPacket;
+import net.minecraft.particle.ParticleEffect;
 import net.minecraft.particle.ParticleTypes;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.sound.SoundCategory;
+import net.minecraft.sound.SoundEvent;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 
@@ -47,7 +50,8 @@ public final class FeedbackHelper {
         if (CustomBlocksConfig.isSoundCategoryEnabled(CAT_GUI)) {
             player.playSound(SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, 0.6f, 1.25f);
         }
-        if (CustomBlocksConfig.isParticleCategoryEnabled(CAT_GUI) && player.getServerWorld() instanceof ServerWorld sw) {
+        if (CustomBlocksConfig.isParticleCategoryEnabled(CAT_GUI)) {
+            ServerWorld sw = player.getServerWorld();
             sw.spawnParticles(ParticleTypes.ENCHANT,
                     player.getX(), player.getY() + 1.5, player.getZ(),
                     6, 0.3, 0.3, 0.3, 0.05);
@@ -59,7 +63,8 @@ public final class FeedbackHelper {
         if (CustomBlocksConfig.isSoundCategoryEnabled(CAT_SUCCESS)) {
             player.playSound(SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, 0.8f, 1.0f);
         }
-        if (CustomBlocksConfig.isParticleCategoryEnabled(CAT_SUCCESS) && player.getServerWorld() instanceof ServerWorld sw) {
+        if (CustomBlocksConfig.isParticleCategoryEnabled(CAT_SUCCESS)) {
+            ServerWorld sw = player.getServerWorld();
             sw.spawnParticles(ParticleTypes.COMPOSTER,
                     player.getX(), player.getY() + 1.5, player.getZ(),
                     12, 0.4, 0.4, 0.4, 0.02);
@@ -71,7 +76,8 @@ public final class FeedbackHelper {
         if (CustomBlocksConfig.isSoundCategoryEnabled(CAT_SELECTION)) {
             player.playSound(SoundEvents.BLOCK_NOTE_BLOCK_CHIME.value(), 0.85f, 1.0f);
         }
-        if (CustomBlocksConfig.isParticleCategoryEnabled(CAT_SELECTION) && player.getServerWorld() instanceof ServerWorld sw) {
+        if (CustomBlocksConfig.isParticleCategoryEnabled(CAT_SELECTION)) {
+            ServerWorld sw = player.getServerWorld();
             sw.spawnParticles(ParticleTypes.SOUL_FIRE_FLAME,
                     player.getX(), player.getY() + 1.0, player.getZ(),
                     4, 0.2, 0.2, 0.2, 0.01);
@@ -83,7 +89,8 @@ public final class FeedbackHelper {
         if (CustomBlocksConfig.isSoundCategoryEnabled(CAT_ERROR)) {
             player.playSound(SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), 1.0f, 0.7f);
         }
-        if (CustomBlocksConfig.isParticleCategoryEnabled(CAT_ERROR) && player.getServerWorld() instanceof ServerWorld sw) {
+        if (CustomBlocksConfig.isParticleCategoryEnabled(CAT_ERROR)) {
+            ServerWorld sw = player.getServerWorld();
             sw.spawnParticles(ParticleTypes.SMOKE,
                     player.getX(), player.getY() + 1.5, player.getZ(),
                     4, 0.3, 0.3, 0.3, 0.02);
@@ -95,7 +102,8 @@ public final class FeedbackHelper {
         if (CustomBlocksConfig.isSoundCategoryEnabled(CAT_ERROR)) {
             player.playSound(SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), 1.0f, 0.5f);
         }
-        if (CustomBlocksConfig.isParticleCategoryEnabled(CAT_ERROR) && player.getServerWorld() instanceof ServerWorld sw) {
+        if (CustomBlocksConfig.isParticleCategoryEnabled(CAT_ERROR)) {
+            ServerWorld sw = player.getServerWorld();
             sw.spawnParticles(ParticleTypes.LARGE_SMOKE,
                     player.getX(), player.getY() + 1.5, player.getZ(),
                     12, 0.4, 0.4, 0.4, 0.02);
@@ -107,7 +115,8 @@ public final class FeedbackHelper {
         if (CustomBlocksConfig.isSoundCategoryEnabled(CAT_SUCCESS)) {
             player.playSound(SoundEvents.ENTITY_PLAYER_LEVELUP, 0.6f, 1.4f);
         }
-        if (CustomBlocksConfig.isParticleCategoryEnabled(CAT_SUCCESS) && player.getServerWorld() instanceof ServerWorld sw) {
+        if (CustomBlocksConfig.isParticleCategoryEnabled(CAT_SUCCESS)) {
+            ServerWorld sw = player.getServerWorld();
             sw.spawnParticles(ParticleTypes.ENCHANT,
                     player.getX(), player.getY() + 1.5, player.getZ(),
                     4, 0.2, 0.2, 0.2, 0.05);
@@ -118,7 +127,8 @@ public final class FeedbackHelper {
         if (CustomBlocksConfig.isSoundCategoryEnabled(CAT_BULK_COMPLETE)) {
             player.playSound(SoundEvents.BLOCK_BEACON_ACTIVATE, 0.8f, 1.0f);
         }
-        if (CustomBlocksConfig.isParticleCategoryEnabled(CAT_BULK_COMPLETE) && player.getServerWorld() instanceof ServerWorld sw) {
+        if (CustomBlocksConfig.isParticleCategoryEnabled(CAT_BULK_COMPLETE)) {
+            ServerWorld sw = player.getServerWorld();
             sw.spawnParticles(ParticleTypes.HAPPY_VILLAGER,
                 player.getX(), player.getY() + 1.2, player.getZ(),
                 10, 0.35, 0.35, 0.35, 0.02);
@@ -130,7 +140,8 @@ public final class FeedbackHelper {
         if (CustomBlocksConfig.isSoundCategoryEnabled(CAT_RP_REGENERATE)) {
             player.playSound(SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, 0.35f, 1.15f);
         }
-        if (CustomBlocksConfig.isParticleCategoryEnabled(CAT_RP_REGENERATE) && player.getServerWorld() instanceof ServerWorld sw) {
+        if (CustomBlocksConfig.isParticleCategoryEnabled(CAT_RP_REGENERATE)) {
+            ServerWorld sw = player.getServerWorld();
             sw.spawnParticles(ParticleTypes.ENCHANT,
                 player.getX(), player.getY() + 1.2, player.getZ(),
                 4, 0.25, 0.25, 0.25, 0.03);
@@ -195,6 +206,18 @@ public final class FeedbackHelper {
     public static void clearBossBar(ServerPlayerEntity player) {
         ServerBossBar old = ACTIVE_BARS.remove(player.getUuid());
         if (old != null) old.removePlayer(player);
+    }
+
+    public static void playSound(ServerPlayerEntity player, SoundEvent sound, float volume, float pitch) {
+        if (player == null || sound == null || !CustomBlocksConfig.soundsEnabled) return;
+        player.getServerWorld().playSound(null, player.getBlockPos(), sound, SoundCategory.PLAYERS, volume, pitch);
+    }
+
+    public static void spawnParticle(ServerPlayerEntity player, ParticleEffect particle, int count) {
+        if (player == null || particle == null || count <= 0 || !CustomBlocksConfig.particlesEnabled) return;
+        ServerWorld sw = player.getServerWorld();
+        sw.spawnParticles(particle, player.getX(), player.getY() + 1.2, player.getZ(),
+            count, 0.25, 0.25, 0.25, 0.03);
     }
 
 }

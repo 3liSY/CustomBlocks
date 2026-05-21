@@ -49,6 +49,23 @@ public final class NetworkManager {
      *  when a broadcastFullSync fires shortly after a join sync. */
     private static final long FULL_SYNC_COOLDOWN_MS = 30_000;
 
+    // ── AnimSettings per-player rate-limiting (DoS protection, item 1.26) ───
+    /** Tracks the last time each player sent an AnimSettingsPayload. */
+    private static final ConcurrentHashMap<UUID, Long> ANIM_SETTINGS_COOLDOWN = new ConcurrentHashMap<>();
+    /** Minimum ms between AnimSettings packets per player. 100ms = max 10/sec. */
+    private static final long ANIM_SETTINGS_COOLDOWN_MS = 100L;
+
+    /**
+     * Call at the top of the AnimSettingsPayload server handler.
+     * Returns {@code true} if the packet is allowed to proceed,
+     * {@code false} if it should be silently discarded (rate-limited).
+     */
+    public static boolean checkAnimSettingsCooldown(UUID playerUuid) {
+        long now = System.currentTimeMillis();
+        Long last = ANIM_SETTINGS_COOLDOWN.put(playerUuid, now);
+        return last == null || (now - last) >= ANIM_SETTINGS_COOLDOWN_MS;
+    }
+
     /**
      * Validate payload size before queueing. Returns true if payload is safe to send.
      * Logs warnings for oversized textures and rejects payloads exceeding hard limit.
@@ -142,11 +159,18 @@ public final class NetworkManager {
             // H4 — bundle variant textures as a JSON array of base64 strings
             String variantsJson = buildVariantsJson(data);
             if (data.texture != null && data.texture.length > 0) {
-                queue.enqueue(new SlotUpdatePayload("add", data.index, data.customId,
-                        data.displayName, data.texture,
-                        data.lightLevel, data.hardness, data.soundType,
-                        null, null, data.animMeta, facesJson, variantsJson));
-                texCount++;
+                // 1.12 Layer 3 — skip drip-feed for huge textures; RP HTTP download handles them
+                if (data.texture.length > MAX_SINGLE_TEXTURE_BYTES) {
+                    LOGGER.warn("[CustomBlocks] 1.12 Layer 3: slot {} texture is {} MB — skipping drip-feed, RP download will serve it",
+                        data.customId, data.texture.length / (1024 * 1024));
+                    nullCount++;
+                } else {
+                    queue.enqueue(new SlotUpdatePayload("add", data.index, data.customId,
+                            data.displayName, data.texture,
+                            data.lightLevel, data.hardness, data.soundType,
+                            null, null, data.animMeta, facesJson, variantsJson));
+                    texCount++;
+                }
             } else {
                 nullCount++;
             }
@@ -154,15 +178,13 @@ public final class NetworkManager {
         LOGGER.info("[CustomBlocks] Drip-feed queued for {}: {} textures ({} with bundled faces), {} null-texture slots",
                 player.getName().getString(), texCount, bundledFaceSlots, nullCount);
 
-        // Sentinel: tells the client that every join texture has been queued.
-        // The client uses this to fire exactly one resource-pack reload instead
-        // of relying on a fixed debounce timer that can fire mid-burst on
-        // slower internet connections, causing cascading reloads and a disconnect.
-        // The server hash is embedded in customId so the client can echo it back
-        // on the next join — guaranteeing a server-vs-server hash comparison.
+        // 1.20 — Enqueue SyncCompletePayload after all "add" payloads so it arrives
+        // at the client AFTER all textures have been sent (TCP order guaranteed).
+        // Carries exact payload count + SHA-256 manifest for count-verified sync
+        // and per-file integrity checking on subsequent joins.
         String serverHash = SlotManager.computeTextureHash();
-        queue.enqueue(new SlotUpdatePayload("sync_done", -1, serverHash, null,
-                new byte[0], 0, 0f, "stone"));
+        String manifest = computeManifest();
+        queue.enqueueRaw(new SyncCompletePayload(texCount, manifest, serverHash));
     }
 
     /**
@@ -179,6 +201,8 @@ public final class NetworkManager {
     /** Max bytes of texture data to send per player per tick. Prevents saturating
      *  the game socket on shared hosting with limited bandwidth. */
     private static final int BYTES_PER_TICK_BUDGET = 512 * 1024; // 512KB (Phase 5)
+    /** 1.12 Layer 3 — Skip drip-feed for textures over this size; let the RP HTTP download handle them. */
+    private static final int MAX_SINGLE_TEXTURE_BYTES = 2 * 1024 * 1024; // 2 MB
 
     /**
      * Called every server tick. Drains pending payloads and sends them,
@@ -192,11 +216,13 @@ public final class NetworkManager {
             java.util.UUID uid = player.getUuid();
 
             // Fix 12: Traffic shaping — if this player is in cooldown, decrement and skip
-            Integer cooldown = COOLDOWN_TICKS.get(uid);
-            if (cooldown != null && cooldown > 0) {
-                COOLDOWN_TICKS.put(uid, cooldown - 1);
-                continue;
-            }
+            // 7.9 — use compute for atomic decrement (get+put on ConcurrentHashMap is not atomic)
+            boolean[] inCooldown = {false};
+            COOLDOWN_TICKS.compute(uid, (k, cooldown) -> {
+                if (cooldown != null && cooldown > 0) { inCooldown[0] = true; return cooldown - 1; }
+                return cooldown;
+            });
+            if (inCooldown[0]) continue;
 
             TextureQueue queue = PLAYER_QUEUES.get(uid);
             if (queue == null || queue.isEmpty()) continue;
@@ -249,6 +275,7 @@ public final class NetworkManager {
         if (queue != null) queue.clear();
         LAST_FULL_SYNC.remove(player.getUuid());
         COOLDOWN_TICKS.remove(player.getUuid());
+        ANIM_SETTINGS_COOLDOWN.remove(player.getUuid()); // 1.26 — prevent memory leak
     }
 
     /**
@@ -274,8 +301,9 @@ public final class NetworkManager {
                 ServerPlayNetworking.send(player, new FullSyncPayload(entries, tabIcon,
                         com.customblocks.CustomBlocksConfig.maxSlots));
                 TextureQueue queue = getOrCreateQueue(player);
-                queue.enqueue(new SlotUpdatePayload("sync_done", -1, serverHash, null,
-                        new byte[0], 0, 0f, "stone"));
+                // 1.20 — hash match: 0 texture payloads sent, but still send manifest for integrity checks
+                String manifest0 = computeManifest();
+                queue.enqueueRaw(new SyncCompletePayload(0, manifest0, serverHash));
                 return;
             }
 
@@ -318,11 +346,17 @@ public final class NetworkManager {
                             facesJson = fj.toString();
                         }
                         String variantsJson = buildVariantsJson(data);
-                        queue.enqueue(new SlotUpdatePayload("add", data.index, data.customId,
-                                data.displayName, data.texture,
-                                data.lightLevel, data.hardness, data.soundType,
-                                null, null, data.animMeta, facesJson, variantsJson));
-                        deltaCount++;
+                        // 1.12 Layer 3 — skip drip-feed for huge textures
+                        if (data.texture.length > MAX_SINGLE_TEXTURE_BYTES) {
+                            LOGGER.warn("[CustomBlocks] 1.12 Layer 3: slot {} texture is {} MB — skipping delta drip-feed",
+                                data.customId, data.texture.length / (1024 * 1024));
+                        } else {
+                            queue.enqueue(new SlotUpdatePayload("add", data.index, data.customId,
+                                    data.displayName, data.texture,
+                                    data.lightLevel, data.hardness, data.soundType,
+                                    null, null, data.animMeta, facesJson, variantsJson));
+                            deltaCount++;
+                        }
                     }
 
                     // Also send "remove" for slots client knows but server no longer has
@@ -336,12 +370,12 @@ public final class NetworkManager {
                     }
 
                     String serverHash2 = SlotManager.computeTextureHash();
-                    queue.enqueue(new SlotUpdatePayload("sync_done", -1, serverHash2, null,
-                            new byte[0], 0, 0f, "stone"));
+                    String manifest2 = computeManifest();
+                    queue.enqueueRaw(new SyncCompletePayload(deltaCount, manifest2, serverHash2));
                     LOGGER.info("[CustomBlocks] N3 delta sync for {}: {} slots changed (of {} total), {} client-had",
                             player.getName().getString(), deltaCount, serverSlots.size(), clientSlots.size());
                     return;
-                } catch (Exception ex) {
+                } catch (RuntimeException ex) {
                     LOGGER.warn("[CustomBlocks] N3 delta parse failed for {}, falling back to full sync: {}",
                             player.getName().getString(), ex.getMessage());
                 }
@@ -451,6 +485,30 @@ public final class NetworkManager {
             ja.add(java.util.Base64.getEncoder().encodeToString(v));
         }
         return ja.toString();
+    }
+
+    /**
+     * 1.20 — Compute a SHA-256 manifest of all slots that have a texture.
+     * Returns a JSON string: {"slotCustomId": "sha256hex", ...}
+     * Sent inside {@link SyncCompletePayload} so the client can verify
+     * per-file integrity on subsequent joins.
+     */
+    static String computeManifest() {
+        com.google.gson.JsonObject jo = new com.google.gson.JsonObject();
+        try {
+            java.security.MessageDigest sha256 = java.security.MessageDigest.getInstance("SHA-256");
+            for (SlotData data : SlotManager.allSlots()) {
+                if (data.texture == null || data.texture.length == 0) continue;
+                sha256.reset();
+                byte[] hashBytes = sha256.digest(data.texture);
+                StringBuilder sb = new StringBuilder();
+                for (byte b : hashBytes) sb.append(String.format("%02x", b));
+                jo.addProperty(data.customId, sb.toString());
+            }
+        } catch (java.security.NoSuchAlgorithmException e) {
+            LOGGER.error("[CustomBlocks] SHA-256 not available for manifest computation", e);
+        }
+        return jo.toString();
     }
 
 }

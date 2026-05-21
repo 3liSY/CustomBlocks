@@ -1,5 +1,6 @@
 package com.customblocks.network;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.packet.CustomPayload;
@@ -17,6 +18,7 @@ import net.minecraft.util.Identifier;
  * Metadata fields (action, customId, etc.) are only meaningful on chunk 0;
  * subsequent chunks carry empty/default metadata to save bandwidth.
  */
+@SuppressFBWarnings({"EI_EXPOSE_REP", "EI_EXPOSE_REP2"})
 public record ChunkedTexturePayload(
         String transferId,    // unique UUID per transfer
         int    chunkIndex,    // 0-based piece index

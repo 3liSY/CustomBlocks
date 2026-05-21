@@ -91,16 +91,10 @@ public record GuiState(
         return new GuiState(GuiMode.TAB_ICON_MENU, null, 0, false, 0, false);
     }
 
-    public static GuiState findPortGui() {
-        return new GuiState(GuiMode.FIND_PORT_GUI, null, 0, false, 0, false);
-    }
+    // FIND_PORT_GUI, ASSISTANT_CONTROL — factories removed; modes reserved but not reachable yet.
 
     public static GuiState resourceCenter() {
         return new GuiState(GuiMode.RESOURCE_CENTER, null, 0, false, 0, false);
-    }
-
-    public static GuiState assistantControl() {
-        return new GuiState(GuiMode.ASSISTANT_CONTROL, null, 0, false, 0, false);
     }
 
     public static GuiState bulkDelete(int page) {
@@ -192,6 +186,11 @@ public record GuiState(
         return new GuiState(GuiMode.SORT_BLOCKS_MENU, categoryKey, 0, false, 0, false);
     }
 
+    /** 1.27 — global picker sort menu; returnPage stored in {@link #page()}. */
+    public static GuiState pickerSort(int returnPage) {
+        return new GuiState(GuiMode.SORT_BLOCKS_MENU, "__picker_sort__", returnPage, false, 0, false);
+    }
+
     public static GuiState categoryStats(String categoryKey) {
         return new GuiState(GuiMode.CATEGORY_STATS, categoryKey, 0, false, 0, false);
     }
@@ -226,9 +225,7 @@ public record GuiState(
         return new GuiState(GuiMode.FEATURE_MENU, null, tab, false, 0, false);
     }
 
-    public static GuiState permissionsSummary() {
-        return new GuiState(GuiMode.PERMISSIONS_SUMMARY, null, 0, false, 0, false);
-    }
+    // PERMISSIONS_SUMMARY (Phase A6) — factory removed; mode reserved but not reachable yet.
 
     /** K2 — usage statistics dashboard. */
     public static GuiState statsGui() {
@@ -259,6 +256,91 @@ public record GuiState(
     public static GuiState marketGui(int page) {
         return new GuiState(GuiMode.MARKET_GUI, null, page, false, 0, false);
     }
+
+    /** Phase 2 — Bulk operations hub. */
+    public static GuiState bulkHub() {
+        return new GuiState(GuiMode.BULK_HUB, null, 0, false, 0, false);
+    }
+
+    /** Phase 2 — Bulk op picker. editingId = operation key, page = current page. */
+    public static GuiState bulkOpPicker(String opId, int page) {
+        return new GuiState(GuiMode.BULK_OP_PICKER, opId, page, false, 0, false);
+    }
+
+    /**
+     * Phase 3.1 — Color Library picker.
+     * editingId = context string (e.g. "triangle", "square", "recolor:<blockId>").
+     * page = not used (always 0).
+     */
+    public static GuiState colorPicker(String context) {
+        return new GuiState(GuiMode.COLOR_PICKER, context, 0, false, 0, false);
+    }
+
+    /** 5.25 — Voice Mode Picker GUI. */
+    public static GuiState voicePicker() {
+        return new GuiState(GuiMode.VOICE_PICKER, null, 0, false, 0, false);
+    }
+
+    /** Feature Menu shortcut — favorited blocks list. page = current page index. */
+    public static GuiState favoritesGui(int page) {
+        return new GuiState(GuiMode.FAVORITES_GUI, null, page, false, 0, false);
+    }
+
+    /** Feature Menu shortcut — recently-edited blocks (no pagination). */
+    public static GuiState recentGui() {
+        return new GuiState(GuiMode.RECENT_GUI, null, 0, false, 0, false);
+    }
+
+    // DRESS_GUI (3.3), GRADIENT_GUI (3.4), IMPORT_WIZARD (4A.6), RETEXTURE_WIZARD (4A.7)
+    // — factories removed; modes reserved but not reachable yet.
+
+    /** Phase 9.2 — Safety Center. */
+    public static GuiState safetyCenter() {
+        return new GuiState(GuiMode.SAFETY_CENTER, null, 0, false, 0, false);
+    }
+
+    /** Phase 9.3 — History GUI. page = current page index. */
+    public static GuiState historyGui(int page) {
+        return new GuiState(GuiMode.HISTORY_GUI, null, page, false, 0, false);
+    }
+
+    /** Phase 10.1 — Script GUI. page = current page index. */
+    public static GuiState scriptGui(int page) {
+        return new GuiState(GuiMode.SCRIPT_GUI, null, page, false, 0, false);
+    }
+
+    /** Phase 10.1 — Script summary. editingId = script name. page = step count. */
+    public static GuiState scriptSummary(String scriptName, int stepCount) {
+        return new GuiState(GuiMode.SCRIPT_SUMMARY, scriptName, stepCount, false, 0, false);
+    }
+
+    /** Phase 10.3 — Cache Dashboard. page = tab index (0-4). */
+    public static GuiState cacheDashboard(int tab) {
+        return new GuiState(GuiMode.CACHE_DASHBOARD, null, tab, false, 0, false);
+    }
+
+    /** Phase 10.4 — Audit GUI. page = current page index. */
+    public static GuiState auditGui(int page) {
+        return new GuiState(GuiMode.AUDIT_GUI, null, page, false, 0, false);
+    }
+
+    /** Phase 11.1 — AI Gen prompt. editingId = description typed so far (null if fresh). */
+    public static GuiState aiGen(String description) {
+        return new GuiState(GuiMode.AI_GEN, description, 0, false, 0, false);
+    }
+
+    // AI_PICKER (Phase 11.1) — factory removed; GuiMode.AI_PICKER is reserved but not reachable yet.
+
+    /** Phase 11.2 — Custom Color Studio. editingId = current hex string (without #). */
+    public static GuiState customColorStudio(String hex) {
+        return new GuiState(GuiMode.CUSTOM_COLOR_STUDIO, hex, 0, false, 0, false);
+    }
+
+    public static GuiState achievementsGui(int page) {
+        return new GuiState(GuiMode.ACHIEVEMENTS_GUI, null, page, false, 0, false);
+    }
+
+    // DROP_CONFIG (Phase 12.2) — factory removed; mode reserved but not reachable yet.
 
     // Mutation (returns new instance)
 

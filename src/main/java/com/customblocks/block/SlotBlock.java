@@ -141,6 +141,47 @@ public class SlotBlock extends Block {
         super.onStateReplaced(state, world, pos, newState, moved);
     }
 
+    /** Phase 12.2 — honour drop-mode override when block is broken. */
+    @Override
+    public void afterBreak(World world, PlayerEntity player, BlockPos pos, BlockState state,
+                           @org.jetbrains.annotations.Nullable net.minecraft.block.entity.BlockEntity blockEntity,
+                           ItemStack tool) {
+        SlotData d = SlotManager.getBySlot(slotKey);
+        String blockId = d != null ? d.customId : null;
+        com.customblocks.core.DropConfigManager.DropMode mode = blockId != null
+            ? com.customblocks.core.DropConfigManager.getConfig(blockId).mode()
+            : com.customblocks.core.DropConfigManager.DropMode.SELF;
+        switch (mode) {
+            case SELF -> super.afterBreak(world, player, pos, state, blockEntity, tool);
+            case STONE_LIKE -> {
+                player.incrementStat(net.minecraft.stat.Stats.MINED.getOrCreateStat(this));
+                player.addExhaustion(0.005f);
+                if (!world.isClient)
+                    net.minecraft.block.Block.dropStack(world, pos, new ItemStack(net.minecraft.item.Items.COBBLESTONE));
+            }
+            case WOOD_LIKE -> {
+                player.incrementStat(net.minecraft.stat.Stats.MINED.getOrCreateStat(this));
+                player.addExhaustion(0.005f);
+                if (!world.isClient)
+                    net.minecraft.block.Block.dropStack(world, pos, new ItemStack(net.minecraft.item.Items.OAK_LOG));
+            }
+            case EXPERIENCE -> {
+                player.incrementStat(net.minecraft.stat.Stats.MINED.getOrCreateStat(this));
+                player.addExhaustion(0.005f);
+                if (!world.isClient)
+                    net.minecraft.entity.ExperienceOrbEntity.spawn(
+                        (net.minecraft.server.world.ServerWorld) world,
+                        net.minecraft.util.math.Vec3d.ofCenter(pos),
+                        world.random.nextBetween(1, 3));
+            }
+            case NOTHING -> {
+                player.incrementStat(net.minecraft.stat.Stats.MINED.getOrCreateStat(this));
+                player.addExhaustion(0.005f);
+                // no drop
+            }
+        }
+    }
+
     /** Build VoxelShape from slot shape boxes. */
     private static VoxelShape buildVoxelShape(String slotKey) {
         SlotData d = SlotManager.getBySlot(slotKey);

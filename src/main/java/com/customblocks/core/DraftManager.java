@@ -1,5 +1,6 @@
 package com.customblocks.core;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -67,6 +68,7 @@ public final class DraftManager {
         SESSION_SHELL
     }
 
+    @SuppressFBWarnings({"EI_EXPOSE_REP", "EI_EXPOSE_REP2"})
     public record Draft(UUID playerId, Kind kind, Map<String, Object> payload, long createdAt) {}
 
     private static final ConcurrentHashMap<UUID, Draft> ACTIVE = new ConcurrentHashMap<>();

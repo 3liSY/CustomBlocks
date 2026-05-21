@@ -8,7 +8,11 @@ const RATE_LIMIT_MAX    = 10;   // max shares per window
 const RATE_LIMIT_WINDOW = 60;   // seconds
 const META_PREFIX       = "meta:";
 const RL_PREFIX         = "rl:";
+const PACK_RL_PREFIX    = "rl-pack:";
+const PACK_RL_MAX       = 20;   // max pack uploads per window (generous for legit server use)
+const PACK_RL_WIN       = 60;   // seconds
 const MARKET_PAGE_SIZE  = 20;
+const PACK_TTL          = 7 * 86400; // R.32: 7-day TTL so idle servers keep delivering
 
 function json(data, status = 200, extra = {}) {
   return new Response(JSON.stringify(data), {
@@ -29,27 +33,32 @@ function ip(request) {
   );
 }
 
-/** Returns true if the request is rate-limited; updates the KV counter. */
-async function checkRateLimit(env, clientIp) {
-  const key = RL_PREFIX + clientIp;
-  const raw = await env.BLOCKS.get(key);
+/**
+ * Returns true if the request is rate-limited; updates the KV counter.
+ * key       — full KV key (caller builds it: prefix + clientIp)
+ * max       — max requests allowed in window
+ * windowSecs — window length in seconds
+ */
+async function checkRateLimit(env, key, max, windowSecs) {
+  let raw;
+  try { raw = await env.BLOCKS.get(key); } catch { return false; } // 7.50 — KV errors don't block requests
   const now = Math.floor(Date.now() / 1000);
 
   if (raw) {
     const rl = JSON.parse(raw);
     if (now < rl.reset) {
-      if (rl.count >= RATE_LIMIT_MAX) return true; // limited
+      if (rl.count >= max) return true; // limited
       await env.BLOCKS.put(key, JSON.stringify({ count: rl.count + 1, reset: rl.reset }), {
         expirationTtl: rl.reset - now + 1,
       });
       return false;
     }
-    // window expired -- fall through to fresh window
+    // window expired — fall through to fresh window
   }
 
   // fresh window
-  await env.BLOCKS.put(key, JSON.stringify({ count: 1, reset: now + RATE_LIMIT_WINDOW }), {
-    expirationTtl: RATE_LIMIT_WINDOW + 5,
+  await env.BLOCKS.put(key, JSON.stringify({ count: 1, reset: now + windowSecs }), {
+    expirationTtl: windowSecs + 5,
   });
   return false;
 }
@@ -68,8 +77,65 @@ export default {
       return json({
         ok: true,
         service: "CustomBlocks Cloud Vault v2",
-        endpoints: ["GET /", "POST /share", "GET /share/:hash", "GET /market"],
+        endpoints: ["GET /", "POST /share", "GET /share/:hash", "GET /market", "POST /pack", "GET /pack.zip"],
         rateLimit: `${RATE_LIMIT_MAX} shares / ${RATE_LIMIT_WINDOW}s per IP`,
+      });
+    }
+
+    // POST /pack — upload resource pack ZIP (authenticated by shared secret)
+    if (request.method === "POST" && url.pathname === "/pack") {
+      // R.30: timing-safe secret comparison to prevent timing-oracle attacks
+      const authHeader = request.headers.get("x-pack-secret");
+      if (!authHeader || !env.PACK_SECRET) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+      const encoder = new TextEncoder();
+      const authBytes = encoder.encode(authHeader);
+      const secretBytes = encoder.encode(env.PACK_SECRET);
+      const authed = authBytes.byteLength === secretBytes.byteLength
+        && crypto.subtle.timingSafeEqual(authBytes, secretBytes);
+      if (!authed) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+
+      // R.31: rate-limit pack uploads per IP (prevents abuse from leaked secrets)
+      const clientIp = ip(request);
+      const limited = await checkRateLimit(env, PACK_RL_PREFIX + clientIp, PACK_RL_MAX, PACK_RL_WIN);
+      if (limited) {
+        return json(
+          { error: "Rate limit exceeded", retryAfter: PACK_RL_WIN },
+          429,
+          { "retry-after": String(PACK_RL_WIN) }
+        );
+      }
+
+      const body = await request.arrayBuffer();
+      if (body.byteLength > 20 * 1024 * 1024) {
+        return json({ error: "Pack too large" }, 413);
+      }
+      const hash = request.headers.get("x-pack-hash") || "latest";
+      // R.32: 7-day TTL so the pack survives server downtime up to a week
+      await env.BLOCKS.put("pack:latest", body, {
+        expirationTtl: PACK_TTL,
+        metadata: { hash, updatedAt: new Date().toISOString() },
+      });
+      return json({ ok: true, url: `https://${url.hostname}/pack.zip` }, 201);
+    }
+
+    // GET /pack.zip — serve resource pack to Minecraft clients
+    if (request.method === "GET" && url.pathname === "/pack.zip") {
+      let data;
+      try { data = await env.BLOCKS.getWithMetadata("pack:latest", { type: "arrayBuffer" }); }
+      catch { return json({ error: "Storage unavailable" }, 503); } // 7.50
+      if (!data || !data.value) return new Response("No pack uploaded yet", { status: 404 });
+      return new Response(data.value, {
+        status: 200,
+        headers: {
+          "content-type": "application/zip",
+          "content-disposition": "attachment; filename=\"pack.zip\"",
+          "x-pack-hash": data.metadata?.hash || "",
+          ...CORS_HEADERS,
+        },
       });
     }
 
@@ -77,7 +143,7 @@ export default {
     if (request.method === "POST" && url.pathname === "/share") {
       // Rate-limit check
       const clientIp = ip(request);
-      const limited = await checkRateLimit(env, clientIp);
+      const limited = await checkRateLimit(env, RL_PREFIX + clientIp, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW);
       if (limited) {
         return json(
           { error: "Rate limit exceeded", retryAfter: RATE_LIMIT_WINDOW },
@@ -121,7 +187,9 @@ export default {
       const hash = decodeURIComponent(url.pathname.slice("/share/".length)).trim();
       if (!hash) return json({ error: "Missing hash" }, 400);
 
-      const stored = await env.BLOCKS.get(hash);
+      let stored;
+      try { stored = await env.BLOCKS.get(hash); }
+      catch { return json({ error: "Storage unavailable" }, 503); } // 7.50
       if (!stored) return json({ error: "Not found" }, 404);
 
       return new Response(stored, {
@@ -146,7 +214,8 @@ export default {
 
       const entries = await Promise.all(
         listed.keys.map(async (k) => {
-          const raw = await env.BLOCKS.get(k.name);
+          let raw;
+          try { raw = await env.BLOCKS.get(k.name); } catch { return null; } // 7.50
           if (!raw) return null;
           try { return JSON.parse(raw); } catch { return null; }
         })

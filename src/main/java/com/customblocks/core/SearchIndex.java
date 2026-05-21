@@ -86,4 +86,14 @@ public final class SearchIndex {
                 .toList();
     }
 
+    /**
+     * Phase 4.1 — Filter with full SearchFilter support.
+     * Parses structured tokens (category:, animated:, glow:, etc.) and bare text.
+     */
+    public static List<SlotData> search(String query, UUID playerUuid) {
+        SearchFilter filter = SearchFilter.parse(query, playerUuid);
+        List<SlotData> all = SlotManager.sortedSlots();
+        return filter.apply(all);
+    }
+
 }

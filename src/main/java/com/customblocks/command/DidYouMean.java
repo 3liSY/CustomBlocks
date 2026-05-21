@@ -36,19 +36,33 @@ public final class DidYouMean {
 
     private DidYouMean() {}
 
+    public static void onPlayerDisconnect(UUID uuid) {
+        LAST_SUGGESTED.remove(uuid);
+    }
+
     /**
      * Appends greedy catch-all branch as the last sibling (must remain after all literals).
+     * Always added regardless of didYouMeanMode so Minecraft never leaks raw
+     * internal argument names (e.g. "[<__cb_unknown_tail>]") to the player.
+     * When mode is "off", shows a plain "unknown command" error instead of a suggestion.
      */
     public static LiteralArgumentBuilder<ServerCommandSource> appendFallbackBranch(
             LiteralArgumentBuilder<ServerCommandSource> root
     ) {
-        if ("off".equalsIgnoreCase(CustomBlocksConfig.normalizeDidYouMeanMode(CustomBlocksConfig.didYouMeanMode))) {
-            return root;
-        }
-        return root.then(CommandManager.argument("__cb_unknown_tail", StringArgumentType.greedyString())
+        return root.then(CommandManager.argument("unknown_cb_tail", StringArgumentType.greedyString())
             .requires(PermissionHelper::canUse)
-            .executes(ctx -> handleUnknown(ctx.getSource(),
-                StringArgumentType.getString(ctx, "__cb_unknown_tail"))));
+            .executes(ctx -> {
+                String typed = StringArgumentType.getString(ctx, "unknown_cb_tail");
+                String mode = CustomBlocksConfig.normalizeDidYouMeanMode(CustomBlocksConfig.didYouMeanMode);
+                if (!"off".equals(mode)) {
+                    return handleUnknown(ctx.getSource(), typed);
+                }
+                // DYM disabled — still show a friendly error, never a raw arg label
+                ChatHelper.error(ctx.getSource(),
+                    "§cUnknown command: §f/cb " + (typed != null ? typed.trim() : "") +
+                    "\n§7Type §f/cb help§7 to see all available commands.");
+                return 0;
+            }));
     }
 
     public static LinkedHashSet<String> subcommandCandidates() {
@@ -128,7 +142,7 @@ public final class DidYouMean {
 
     private static String pickBest(String mode, String typed, LinkedHashSet<String> cands,
                                    ServerPlayerEntity player) {
-        int maxDist = "strict".equals(mode) ? 1 : ("smart".equals(mode) || "genius".equals(mode)) ? 3 : 3;
+        int maxDist = "strict".equals(mode) ? 1 : 3;
 
         UUID uuid = player != null ? player.getUuid() : null;
         String last = uuid != null ? LAST_SUGGESTED.get(uuid) : null;

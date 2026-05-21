@@ -22,13 +22,13 @@ public final class ColorPickerHelper {
         float min = Math.min(rf, Math.min(gf, bf));
         float h = 0, s, l = (max + min) / 2f;
 
-        if (max == min) {
+        if (max - min < 1e-6f) {
             s = 0; // achromatic
         } else {
             float d = max - min;
             s = l > 0.5f ? d / (2f - max - min) : d / (max + min);
-            if (max == rf) h = (gf - bf) / d + (gf < bf ? 6f : 0f);
-            else if (max == gf) h = (bf - rf) / d + 2f;
+            if (Math.abs(max - rf) < 1e-6f) h = (gf - bf) / d + (gf < bf ? 6f : 0f);
+            else if (Math.abs(max - gf) < 1e-6f) h = (bf - rf) / d + 2f;
             else h = (rf - gf) / d + 4f;
             h /= 6f;
         }

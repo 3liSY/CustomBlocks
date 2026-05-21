@@ -1,5 +1,6 @@
 package com.customblocks.client.gui;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import com.customblocks.network.AnimSettingsPayload;
 import com.google.gson.*;
 import net.fabricmc.api.EnvType;
@@ -17,6 +18,7 @@ import net.minecraft.text.Text;
  * Opens when a player right-clicks any animated CustomBlock (GIF/APNG/animated).
  */
 @Environment(EnvType.CLIENT)
+@SuppressFBWarnings("URF_UNREAD_FIELD")
 public class AnimBlockScreen extends Screen {
 
     // ── Data ──────────────────────────────────────────────────────────────────
@@ -104,7 +106,7 @@ public class AnimBlockScreen extends Screen {
                 for (int i = 0; i < frameCount; i++) frameTimes[i] = frametime;
                 targetFps = Math.round((20.0f / frametime) * 10) / 10.0f;
             }
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             frameTimes  = new int[Math.max(1, frameCount)];
             for (int i = 0; i < frameTimes.length; i++) frameTimes[i] = 2;
             targetFps   = 10.0f;

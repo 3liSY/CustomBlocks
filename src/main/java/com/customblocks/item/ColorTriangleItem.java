@@ -4,6 +4,7 @@ import com.customblocks.CustomBlocksMod;
 import com.customblocks.CustomBlocksConfig;
 import com.customblocks.command.PermissionHelper;
 import com.customblocks.gui.ChatHelper;
+import com.customblocks.core.ColorNames;
 import com.customblocks.core.SlotData;
 import com.customblocks.core.SlotManager;
 import com.customblocks.core.UndoManager;
@@ -34,7 +35,10 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Queue;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Right-click any CustomBlock to create a new colour variant of it.
@@ -58,11 +62,28 @@ public class ColorTriangleItem extends Item {
     private final int    targetR, targetG, targetB;
     private final String colorName;
 
-    /** Known colours used in block IDs — kept in sync with ColorSquareItem. */
-    private static final String[] COLOR_NAMES = { "black", "yellow", "green" };
+    /**
+     * All 16 canonical color family names — kept in sync with {@link ColorNames#FAMILY_NAMES}.
+     * Used for stripping existing color segments from block IDs and display names.
+     */
+    private static final String[] COLOR_NAMES =
+        ColorNames.FAMILY_NAMES.toArray(new String[0]);
 
-    /** Per-channel tolerance for background detection. */
-    private static final int TOLERANCE = 35;
+    // ── 3.6 Per-player flood-fill tolerance ──────────────────────────────────
+    /** Default per-channel tolerance for background detection.
+     *  Falls back to {@link CustomBlocksConfig#bgRemovalTolerance} if &gt; 0, else 35. */
+    public static final int DEFAULT_TOLERANCE = 35;
+    /** Per-player overrides set via /cb tolerance. Range 10–80. */
+    public static final Map<UUID, Integer> PLAYER_TOLERANCE = new ConcurrentHashMap<>();
+
+    /** Resolve effective tolerance for a player (uses config default if no override). */
+    public static int effectiveTolerance(UUID playerUuid) {
+        if (PLAYER_TOLERANCE.containsKey(playerUuid)) {
+            return PLAYER_TOLERANCE.get(playerUuid);
+        }
+        int cfg = CustomBlocksConfig.bgRemovalTolerance;
+        return (cfg > 0) ? cfg : DEFAULT_TOLERANCE;
+    }
     /** Mode B safety: skip trapped regions larger than this fraction of texture pixels. */
     private static final double MAX_TRAPPED_HOLE_FRACTION = 0.28d;
 
@@ -141,6 +162,17 @@ public class ColorTriangleItem extends Item {
 
         SlotData source = SlotManager.getBySlot(sb.getSlotKey());
         if (source == null) return ActionResult.PASS;
+
+        // ── 3.5 Shift+right-click → open block editor for inspection ─────────
+        // Phase 3.5 recolor-preview GUI is not yet implemented.
+        // For now, shift+right-click opens the full editor so the player can inspect the block
+        // before deciding to recolor it. When Phase 3.5 is built, replace openEditor() here
+        // with GuiManager.openRecolorPreviewGui(player, source, resolveColor(ctx.getStack())).
+        if (player != null && player.isSneaking()) {
+            com.customblocks.gui.GuiManager.openEditor((net.minecraft.server.network.ServerPlayerEntity) player, source.customId, 0);
+            return ActionResult.SUCCESS;
+        }
+
         TriangleColor color = resolveColor(ctx.getStack());
 
         byte[] workTexture = source.texture;
@@ -178,8 +210,8 @@ public class ColorTriangleItem extends Item {
         SlotData existing = SlotManager.getById(newId);
         if (existing != null) {
             if (player != null) {
-                player.getInventory().insertStack(
-                    new ItemStack(CustomBlocksMod.SLOT_ITEMS[existing.index]));
+                SlotBlock.SlotItem existingItem = CustomBlocksMod.safeSlotItem(existing.index);
+                if (existingItem != null) player.getInventory().insertStack(new ItemStack(existingItem));
                 player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_triangle_variant_exists", existing.displayName)), true);
                 if (world instanceof ServerWorld sw) {
                     sw.spawnParticles(net.minecraft.particle.ParticleTypes.GLOW, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 5, 0.2, 0.2, 0.2, 0.05);
@@ -201,11 +233,14 @@ public class ColorTriangleItem extends Item {
         SlotData finalSrc = source;
         PlayerEntity         fp      = player;
         int fR = color.r(), fG = color.g(), fB = color.b();
+        // 3.6 — capture per-player tolerance before entering the background thread
+        int fTolerance = (fp != null) ? effectiveTolerance(fp.getUuid())
+                                      : (CustomBlocksConfig.bgRemovalTolerance > 0 ? CustomBlocksConfig.bgRemovalTolerance : DEFAULT_TOLERANCE);
 
         Thread t = new Thread(() -> {
             try {
                 System.setProperty("java.awt.headless", "true");
-                byte[] newTexture = recolourBackground(finalTex, fR, fG, fB, CustomBlocksConfig.useTrappedHoleFill());
+                byte[] newTexture = recolourBackground(finalTex, fR, fG, fB, CustomBlocksConfig.useTrappedHoleFill(), fTolerance);
 
                 server.execute(() -> {
                     if (SlotManager.freeSlots() == 0) {
@@ -233,8 +268,8 @@ public class ColorTriangleItem extends Item {
 
                     // Give the new block to the player
                     if (fp != null) {
-                        fp.getInventory().insertStack(
-                            new ItemStack(CustomBlocksMod.SLOT_ITEMS[newD.index]));
+                        SlotBlock.SlotItem newDItem = CustomBlocksMod.safeSlotItem(newD.index);
+                        if (newDItem != null) fp.getInventory().insertStack(new ItemStack(newDItem));
                         fp.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_triangle_created", newName)), true);
                         
                         ServerWorld sw = (ServerWorld) world;
@@ -263,7 +298,7 @@ public class ColorTriangleItem extends Item {
      * regions reachable from the image border are changed — interior details
      * with a similar colour are never touched.
      */
-    private static byte[] recolourBackground(byte[] src, int newR, int newG, int newB, boolean fillTrapped)
+    private static byte[] recolourBackground(byte[] src, int newR, int newG, int newB, boolean fillTrapped, int tolerance)
             throws Exception {
         BufferedImage img = ImageIO.read(new ByteArrayInputStream(src));
         if (img == null) throw new Exception("Could not decode image");
@@ -285,7 +320,7 @@ public class ColorTriangleItem extends Item {
         // Seed from all 4 corners
         int[][] corners = { {0,0}, {w-1,0}, {0,h-1}, {w-1,h-1} };
         for (int[] c : corners) {
-            if (!visited[c[0]][c[1]] && isBackground(img, c[0], c[1], bgA, bgR, bgG, bgB)) {
+            if (!visited[c[0]][c[1]] && isBackground(img, c[0], c[1], bgA, bgR, bgG, bgB, tolerance)) {
                 visited[c[0]][c[1]] = true;
                 queue.add(c);
             }
@@ -301,7 +336,7 @@ public class ColorTriangleItem extends Item {
                 int nx = x + d[0], ny = y + d[1];
                 if (nx >= 0 && nx < w && ny >= 0 && ny < h
                         && !visited[nx][ny]
-                        && isBackground(img, nx, ny, bgA, bgR, bgG, bgB)) {
+                        && isBackground(img, nx, ny, bgA, bgR, bgG, bgB, tolerance)) {
                     visited[nx][ny] = true;
                     queue.add(new int[]{nx, ny});
                 }
@@ -316,8 +351,15 @@ public class ColorTriangleItem extends Item {
         return baos.toByteArray();
     }
 
+    /** Recolour with a specific tolerance value (3.6 per-player tolerance support). */
+    public static byte[] recolourTexture(byte[] src, int newR, int newG, int newB, boolean fillTrapped, int tolerance) throws Exception {
+        return recolourBackground(src, newR, newG, newB, fillTrapped, tolerance);
+    }
+
+    /** Recolour using the default/config tolerance (backwards-compatible overload). */
     public static byte[] recolourTexture(byte[] src, int newR, int newG, int newB, boolean fillTrapped) throws Exception {
-        return recolourBackground(src, newR, newG, newB, fillTrapped);
+        int tol = CustomBlocksConfig.bgRemovalTolerance > 0 ? CustomBlocksConfig.bgRemovalTolerance : DEFAULT_TOLERANCE;
+        return recolourBackground(src, newR, newG, newB, fillTrapped, tol);
     }
 
     private static void fillTrappedBackgroundRegions(BufferedImage img, boolean[][] visited, int newArgb) {
@@ -391,7 +433,7 @@ public class ColorTriangleItem extends Item {
     }
 
     private static boolean isBackground(BufferedImage img, int x, int y,
-                                        int bgA, int bgR, int bgG, int bgB) {
+                                        int bgA, int bgR, int bgG, int bgB, int tolerance) {
         int px = img.getRGB(x, y);
         int a  = (px >> 24) & 0xFF;
         if (a < 50)  return true;                     // transparent = background
@@ -399,9 +441,9 @@ public class ColorTriangleItem extends Item {
         int r = (px >> 16) & 0xFF;
         int g = (px >> 8)  & 0xFF;
         int b =  px        & 0xFF;
-        return Math.abs(r - bgR) <= TOLERANCE
-            && Math.abs(g - bgG) <= TOLERANCE
-            && Math.abs(b - bgB) <= TOLERANCE;
+        return Math.abs(r - bgR) <= tolerance
+            && Math.abs(g - bgG) <= tolerance
+            && Math.abs(b - bgB) <= tolerance;
     }
 
     // ── ID / name helpers ─────────────────────────────────────────────────────
@@ -419,18 +461,27 @@ public class ColorTriangleItem extends Item {
      * If no colour token is found the original ID is returned unchanged
      * (the new colour will be appended as a suffix by the caller).
      */
+    /**
+     * Strip the FIRST color segment from a block ID, using the full ColorNames vocabulary
+     * (16 families + 40+ aliases).
+     *
+     * Examples:
+     *   "mars_black"      → "mars"
+     *   "28_lam_black"    → "28_lam"
+     *   "black_mars"      → "mars"
+     *   "letter_black_v2" → "letter_v2"
+     *   "marble_crimson"  → "marble"   (alias: crimson → red)
+     */
     private static String stripColorSuffix(String id) {
         id = id.replaceFirst("(?i)_hex_[0-9a-f]{6}$", "");
         String[] segments = id.split("_", -1);
         for (int i = 0; i < segments.length; i++) {
-            for (String c : COLOR_NAMES) {
-                if (segments[i].equalsIgnoreCase(c)) {
-                    // Remove this segment, rejoin the rest
-                    String[] without = new String[segments.length - 1];
-                    System.arraycopy(segments, 0, without, 0, i);
-                    System.arraycopy(segments, i + 1, without, i, segments.length - i - 1);
-                    return String.join("_", without);
-                }
+            if (ColorNames.resolveFamily(segments[i]) != null) {
+                // Remove this segment, rejoin the rest
+                String[] without = new String[segments.length - 1];
+                System.arraycopy(segments, 0, without, 0, i);
+                System.arraycopy(segments, i + 1, without, i, segments.length - i - 1);
+                return String.join("_", without);
             }
         }
         return id; // no colour found — caller will append new colour
@@ -440,12 +491,23 @@ public class ColorTriangleItem extends Item {
         return stripColorSuffix(sourceId) + "_" + colorKey.toLowerCase(Locale.ROOT);
     }
 
-    /** Replaces a known colour word in the display name, or appends the new colour. */
+    /**
+     * Replace a known color word in the display name, or append the new color.
+     * Checks all 16 family names + all 40+ aliases (capitalised and lower-case).
+     */
     private static String deriveDisplayName(String original, String newColorName) {
+        // Check canonical family names first (most common case)
         for (String c : COLOR_NAMES) {
             String cap = Character.toUpperCase(c.charAt(0)) + c.substring(1);
             if (original.contains(cap)) return original.replace(cap, newColorName);
-            if (original.contains(c))   return original.replace(c,   newColorName.toLowerCase());
+            if (original.contains(c))   return original.replace(c,   newColorName.toLowerCase(Locale.ROOT));
+        }
+        // Check aliases (e.g. "Crimson" → replace with new color)
+        for (Map.Entry<String, String> e : ColorNames.ALIAS_MAP.entrySet()) {
+            String alias = e.getKey();
+            String cap   = Character.toUpperCase(alias.charAt(0)) + alias.substring(1);
+            if (original.contains(cap)) return original.replace(cap, newColorName);
+            if (original.contains(alias)) return original.replace(alias, newColorName.toLowerCase(Locale.ROOT));
         }
         return original + " " + newColorName;
     }

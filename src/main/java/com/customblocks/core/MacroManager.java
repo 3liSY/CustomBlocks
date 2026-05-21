@@ -1,5 +1,6 @@
 package com.customblocks.core;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import com.google.gson.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,20 +13,25 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * P1/P2 — Macro system.
+ * P1/P2 — Macro and Script system (unified).
  * <p>
- * A macro is a named, ordered list of {@code /cb} command strings that can be
- * recorded via {@link #startRecording} and replayed via
- * {@link #runMacro}.
+ * Macros and scripts share the same file storage ({@code config/customblocks/macros/}).
+ * Both are ordered lists of {@code /cb} command strings. The distinction is in how
+ * they are created and executed:
+ * <ul>
+ *   <li><b>Macros</b> are recorded live ({@code /cb macro record}) and replayed with
+ *       {@link #runMacro} — steps fire and-forget, no pass/fail tracking.</li>
+ *   <li><b>Scripts</b> are the same files executed via {@code /cb script run} with
+ *       {@link #runScript} — each step is tracked individually and a
+ *       {@link ScriptRunResult} is returned for display in the Script GUI.</li>
+ * </ul>
+ * This merge is intentional: there is no benefit to a separate storage backend when
+ * the file format is identical. A recorded macro IS a runnable script.
  * <p>
  * <b>Recording lifecycle:</b><br>
  * {@code /cb macro record <name>} → startRecording → player is "live-recording"<br>
  * Key command handlers call {@link #record(UUID, String)} when recording is active<br>
- * {@code /cb macro stop} → stopRecording → saves to disk<br>
- * <p>
- * <b>Playback:</b><br>
- * {@code /cb macro run <name>} → loads macro from disk → dispatches each stored command
- * string via {@link net.minecraft.server.command.ServerCommandSource#getServer()}.
+ * {@code /cb macro stop} → stopRecording → saves to disk
  */
 public final class MacroManager {
 
@@ -37,8 +43,22 @@ public final class MacroManager {
     private static final Map<UUID, String> RECORDING = new ConcurrentHashMap<>();
     /** Per-player capture buffer while recording. */
     private static final Map<UUID, List<String>> BUFFER = new ConcurrentHashMap<>();
+    /** Phase 10.1 — tracks last run timestamp (millis) per script name. */
+    private static final Map<String, Long> LAST_RUN = new ConcurrentHashMap<>();
+    /** Phase 10.1 — prevents two scripts running concurrently for the same player. */
+    private static final Set<UUID> ACTIVE_RUNNERS = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** Phase 10.1 — result of a script run. */
+    @SuppressFBWarnings({"EI_EXPOSE_REP", "EI_EXPOSE_REP2"})
+    public record ScriptRunResult(String name, List<String> steps, List<Boolean> passed, int ran, int failed) {}
 
     private MacroManager() {}
+
+    public static void onPlayerDisconnect(UUID uuid) {
+        RECORDING.remove(uuid);
+        BUFFER.remove(uuid);
+        ACTIVE_RUNNERS.remove(uuid);
+    }
 
     // ── Recording ─────────────────────────────────────────────────────────────
 
@@ -198,5 +218,60 @@ public final class MacroManager {
             }
         }
         return count;
+    }
+
+    // ── Phase 10.1 additions ──────────────────────────────────────────────────
+
+    /** Returns the last run time (millis) for this script, or 0 if never run. */
+    public static long lastRunTime(String name) {
+        return LAST_RUN.getOrDefault(sanitizeName(name), 0L);
+    }
+
+    /** Returns true if this player currently has a script executing. */
+    public static boolean isRunning(UUID uuid) {
+        return ACTIVE_RUNNERS.contains(uuid);
+    }
+
+    /**
+     * Phase 10.1 — Enhanced script run with per-step progress and result tracking.
+     * Shows action-bar step progress during execution.
+     * Marks ACTIVE_RUNNERS while running; clears on completion or error.
+     *
+     * @return {@link ScriptRunResult} on success; null if script not found or already running.
+     */
+    public static ScriptRunResult runScript(net.minecraft.server.network.ServerPlayerEntity player, String name) {
+        UUID uuid = player.getUuid();
+        if (ACTIVE_RUNNERS.contains(uuid)) return null; // already running guard
+        List<String> commands = loadMacro(name);
+        if (commands == null) return null;
+        ACTIVE_RUNNERS.add(uuid);
+        net.minecraft.server.command.ServerCommandSource src = player.getCommandSource();
+        net.minecraft.server.MinecraftServer server = player.getServer();
+        List<Boolean> passed = new ArrayList<>();
+        int failed = 0;
+        try {
+            for (int i = 0; i < commands.size(); i++) {
+                String cmd = commands.get(i);
+                int step = i + 1;
+                int total = commands.size();
+                // Action bar progress flash
+                player.sendMessage(net.minecraft.text.Text.literal(
+                    "§b▶ §fScript: §e" + name + " §8— §fstep §a" + step + "§8/§a" + total), true);
+                boolean ok = true;
+                try {
+                    server.getCommandManager().getDispatcher().execute("cb " + cmd, src);
+                } catch (Exception e) {
+                    LOGGER.warn("[Script] Step {} '{}' failed: {}", step, cmd, e.getMessage());
+                    ok = false;
+                    failed++;
+                }
+                passed.add(ok);
+            }
+        } finally {
+            ACTIVE_RUNNERS.remove(uuid);
+        }
+        LAST_RUN.put(sanitizeName(name), System.currentTimeMillis());
+        int ran = (int) passed.stream().filter(b -> b).count();
+        return new ScriptRunResult(name, commands, passed, ran, failed);
     }
 }

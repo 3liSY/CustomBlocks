@@ -93,7 +93,7 @@ public final class DiagnosticsHelper {
             }
 
             return zipPath;
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to create diagnostics ZIP", e);
             return null;
         }
@@ -125,5 +125,60 @@ public final class DiagnosticsHelper {
         return FabricLoader.getInstance().getModContainer(modId)
                 .map(c -> c.getMetadata().getVersion().getFriendlyString())
                 .orElse("unknown");
+    }
+
+    // ── Phase 10.3 — Error Log Export ─────────────────────────────────────────
+
+    /**
+     * Writes WARN/ERROR lines (last 200 matches) from logs/latest.log to a
+     * timestamped text file under config/customblocks/exports/. Returns the path.
+     */
+    public static Path exportErrorLog() throws IOException {
+        Path outDir = Path.of("config/customblocks/exports");
+        Files.createDirectories(outDir);
+        String ts = TS.format(Instant.now());
+        Path out = outDir.resolve("error_log_" + ts + ".txt");
+
+        Path serverLog = Path.of("logs/latest.log");
+        java.util.List<String> filtered = new java.util.ArrayList<>();
+        if (Files.isRegularFile(serverLog)) {
+            for (String line : Files.readAllLines(serverLog, StandardCharsets.UTF_8)) {
+                if (line.contains("WARN") || line.contains("ERROR") || line.contains("CustomBlocks")) {
+                    filtered.add(line);
+                }
+            }
+        }
+        int from = Math.max(0, filtered.size() - 200);
+        String content = filtered.isEmpty()
+            ? "(No WARN/ERROR lines found in logs/latest.log)"
+            : String.join("\n", filtered.subList(from, filtered.size()));
+        Files.writeString(out, content, StandardCharsets.UTF_8);
+        return out;
+    }
+
+    // ── Phase 10.4 — GUI Audit ────────────────────────────────────────────────
+
+    /**
+     * Scans all GuiMode values and reports Royal Directive compliance.
+     * Returns strings prefixed with "PASS:" or "FAIL:".
+     */
+    public static java.util.List<String> runGuiAudit() {
+        java.util.List<String> results = new java.util.ArrayList<>();
+        // Source of truth lives in GuiManager — no local hardcoded lists needed.
+        java.util.Set<String> implemented = com.customblocks.gui.GuiManager.implementedModeNames();
+        java.util.Set<String> knownStubs  = com.customblocks.gui.GuiManager.stubModeNames();
+
+        for (com.customblocks.gui.GuiMode mode : com.customblocks.gui.GuiMode.values()) {
+            String name = mode.name();
+            if (knownStubs.contains(name)) {
+                results.add("FAIL:" + name + ": stub — reserved for future phase");
+            } else if (implemented.contains(name)) {
+                results.add("PASS:" + name + ": handler and reopen case present");
+            } else {
+                results.add("FAIL:" + name + ": unknown — add to GuiManager.IMPLEMENTED_MODES or STUB_MODES");
+            }
+        }
+        results.sort(java.util.Comparator.comparing(s -> s.startsWith("FAIL") ? "0" : "1"));
+        return results;
     }
 }

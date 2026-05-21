@@ -1,5 +1,6 @@
 package com.customblocks.item;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import com.customblocks.CustomBlocksMod;
 import com.customblocks.CustomBlocksConfig;
 import com.customblocks.command.PermissionHelper;
@@ -46,6 +47,7 @@ public class RectangleToolItem extends Item {
     public static final Map<UUID, PendingSession> PENDING = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> SESSION_TIMESTAMPS = new ConcurrentHashMap<>();
 
+    @SuppressFBWarnings({"EI_EXPOSE_REP", "EI_EXPOSE_REP2"})
     public record PendingSession(
             BlockPos pos,
             String   face,
@@ -73,6 +75,7 @@ public class RectangleToolItem extends Item {
     // ── Right-click logic ─────────────────────────────────────────────────────
 
     @Override
+    @SuppressFBWarnings({"NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE", "NP_NULL_ON_SOME_PATH"})
     public ActionResult useOnBlock(ItemUsageContext ctx) {
         World        world  = ctx.getWorld();
         BlockPos     pos    = ctx.getBlockPos();
@@ -214,8 +217,8 @@ public class RectangleToolItem extends Item {
                     ServerWorld world = player.getServerWorld();
                     BlockState current = world.getBlockState(session.pos());
                     if (current.getBlock() instanceof SlotBlock) {
-                        world.setBlockState(session.pos(),
-                            CustomBlocksMod.SLOT_BLOCKS[newBlock.index].getDefaultState());
+                        SlotBlock sb = CustomBlocksMod.safeSlotBlock(newBlock.index);
+                        if (sb != null) world.setBlockState(session.pos(), sb.getDefaultState());
                     }
 
                     player.getInventory().insertStack(

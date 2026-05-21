@@ -98,7 +98,7 @@ public final class PlacementStats {
             }
             dirty = false;
             LOGGER.info("[CustomBlocks] PlacementStats loaded ({} blocks tracked).", BLOCK_COUNTS.size());
-        } catch (Exception ex) {
+        } catch (IOException | RuntimeException ex) {
             LOGGER.warn("[CustomBlocks] Could not load placement_stats.json.gz: {}", ex.getMessage());
         }
     }
@@ -107,7 +107,8 @@ public final class PlacementStats {
         if (!dirty) return;
         Path path = Path.of(DATA_FILE);
         try {
-            Files.createDirectories(path.getParent());
+            Path statsParent = path.getParent();
+            if (statsParent != null) Files.createDirectories(statsParent);
             Path tmp = path.resolveSibling("placement_stats.json.gz.tmp");
             try (OutputStream fos = Files.newOutputStream(tmp);
                  GZIPOutputStream gzip = new GZIPOutputStream(fos);

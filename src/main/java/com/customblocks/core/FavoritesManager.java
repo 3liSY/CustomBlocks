@@ -9,6 +9,7 @@ import net.minecraft.server.MinecraftServer;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
@@ -110,7 +111,8 @@ public final class FavoritesManager {
     public static void flushSave() {
         if (!loaded) return;
         try {
-            Files.createDirectories(DATA_PATH.getParent());
+            Path favParent = DATA_PATH.getParent();
+            if (favParent != null) Files.createDirectories(favParent);
             JsonObject root = new JsonObject();
             for (Map.Entry<UUID, Set<String>> e : FAV.entrySet()) {
                 var arr = new com.google.gson.JsonArray();
@@ -127,7 +129,7 @@ public final class FavoritesManager {
                 GSON.toJson(root, w);
             }
             Files.move(tmp, DATA_PATH, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (Exception ex) {
+        } catch (IOException | RuntimeException ex) {
             CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to save favorites", ex);
         }
     }

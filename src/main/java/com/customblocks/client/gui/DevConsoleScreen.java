@@ -52,9 +52,13 @@ public class DevConsoleScreen extends Screen {
                 }
             }).dimensions(panelX + 10, btnY, 140, 20).build());
         } else if (activeTab == 1) {
-            addDrawableChild(ButtonWidget.builder(Text.literal("Run GC"), btn -> {
-                System.gc();
-            }).dimensions(panelX + 10, btnY, 80, 20).build());
+            addDrawableChild(ButtonWidget.builder(Text.literal("Log Memory"), btn -> {
+                Runtime rt = Runtime.getRuntime();
+                long usedMb = (rt.totalMemory() - rt.freeMemory()) / (1024 * 1024);
+                long maxMb = rt.maxMemory() / (1024 * 1024);
+                if (client != null && client.player != null)
+                    client.player.sendMessage(net.minecraft.text.Text.literal("[CB] Heap: " + usedMb + " / " + maxMb + " MB"), false);
+            }).dimensions(panelX + 10, btnY, 100, 20).build());
         } else if (activeTab == 4) {
             addDrawableChild(ButtonWidget.builder(Text.literal("Panic Rollback Test"), btn -> {
                 if (client != null && client.player != null) {

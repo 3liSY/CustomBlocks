@@ -1,5 +1,6 @@
 package com.customblocks.network;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.packet.CustomPayload;
@@ -14,6 +15,7 @@ import java.util.List;
  * Textures are NOT included — they are drip-fed via {@link SlotUpdatePayload} after the sync.
  * This keeps the join payload small (< 100KB even with 2048 slots).
  */
+@SuppressFBWarnings({"EI_EXPOSE_REP", "EI_EXPOSE_REP2"})
 public record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture, int maxSlots) implements CustomPayload {
 
     /** Legacy constructor without maxSlots (backward compat). */
@@ -24,6 +26,7 @@ public record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture, in
     public static final Id<FullSyncPayload> ID =
             new Id<>(Identifier.of("customblocks", "full_sync"));
 
+    @SuppressFBWarnings({"EI_EXPOSE_REP", "EI_EXPOSE_REP2"})
     public record SlotEntry(
             int    index,
             String customId,

@@ -1,5 +1,6 @@
 package com.customblocks;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
 import javax.imageio.metadata.IIOMetadata;
@@ -38,6 +39,7 @@ public final class ImageProcessor {
     /**
      * Container for processed image data and its corresponding Minecraft animation metadata.
      */
+    @SuppressFBWarnings({"EI_EXPOSE_REP", "EI_EXPOSE_REP2"})
     public record ProcessResult(byte[] bytes, String mcmeta, int frameCount, String warning) {
         public boolean isAnimated() { return frameCount > 1; }
     }
@@ -149,10 +151,183 @@ public final class ImageProcessor {
     }
 
     /**
+     * Phase 4A.1 — Process raw PNG bytes with an explicit background mode.
+     *
+     * <p>This is the low-level entry point used by the per-slot import settings.
+     * The caller is responsible for downloading/converting to PNG first.
+     *
+     * @param pngBytes   source PNG bytes (must already be a valid PNG)
+     * @param targetSize target square size in pixels
+     * @param bgMode     one of "keep_transparent", "remove_auto", "fill_black", "fill_color"
+     * @param fillColor  RGB int (0xRRGGBB) used only when bgMode is "fill_color"; ignored otherwise
+     * @return a {@link ProcessResult} with the processed static texture (frameCount = 1)
+     */
+    public static ProcessResult processWithMode(byte[] pngBytes, int targetSize, String bgMode, int fillColor) throws IOException {
+        byte[] png = padToSquare(pngBytes);
+        byte[] processed;
+        switch (bgMode == null ? "remove_auto" : bgMode) {
+            case "keep_transparent" ->
+                // Skip background removal entirely — preserve alpha as-is
+                processed = resizeTo(png, targetSize);
+            case "fill_black" ->
+                // Legacy behavior: composite against black
+                processed = resizeTo(replaceBackground(png), targetSize);
+            case "fill_color" ->
+                // Composite against the specified fill colour
+                processed = resizeTo(replaceBackgroundWithColor(png, fillColor), targetSize);
+            default -> // "remove_auto" — standard auto-detection
+                processed = resizeTo(replaceBackground(png), targetSize);
+        }
+        return new ProcessResult(processed, null, 1, null);
+    }
+
+    /**
+     * Phase 4A.4 — Maps a named fringe mode to a pixel tolerance value.
+     * Returns -1 to indicate the fringe pass should be skipped entirely.
+     */
+    private static int fringeTolerance(String fringe) {
+        if (fringe == null) return FRINGE_TOLERANCE;
+        return switch (fringe) {
+            case "off"        -> -1;   // -1 = skip fringe pass entirely
+            case "light"      -> 30;
+            case "normal"     -> 40;
+            case "aggressive" -> 80;
+            default           -> FRINGE_TOLERANCE;
+        };
+    }
+
+    /**
+     * Phase 4A.4 — Returns true if this pixel is a fringe candidate using an explicit tolerance.
+     * tolerance == -1 always returns false (fringe pass disabled).
+     */
+    private static boolean isFringeWithTolerance(int argb, int tolerance) {
+        if (tolerance < 0) return false;
+        int a = (argb >> 24) & 0xFF;
+        if (a < OPAQUE_THRESHOLD) return true;
+        if (tolerance == 0) return false;
+        return CustomBlocksConfig.bgRemovalUseYcbcr
+            ? isNearWhiteYcbcr(argb, tolerance)
+            : deltaE(rgbToLab(argb), LAB_WHITE) <= tolerance;
+    }
+
+    /**
+     * Phase 4A.4 — Same as {@link #replaceBackground(byte[])} but with an explicit fringe
+     * tolerance. Pass -1 to skip the fringe dilation pass entirely.
+     */
+    public static byte[] replaceBackgroundWithFringeTolerance(byte[] pngBytes, int fringeTol) throws IOException {
+        BufferedImage img = ImageIO.read(new ByteArrayInputStream(pngBytes));
+        if (img == null) return pngBytes;
+        int w = img.getWidth(), h = img.getHeight();
+        BufferedImage argb = toArgb(img);
+
+        final int BLACK    = 0xFF000000;
+        final int[][] DIRS = {{1,0},{-1,0},{0,1},{0,-1}};
+        boolean[][] isBg   = new boolean[w][h];
+
+        Queue<int[]> queue = new ArrayDeque<>();
+        for (int x = 0; x < w; x++) {
+            if (!isBg[x][0]   && isBackground(argb.getRGB(x, 0)))   { isBg[x][0]   = true; queue.add(new int[]{x, 0});   }
+            if (!isBg[x][h-1] && isBackground(argb.getRGB(x, h-1))) { isBg[x][h-1] = true; queue.add(new int[]{x, h-1}); }
+        }
+        for (int y = 1; y < h - 1; y++) {
+            if (!isBg[0][y]   && isBackground(argb.getRGB(0, y)))   { isBg[0][y]   = true; queue.add(new int[]{0, y});   }
+            if (!isBg[w-1][y] && isBackground(argb.getRGB(w-1, y))) { isBg[w-1][y] = true; queue.add(new int[]{w-1, y}); }
+        }
+
+        if (!queue.isEmpty()) {
+            while (!queue.isEmpty()) {
+                int[] px = queue.poll();
+                int x = px[0], y = px[1];
+                for (int[] d : DIRS) {
+                    int nx = x + d[0], ny = y + d[1];
+                    if (nx >= 0 && nx < w && ny >= 0 && ny < h
+                            && !isBg[nx][ny] && isBackground(argb.getRGB(nx, ny))) {
+                        isBg[nx][ny] = true;
+                        queue.add(new int[]{nx, ny});
+                    }
+                }
+            }
+
+            if (fringeTol >= 0) {
+                boolean[][] fringe = new boolean[w][h];
+                for (int y = 0; y < h; y++) {
+                    for (int x = 0; x < w; x++) {
+                        if (isBg[x][y]) continue;
+                        boolean adjacentToBg = false;
+                        for (int[] d : DIRS) {
+                            int nx = x + d[0], ny = y + d[1];
+                            if (nx >= 0 && nx < w && ny >= 0 && ny < h && isBg[nx][ny]) {
+                                adjacentToBg = true;
+                                break;
+                            }
+                        }
+                        if (adjacentToBg && isFringeWithTolerance(argb.getRGB(x, y), fringeTol))
+                            fringe[x][y] = true;
+                    }
+                }
+                for (int y = 0; y < h; y++)
+                    for (int x = 0; x < w; x++)
+                        if (fringe[x][y]) isBg[x][y] = true;
+            }
+        }
+
+        final int bgR = 255, bgG = 255, bgB = 255;
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                if (isBg[x][y]) {
+                    argb.setRGB(x, y, BLACK);
+                    continue;
+                }
+                int pixel = argb.getRGB(x, y);
+                int a = (pixel >> 24) & 0xFF;
+                if (a == 255) continue;
+                int r = (int)(((pixel >> 16) & 0xFF) * a / 255.0 + bgR * (255 - a) / 255.0 + 0.5);
+                int g = (int)(((pixel >>  8) & 0xFF) * a / 255.0 + bgG * (255 - a) / 255.0 + 0.5);
+                int b = (int)( (pixel        & 0xFF) * a / 255.0 + bgB * (255 - a) / 255.0 + 0.5);
+                argb.setRGB(x, y, BLACK | (Math.min(255, r) << 16) | (Math.min(255, g) << 8) | Math.min(255, b));
+            }
+        }
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ImageIO.write(argb, "PNG", baos);
+        return baos.toByteArray();
+    }
+
+    /**
+     * Phase 4A.4 — Full processing pipeline with configurable background mode and fringe mode.
+     *
+     * @param pngBytes   source PNG bytes (must already be a valid PNG)
+     * @param targetSize target square size in pixels
+     * @param bgMode     one of "keep_transparent", "remove_auto", "fill_black", "fill_white", "fill_color"
+     * @param fillColor  RGB int (0xRRGGBB) used only when bgMode is "fill_color"; ignored otherwise
+     * @param fringe     one of "off", "light", "normal", "aggressive" (or null for default)
+     * @return a {@link ProcessResult} with the processed static texture (frameCount = 1)
+     */
+    public static ProcessResult processWithMode(byte[] pngBytes, int targetSize, String bgMode, int fillColor, String fringe) throws IOException {
+        byte[] png = padToSquare(pngBytes);
+        int fringeTol = fringeTolerance(fringe);
+        byte[] processed;
+        switch (bgMode == null ? "remove_auto" : bgMode) {
+            case "keep_transparent" ->
+                processed = resizeTo(png, targetSize);
+            case "fill_black" ->
+                processed = resizeTo(replaceBackgroundWithFringeTolerance(png, fringeTol), targetSize);
+            case "fill_white" ->
+                processed = resizeTo(replaceBackgroundWithColor(png, 0xFFFFFF), targetSize);
+            case "fill_color" ->
+                processed = resizeTo(replaceBackgroundWithColor(png, fillColor), targetSize);
+            default -> // "remove_auto" — standard auto-detection
+                processed = resizeTo(replaceBackgroundWithFringeTolerance(png, fringeTol), targetSize);
+        }
+        return new ProcessResult(processed, null, 1, null);
+    }
+
+    /**
      * Download with CDN URL rewriting.
      * Supports Discord, Imgur, and handles redirects.
      * Max 10 MB.
      */
+    @SuppressFBWarnings("DE_MIGHT_IGNORE") // best-effort stream close in error paths — original exception is always re-thrown
     public static byte[] download(String url) throws IOException, InterruptedException {
         // 1.25 — SSRF protection: block private/internal network addresses
         validateUrlSecurity(url);
@@ -189,9 +364,10 @@ public final class ImageProcessor {
             throw new IOException("§eThat doesn't look like a valid link! §7Make sure you copied the full URL — it should start with §fhttp:// §7or §fhttps://");
         }
 
-        HttpResponse<byte[]> res;
+        // 7.34 — use ofInputStream() so we can inspect Content-Length before buffering the body
+        HttpResponse<java.io.InputStream> res;
         try {
-            res = HTTP.send(req, HttpResponse.BodyHandlers.ofByteArray());
+            res = HTTP.send(req, HttpResponse.BodyHandlers.ofInputStream());
         } catch (java.net.http.HttpConnectTimeoutException e) {
             throw new IOException("§eCouldn't reach §f" + domain + "§e! §7The website might be down, or the server doesn't have internet. Try again later.");
         } catch (java.net.http.HttpTimeoutException e) {
@@ -206,6 +382,7 @@ public final class ImageProcessor {
 
         int code = res.statusCode();
         if (code < 200 || code >= 300) {
+            try { res.body().close(); } catch (IOException ignored) {}
             String hint = switch (code) {
                 case 400 -> "§eBad link! §7The URL has something weird in it. Try right-clicking the image → §fCopy image address §7and paste that instead.";
                 case 401, 403 -> "§eNo permission! §f" + domain + " §7won't let us download this image. It might be private. Try uploading it to §fImgur §7or §fDiscord §7instead.";
@@ -220,7 +397,16 @@ public final class ImageProcessor {
             };
             throw new IOException(hint);
         }
-        byte[] body = res.body();
+        // 7.34 — reject oversized responses before reading body (avoids allocating up to 20 MB)
+        java.util.OptionalLong clOpt = res.headers().firstValueAsLong("content-length");
+        if (clOpt.isPresent() && clOpt.getAsLong() > 20_971_520L) {
+            try { res.body().close(); } catch (IOException ignored) {}
+            throw new IOException("§eToo big! §7This image is §f" + (clOpt.getAsLong() / 1_048_576) + " MB§7 but the max is §f20 MB§7. Shrink it first or use a smaller image.");
+        }
+        byte[] body;
+        try (java.io.InputStream is = res.body()) {
+            body = is.readNBytes(20_971_521); // read one byte past limit to detect overflow
+        }
         if (body == null || body.length == 0)
             throw new IOException("§eGot nothing back from §f" + domain + "§e! §7The image was probably deleted. Try a different link.");
         if (body.length > 20_971_520)
@@ -264,7 +450,7 @@ public final class ImageProcessor {
     /** Check if WebP bytes contain an ANIM chunk (animated). */
     private static boolean isAnimatedWebP(byte[] raw) {
         if (!isWebP(raw)) return false;
-        String head = new String(raw, 0, Math.min(200, raw.length));
+        String head = new String(raw, 0, Math.min(200, raw.length), java.nio.charset.StandardCharsets.ISO_8859_1);
         return head.contains("ANIM");
     }
 
@@ -305,12 +491,11 @@ public final class ImageProcessor {
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
         g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        // Fill letterbox with opaque black
-        g.setComposite(AlphaComposite.Src);
-        g.setColor(Color.BLACK);
+        // Phase 4A.5 — Fill letterbox with fully transparent pixels so the bg removal
+        // stage can handle padding uniformly rather than fighting opaque black bars.
+        g.setComposite(java.awt.AlphaComposite.Clear);
         g.fillRect(0, 0, size, size);
-        // Draw the image preserving its alpha channel
-        g.setComposite(AlphaComposite.SrcOver);
+        g.setComposite(java.awt.AlphaComposite.SrcOver);
         int x = (size - w) / 2, y = (size - h) / 2;
         g.drawImage(img, x, y, null);
         g.dispose();
@@ -394,7 +579,10 @@ public final class ImageProcessor {
         }
 
         // ── Stage 3: Paint bg black; composite every semi-transparent pixel ──
-        // against black and make fully opaque. No transparency left in output.
+        // against white (Phase 4A.3 — prevents edge darkening on anti-aliased art)
+        // and make fully opaque. No transparency left in output.
+        // Phase 4A.3 — composite against white instead of black to avoid dark fringes.
+        final int bgR = 255, bgG = 255, bgB = 255;
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
                 if (isBg[x][y]) {
@@ -404,11 +592,11 @@ public final class ImageProcessor {
                 int pixel = argb.getRGB(x, y);
                 int a = (pixel >> 24) & 0xFF;
                 if (a == 255) continue; // already fully opaque — skip
-                // Premultiply alpha against black: out = src * (a/255), fully opaque
-                int r = (int)(((pixel >> 16) & 0xFF) * a / 255.0 + 0.5);
-                int g = (int)(((pixel >>  8) & 0xFF) * a / 255.0 + 0.5);
-                int b = (int)( (pixel        & 0xFF) * a / 255.0 + 0.5);
-                argb.setRGB(x, y, BLACK | (r << 16) | (g << 8) | b);
+                // Composite against white: out = src * (a/255) + white * ((255-a)/255)
+                int r = (int)(((pixel >> 16) & 0xFF) * a / 255.0 + bgR * (255 - a) / 255.0 + 0.5);
+                int g = (int)(((pixel >>  8) & 0xFF) * a / 255.0 + bgG * (255 - a) / 255.0 + 0.5);
+                int b = (int)( (pixel        & 0xFF) * a / 255.0 + bgB * (255 - a) / 255.0 + 0.5);
+                argb.setRGB(x, y, BLACK | (Math.min(255, r) << 16) | (Math.min(255, g) << 8) | Math.min(255, b));
             }
         }
 
@@ -640,10 +828,10 @@ public final class ImageProcessor {
         // GIF87a/GIF89a
         if (raw[0] == 'G' && raw[1] == 'I' && raw[2] == 'F') return true;
         // WebP (RIFF + WEBPVP8X) - heuristic
-        if (raw.length > 30 && raw[0] == 'R' && raw[1] == 'I' && raw[2] == 'F' && raw[3] == 'F' 
+        if (raw.length > 30 && raw[0] == 'R' && raw[1] == 'I' && raw[2] == 'F' && raw[3] == 'F'
             && raw[8] == 'W' && raw[9] == 'E' && raw[10] == 'B' && raw[11] == 'P') {
             // Check for ANIM chunk in WebP
-            String head = new String(raw, 0, Math.min(200, raw.length));
+            String head = new String(raw, 0, Math.min(200, raw.length), java.nio.charset.StandardCharsets.ISO_8859_1);
             if (head.contains("ANIM")) return true;
         }
         // APNG (PNG signature + acTL chunk)
@@ -1019,7 +1207,7 @@ public final class ImageProcessor {
                     for (int i = 0; i < kids.getLength(); i++) stack.push(kids.item(i));
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (RuntimeException ignored) {}
         return new FrameMeta(delay, disposal, offX, offY, transparent);
     }
 
@@ -1074,7 +1262,12 @@ public final class ImageProcessor {
         if (img.getWidth() == targetSize && img.getHeight() == targetSize) return pngBytes;
         BufferedImage out = new BufferedImage(targetSize, targetSize, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = out.createGraphics();
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        // Phase 4A.9 — adaptive interpolation: nearest-neighbor for pixel art (<64px), bicubic otherwise
+        int srcWidth = img.getWidth(), srcHeight = img.getHeight();
+        Object interpHint = (srcWidth < 64 || srcHeight < 64)
+                ? RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR
+                : RenderingHints.VALUE_INTERPOLATION_BICUBIC;
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, interpHint);
         g.setRenderingHint(RenderingHints.KEY_RENDERING,     RenderingHints.VALUE_RENDER_QUALITY);
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,  RenderingHints.VALUE_ANTIALIAS_ON);
         g.drawImage(img, 0, 0, targetSize, targetSize, null);
@@ -1450,9 +1643,9 @@ public final class ImageProcessor {
         try {
             addr = java.net.InetAddress.getByName(host);
         } catch (java.net.UnknownHostException e) {
-            // Unknown host — cannot resolve, not necessarily malicious; let it through
-            // so valid but temporarily-down hosts still get a friendly network error.
-            return;
+            // Block unresolvable hosts — if DNS fails at validation time the HTTP client
+            // could retry with a different result (DNS rebinding window). Safer to reject.
+            throw new IOException("§c[CB] That URL is not allowed. Could not verify the host address.");
         }
 
         if (addr.isLoopbackAddress()) {

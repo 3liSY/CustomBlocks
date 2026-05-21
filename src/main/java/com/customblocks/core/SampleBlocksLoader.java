@@ -117,7 +117,8 @@ public final class SampleBlocksLoader {
 
     private static void writeMarker(Path marker, String note) {
         try {
-            Files.createDirectories(marker.getParent());
+            Path markerParent = marker.getParent();
+            if (markerParent != null) Files.createDirectories(markerParent);
             Files.writeString(marker, "status=" + note + "\n",
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
         } catch (Exception ex) {

@@ -1,5 +1,6 @@
 package com.customblocks;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import com.customblocks.core.VoiceCatalog;
 import com.google.gson.*;
 import org.slf4j.Logger;
@@ -21,6 +22,7 @@ import java.util.Set;
  * All fields are volatile so read access from any thread sees the latest value
  * without synchronisation; writes only happen on the server thread via {@link #load()} / {@link #save()}.
  */
+@SuppressFBWarnings("PA_PUBLIC_PRIMITIVE_ATTRIBUTE")
 public final class CustomBlocksConfig {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("CustomBlocks");
@@ -41,6 +43,11 @@ public final class CustomBlocksConfig {
     public static volatile boolean bgRemovalUseYcbcr = true;
     /** HTTP download timeout in seconds. */
     public static volatile int downloadTimeoutSeconds = 15;
+    /**
+     * 1.25 — Maximum GIF file size in MB before upload is rejected (pre-check to prevent OOM/crash).
+     * Minimum enforced at runtime: 1. Default: 2. Range: 1–10.
+     */
+    public static volatile int maxGifSizeMb = 2;
 
     // ── Tool Sessions ────────────────────────────────────────────────────────
     /** Tool session timeout in seconds (rectangle wand, etc.). 0 = no timeout. */
@@ -94,20 +101,30 @@ public final class CustomBlocksConfig {
     public static volatile String triangleGreenHex = "#1E8C1E";
     /** Editable built-in shade for yellow recolor tools. */
     public static volatile String triangleYellowHex = "#F0C814";
+    /**
+     * 1.28 — What to do when a color square/triangle targets a variant that doesn't exist yet.
+     * "use_base" (default): silently use the base block texture and create the variant automatically.
+     * "auto_create": same as use_base but shows a brief action bar note to the player.
+     * "error": show error and stop (old behavior).
+     */
+    public static volatile String colorSquareFallbackMode = "use_base";
 
     // ── Network ──────────────────────────────────────────────────────────────
     /** Number of texture payloads to drip-feed per server tick. */
     public static volatile int texturePayloadsPerTick = 8;
+    /** 1.12 — Max uncompressed GIF frame-strip bytes before trimming frames (4 MB default). */
+    public static volatile long maxGifStripBytes = 4_000_000L;
     /** Internal HTTP server port for resource pack hosting (0 = disabled/auto). */
     public static volatile int resourcePackPort = 8080;
     /** Debounce time for live-edit resource pack reloads (ms). */
     public static volatile long reloadDebounceMs = 2000;
-    /** Debounce time for initial join burst (ms). */
-    public static volatile long joinDebounceMs = 4000;
-    /** Optional Cloud Vault base URL for cross-server sharing. */
-    public static volatile String cloudShareUrl = "https://cb-cloud-vault.cbbblocksvault.workers.dev";
-    /** Enables Cloud Vault upload/download when a base URL is configured. */
+    // joinDebounceMs removed in 1.20 — replaced by count-verified SyncCompletePayload.
+    /** Hardcoded Cloud Vault URL — not configurable to prevent OPs redirecting uploads. */
+    public static final String cloudShareUrl = "https://cb-cloud-vault.cbbblocksvault.workers.dev";
+    /** Enables Cloud Vault upload/download. */
     public static volatile boolean cloudShareEnabled = true;
+    /** 1.13 — Shared secret for authenticating pack uploads to Cloud Vault (set in config file only, never in GUI). */
+    public static volatile String cloudPackSecret = "";
 
 
     // ── Assistant NPC (The Helper) ───────────────────────────────────────────
@@ -122,6 +139,14 @@ public final class CustomBlocksConfig {
         Set.of("friendly", "professional", "royal", "minimal", "arabic", "silly");
     /** Whether the live status hologram is visible. */
     public static volatile boolean aiHologram = true;
+    /** Phase 11.1 — AI image provider: "openai" or "stability". Empty = procedural only. */
+    public static volatile String aiApiProvider = "";
+    /** Phase 11.1 — API key for the AI image provider. Empty = procedural fallback. */
+    public static volatile String aiApiKey = "";
+    /** Phase 11.1 — Maximum number of AI texture variations to generate (1–3). */
+    public static volatile int aiMaxVariations = 3;
+    /** Phase 11.1 — Texture generation style hint: "pixel_art" or "natural". */
+    public static volatile String aiTextureStyle = "pixel_art";
 
     /**
      * Phase B4 did-you-mean for unknown first argument: {@code off}, {@code strict} (distance ≤1),
@@ -134,8 +159,9 @@ public final class CustomBlocksConfig {
     public static volatile int autoSnapshotMinutes = 30;
 
     // ── Performance (Phase D) ────────────────────────────────────────────────
-    /** Instant-click aggressiveness in ms (0 = max RAM/instant, 10000 = lazy). Default 300. */
-    @Deprecated // TODO: wire into instant-click system or remove
+    /** Controls client-side pack-reload debounce timing (ms).
+     *  Read by CustomBlocksClient.fastReloadDebounceMs() and fullReloadDebounceMs().
+     *  0 = reload immediately on every edit. 10000 = lazy/batched reloads. Default 300. */
     public static volatile int instantClickAggressivenessMs = 300;
 
     // ── Feedback Layers (Phase F) ────────────────────────────────────────────
@@ -144,8 +170,10 @@ public final class CustomBlocksConfig {
     /** Master toggle for feedback particles. */
     public static volatile boolean particlesEnabled = true;
     /** Per-category sound toggles (Phase F4). */
+    @SuppressFBWarnings("MS_MUTABLE_COLLECTION_PKGPROTECT")
     public static final Map<String, Boolean> soundCategories = new LinkedHashMap<>();
     /** Per-category particle toggles (Phase F5). */
+    @SuppressFBWarnings("MS_MUTABLE_COLLECTION_PKGPROTECT")
     public static final Map<String, Boolean> particleCategories = new LinkedHashMap<>();
 
     static {
@@ -155,8 +183,7 @@ public final class CustomBlocksConfig {
 
     // ── Marketplace (Phase L) ────────────────────────────────────────────────
     /** Enable the in-game marketplace UI (separate from cloudShareEnabled). */
-    @Deprecated // TODO: wire into marketplace UI or remove
-    public static volatile boolean marketplaceEnabled = true;
+    public static volatile boolean marketplaceEnabled = true; // 8.4 — gate wired in GuiManager.openMarketGui()
 
     // ── Holograms (Phase I) ──────────────────────────────────────────────────
     /** Whether floating name holograms appear above placed custom blocks. */
@@ -176,13 +203,11 @@ public final class CustomBlocksConfig {
     }
 
     public static boolean isCloudShareEnabled() {
-        return cloudShareEnabled && cloudShareUrl != null && !cloudShareUrl.isBlank();
+        return cloudShareEnabled; // URL is now a hardcoded constant — always present
     }
 
     public static String normalizedCloudShareUrl() {
-        String url = cloudShareUrl == null ? "" : cloudShareUrl.trim();
-        while (url.endsWith("/")) url = url.substring(0, url.length() - 1);
-        return url;
+        return cloudShareUrl; // URL is a hardcoded constant — no trimming needed
     }
 
     public static String normalizeVoiceMode(String raw) {
@@ -197,6 +222,24 @@ public final class CustomBlocksConfig {
         return switch (s) {
             case "off", "strict", "smart", "genius" -> s;
             default -> "smart";
+        };
+    }
+
+    public static String normalizeAiProvider(String raw) {
+        if (raw == null) return "";
+        String s = raw.toLowerCase(Locale.ROOT).trim();
+        return switch (s) {
+            case "openai", "stability" -> s;
+            default -> "";
+        };
+    }
+
+    public static String normalizeAiTextureStyle(String raw) {
+        if (raw == null) return "pixel_art";
+        String s = raw.toLowerCase(Locale.ROOT).trim();
+        return switch (s) {
+            case "pixel_art", "natural", "flat" -> s;
+            default -> "pixel_art";
         };
     }
 
@@ -228,6 +271,7 @@ public final class CustomBlocksConfig {
             bgRemovalTolerance    = getInt(root, "bgRemovalTolerance", bgRemovalTolerance);
             bgRemovalUseYcbcr     = getBool(root, "bgRemovalUseYcbcr", bgRemovalUseYcbcr);
             downloadTimeoutSeconds= getInt(root, "downloadTimeoutSeconds", downloadTimeoutSeconds);
+            maxGifSizeMb          = Math.max(1, getInt(root, "maxGifSizeMb", maxGifSizeMb)); // 1.25 — min 1
             sessionTimeoutSeconds = getInt(root, "sessionTimeoutSeconds", sessionTimeoutSeconds);
             undoMode              = getString(root, "undoMode", undoMode);
             maxUndoDepth          = getInt(root, "maxUndoDepth", maxUndoDepth);
@@ -276,11 +320,12 @@ public final class CustomBlocksConfig {
                 permissionFallbackDevConsole = getInt(root, "permissionFallbackDevConsole", permissionFallbackDevConsole);
             }
             texturePayloadsPerTick= getInt(root, "texturePayloadsPerTick", texturePayloadsPerTick);
+            maxGifStripBytes      = getLong(root, "maxGifStripBytes", maxGifStripBytes);
             resourcePackPort      = getInt(root, "resourcePackPort", resourcePackPort);
             reloadDebounceMs      = getLong(root, "reloadDebounceMs", reloadDebounceMs);
-            joinDebounceMs        = getLong(root, "joinDebounceMs", joinDebounceMs);
-            cloudShareUrl         = getString(root, "cloudShareUrl", cloudShareUrl);
+            // joinDebounceMs removed in 1.20
             cloudShareEnabled     = getBool(root, "cloudShareEnabled", cloudShareEnabled);
+            cloudPackSecret       = getString(root, "cloudPackSecret", cloudPackSecret);
             aiEnabled             = getBool(root, "aiEnabled", getBool(root, "helperEnabled", aiEnabled));
             aiName                = getString(root, "aiName", getString(root, "helperName", aiName));
             if (root.has("voiceMode")) {
@@ -292,6 +337,10 @@ public final class CustomBlocksConfig {
                 voiceMode = normalizeVoiceMode(voiceMode);
             }
             aiHologram            = getBool(root, "aiHologram", getBool(root, "helperHologram", aiHologram));
+            aiApiProvider         = normalizeAiProvider(getString(root, "aiApiProvider", aiApiProvider));
+            aiApiKey              = getString(root, "aiApiKey", aiApiKey);
+            aiMaxVariations       = Math.max(1, Math.min(8, getInt(root, "aiMaxVariations", aiMaxVariations)));
+            aiTextureStyle        = normalizeAiTextureStyle(getString(root, "aiTextureStyle", aiTextureStyle));
             didYouMeanMode         = normalizeDidYouMeanMode(getString(root, "didYouMeanMode", didYouMeanMode));
             autoSnapshotMinutes    = Math.max(0, Math.min(1440, getInt(root, "autoSnapshotMinutes", autoSnapshotMinutes)));
             instantClickAggressivenessMs = Math.max(0, Math.min(10000, getInt(root, "instantClickAggressivenessMs", instantClickAggressivenessMs)));
@@ -310,6 +359,7 @@ public final class CustomBlocksConfig {
             colorToolBackgroundMode = getString(root, "colorToolBackgroundMode", colorToolBackgroundMode);
             triangleGreenHex      = normalizeHexColor(getString(root, "triangleGreenHex", triangleGreenHex), triangleGreenHex);
             triangleYellowHex     = normalizeHexColor(getString(root, "triangleYellowHex", triangleYellowHex), triangleYellowHex);
+            colorSquareFallbackMode = getString(root, "colorSquareFallbackMode", colorSquareFallbackMode);
 
             // Clamp values
             int clampedMaxSlots = Math.max(1, Math.min(8192, maxSlots));
@@ -335,6 +385,7 @@ public final class CustomBlocksConfig {
             int cAi = Math.max(0, Math.min(4, permissionFallbackAi));
             int cDc = Math.max(0, Math.min(4, permissionFallbackDevConsole));
             int clampedTexturePayloadsPerTick = Math.max(1, Math.min(50, texturePayloadsPerTick));
+            long clampedMaxGifStripBytes = Math.max(500_000L, Math.min(16_000_000L, maxGifStripBytes));
 
             shouldRewrite |= clampedMaxSlots != maxSlots;
             shouldRewrite |= clampedDefaultTextureSize != defaultTextureSize;
@@ -359,6 +410,7 @@ public final class CustomBlocksConfig {
             shouldRewrite |= cAi != permissionFallbackAi;
             shouldRewrite |= cDc != permissionFallbackDevConsole;
             shouldRewrite |= clampedTexturePayloadsPerTick != texturePayloadsPerTick;
+            shouldRewrite |= clampedMaxGifStripBytes != maxGifStripBytes;
 
             maxSlots              = clampedMaxSlots;
             defaultTextureSize    = clampedDefaultTextureSize;
@@ -383,12 +435,7 @@ public final class CustomBlocksConfig {
             permissionFallbackAi = cAi;
             permissionFallbackDevConsole = cDc;
             texturePayloadsPerTick= clampedTexturePayloadsPerTick;
-
-            String normalizedCloudUrl = normalizedCloudShareUrl();
-            if (!normalizedCloudUrl.equals(cloudShareUrl)) {
-                cloudShareUrl = normalizedCloudUrl;
-                shouldRewrite = true;
-            }
+            maxGifStripBytes      = clampedMaxGifStripBytes;
 
             if (!undoMode.equals("global") && !undoMode.equals("per_player") && !undoMode.equals("both")) {
                 LOGGER.warn("[CustomBlocks] Invalid undoMode '{}', defaulting to 'both'", undoMode);
@@ -416,7 +463,7 @@ public final class CustomBlocksConfig {
                 LOGGER.info("[CustomBlocks] Cloud Vault: DISABLED -> local-only share codes");
             }
             VoiceCatalog.invalidate();
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             LOGGER.error("[CustomBlocks] Failed to load config, using defaults", e);
         }
     }
@@ -433,6 +480,7 @@ public final class CustomBlocksConfig {
             root.addProperty("bgRemovalTolerance", bgRemovalTolerance);
             root.addProperty("bgRemovalUseYcbcr", bgRemovalUseYcbcr);
             root.addProperty("downloadTimeoutSeconds", downloadTimeoutSeconds);
+            root.addProperty("maxGifSizeMb", maxGifSizeMb); // 1.25
             root.addProperty("sessionTimeoutSeconds", sessionTimeoutSeconds);
             root.addProperty("undoMode", undoMode);
             root.addProperty("maxUndoDepth", maxUndoDepth);
@@ -454,21 +502,26 @@ public final class CustomBlocksConfig {
             root.addProperty("permissionFallbackAi", permissionFallbackAi);
             root.addProperty("permissionFallbackDevConsole", permissionFallbackDevConsole);
             root.addProperty("texturePayloadsPerTick", texturePayloadsPerTick);
+            root.addProperty("maxGifStripBytes", maxGifStripBytes);
             root.addProperty("resourcePackPort", resourcePackPort);
             root.addProperty("reloadDebounceMs", reloadDebounceMs);
-            root.addProperty("joinDebounceMs", joinDebounceMs);
-            root.addProperty("cloudShareUrl", cloudShareUrl);
             root.addProperty("cloudShareEnabled", cloudShareEnabled);
+            root.addProperty("cloudPackSecret", cloudPackSecret);
             root.addProperty("aiEnabled", aiEnabled);
             root.addProperty("aiName", aiName);
             root.addProperty("voiceMode", voiceMode);
             root.addProperty("didYouMeanMode", didYouMeanMode);
             root.addProperty("aiHologram", aiHologram);
+            root.addProperty("aiApiProvider", aiApiProvider);
+            root.addProperty("aiApiKey", aiApiKey); // config.json only — never rendered in GUI
+            root.addProperty("aiMaxVariations", aiMaxVariations);
+            root.addProperty("aiTextureStyle", aiTextureStyle);
             root.addProperty("hideCustomBlockText", hideCustomBlockText);
             root.addProperty("hideCategoryBadge", hideCategoryBadge);
             root.addProperty("colorToolBackgroundMode", colorToolBackgroundMode);
             root.addProperty("triangleGreenHex", normalizeHexColor(triangleGreenHex, "#1E8C1E"));
             root.addProperty("triangleYellowHex", normalizeHexColor(triangleYellowHex, "#F0C814"));
+            root.addProperty("colorSquareFallbackMode", colorSquareFallbackMode);
             root.addProperty("autoSnapshotMinutes", autoSnapshotMinutes);
             root.addProperty("instantClickAggressivenessMs", instantClickAggressivenessMs);
             root.addProperty("soundsEnabled", soundsEnabled);
@@ -515,6 +568,7 @@ public final class CustomBlocksConfig {
             || !root.has("bgRemovalTolerance")
             || !root.has("bgRemovalUseYcbcr")
             || !root.has("downloadTimeoutSeconds")
+            || !root.has("maxGifSizeMb") // 1.25
             || !root.has("sessionTimeoutSeconds")
             || !root.has("undoMode")
             || !root.has("maxUndoDepth")
@@ -525,14 +579,17 @@ public final class CustomBlocksConfig {
             || !root.has("texturePayloadsPerTick")
             || !root.has("resourcePackPort")
             || !root.has("reloadDebounceMs")
-            || !root.has("joinDebounceMs")
-            || !root.has("cloudShareUrl")
             || !root.has("cloudShareEnabled")
+            || !root.has("cloudPackSecret")
             || !root.has("aiEnabled")
             || !root.has("aiName")
             || !root.has("voiceMode")
             || !root.has("didYouMeanMode")
             || !root.has("aiHologram")
+            || !root.has("aiApiProvider")
+            || !root.has("aiApiKey")
+            || !root.has("aiMaxVariations")
+            || !root.has("aiTextureStyle")
             || !root.has("hideCustomBlockText")
             || !root.has("hideCategoryBadge")
             || !root.has("colorToolBackgroundMode")

@@ -1,6 +1,6 @@
 package com.customblocks.core;
 
-
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 import com.customblocks.CustomBlocksConfig;
 
@@ -42,6 +42,7 @@ public final class SlotManager {
 
     /** Atomic container for the entire custom-block database. */
 
+    @SuppressFBWarnings({"EI_EXPOSE_REP", "EI_EXPOSE_REP2"})
     public record Snapshot(List<SlotData> slots, byte[] tabIcon) {}
 
 
@@ -59,6 +60,14 @@ public final class SlotManager {
     private static volatile List<JsonObject> startupLoadQueue = List.of();
     private static final java.util.concurrent.atomic.AtomicInteger startupLoadCursor = new java.util.concurrent.atomic.AtomicInteger(0);
     private static volatile boolean startupLoadInProgress = false;
+    /** 1.17 — true only after ALL textures have finished loading asynchronously on startup. */
+    private static volatile boolean startupLoadComplete = false;
+    /**
+     * 1.11 — true when pack-relevant data (texture bytes, model, animation) changed.
+     * saveAllAsync() only rebuilds the resource pack ZIP when this is true,
+     * so metadata-only saves (rename, category, lock) do NOT trigger an expensive ZIP rebuild.
+     */
+    private static volatile boolean packDirty = false;
     private static final java.util.concurrent.ScheduledExecutorService SAVE_SCHEDULER =
         java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "CustomBlocks-SaveScheduler");
@@ -72,6 +81,9 @@ public final class SlotManager {
     private static final String LEGACY_DATA_FILE = "slots.json";
 
     private static final String TEXTURES_DIR = DATA_DIR + "/textures";
+    /** 1.23 — set of customIds for which the admin has suppressed the broken-texture warning. */
+    private static final java.util.Set<String> SUPPRESSED_IDS = ConcurrentHashMap.newKeySet();
+    private static final String SUPPRESSED_FILE = DATA_DIR + "/suppressed_blocks.json";
 
 
 
@@ -185,6 +197,20 @@ public final class SlotManager {
 
     public static int freeSlots() { return Math.max(0, maxSlots() - usedSlots()); }
 
+    /** 1.16 — Returns the highest slot index currently in use, or -1 if no slots are used. */
+    public static synchronized int highestUsedSlotIndex() {
+        return bySlot.keySet().stream()
+            .map(s -> Integer.parseInt(s.replace("slot_", "")))
+            .max(Integer::compare)
+            .orElse(-1);
+    }
+
+    /** 1.16 — Count block definitions with slot index >= maxSlots (orphaned after a maxSlots decrease). */
+    public static synchronized int countOrphanedBlocks() {
+        int max = maxSlots();
+        return (int) byId.values().stream().filter(d -> d.index >= max).count();
+    }
+
 
 
     // ── Query ────────────────────────────────────────────────────────────────
@@ -231,6 +257,7 @@ public final class SlotManager {
 
 
 
+    @SuppressFBWarnings("MS_EXPOSE_REP")
     public static List<SlotData> sortedSlots() {
 
         List<SlotData> cached = cachedSortedSlots;
@@ -253,6 +280,43 @@ public final class SlotManager {
 
 
 
+    /**
+     * 1.27 — Returns slots sorted according to the given {@link com.customblocks.gui.SortMode}.
+     * Bypasses the alphabetical cache — not cached because sort mode is per-player session.
+     */
+    public static List<SlotData> sortedSlots(com.customblocks.gui.SortMode mode) {
+        if (mode == null || mode == com.customblocks.gui.SortMode.NAME_ASC) return sortedSlots();
+        java.util.stream.Stream<SlotData> base = byId.values().stream()
+                .filter(d -> !"tab_icon".equals(d.customId));
+        Comparator<SlotData> cmp = switch (mode) {
+            case NAME_DESC       -> Comparator.comparing((SlotData d) -> d.displayNameLower).reversed();
+            case INDEX_ASC       -> Comparator.comparingInt(d -> d.index);
+            case INDEX_DESC      -> Comparator.comparingInt((SlotData d) -> d.index).reversed();
+            case RECENTLY_EDITED -> Comparator.comparingLong((SlotData d) -> d.lastEditedAt).reversed();
+            case ANIMATED_FIRST  -> Comparator.comparingInt((SlotData d) -> d.isAnimated() ? 0 : 1)
+                                              .thenComparing(d -> d.displayNameLower);
+            case BROKEN_FIRST    -> Comparator.comparingInt((SlotData d) ->
+                                              (d.isBroken || d.texture == null || d.texture.length <= 4) ? 0 : 1)
+                                              .thenComparing(d -> d.displayNameLower);
+            case BY_CATEGORY     -> Comparator.comparing((SlotData d) -> {
+                                              java.util.Set<String> cats = com.customblocks.core.CategoryManager.getCategoriesForBlock(d.customId);
+                                              return cats.isEmpty() ? "\uFFFF" : cats.iterator().next();
+                                          }).thenComparing(d -> d.displayNameLower);
+            case BY_SIZE         -> Comparator.comparingInt((SlotData d) ->
+                                              d.texture != null ? d.texture.length : 0).reversed()
+                                              .thenComparing(d -> d.displayNameLower);
+            case LOCKED_FIRST    -> Comparator.comparingInt((SlotData d) ->
+                                              com.customblocks.core.LockManager.isLocked(d.customId) ? 0 : 1)
+                                              .thenComparing(d -> d.displayNameLower);
+            case BY_GLOW         -> Comparator.comparingInt((SlotData d) -> d.lightLevel).reversed()
+                                              .thenComparing(d -> d.displayNameLower);
+            case BY_SOUND        -> Comparator.comparing((SlotData d) -> d.soundType)
+                                              .thenComparing(d -> d.displayNameLower);
+            default              -> Comparator.comparing(d -> d.displayNameLower);
+        };
+        return base.sorted(cmp).collect(Collectors.toList());
+    }
+
     /** @return All slots that are currently considered broken. */
 
     public static java.util.List<SlotData> brokenBlocks() {
@@ -265,6 +329,82 @@ public final class SlotManager {
 
                 .collect(Collectors.toList());
 
+    }
+
+    /**
+     * 1.23 — Returns broken slots with a per-slot reason enum so the GUI can
+     * show the admin an actionable tooltip for each broken block.
+     */
+    public static java.util.Map<SlotData, SlotData.TextureReason> brokenBlocksWithReasons() {
+        java.util.Map<SlotData, SlotData.TextureReason> result = new java.util.LinkedHashMap<>();
+        Path texDir = Path.of(TEXTURES_DIR);
+        for (SlotData d : byId.values()) {
+            if ("tab_icon".equals(d.customId)) continue;
+            if (SUPPRESSED_IDS.contains(d.customId)) continue; // 1.23 — admin suppressed
+            boolean noTexture = d.texture == null || d.texture.length <= 4;
+            if (!noTexture && !d.isBroken) continue; // slot is fine
+
+            SlotData.TextureReason reason;
+            if (d.isBroken) {
+                reason = SlotData.TextureReason.CORRUPTED;
+            } else {
+                // texture == null: distinguish NEVER_UPLOADED vs FILE_MISSING
+                Path datFile = texDir.resolve("slot_" + d.index + ".dat");
+                reason = java.nio.file.Files.exists(datFile)
+                        ? SlotData.TextureReason.FILE_MISSING
+                        : SlotData.TextureReason.NEVER_UPLOADED;
+            }
+            result.put(d, reason);
+        }
+        return result;
+    }
+
+    /** 1.23 — Returns true if the admin has suppressed the broken-texture warning for this block. */
+    public static boolean isSuppressed(String customId) {
+        return SUPPRESSED_IDS.contains(customId);
+    }
+
+    /** 1.23 — Toggles the suppress flag for the given block and persists to disk. */
+    public static void setSuppressed(String customId, boolean suppressed) {
+        if (suppressed) SUPPRESSED_IDS.add(customId);
+        else SUPPRESSED_IDS.remove(customId);
+        saveSuppressedAsync();
+    }
+
+    private static void saveSuppressedAsync() {
+        IO_EXECUTOR.submit(() -> {
+            try {
+                Path file = Path.of(SUPPRESSED_FILE);
+                Files.createDirectories(file.getParent());
+                com.google.gson.JsonArray arr = new com.google.gson.JsonArray();
+                SUPPRESSED_IDS.forEach(arr::add);
+                com.google.gson.JsonObject root = new com.google.gson.JsonObject();
+                root.add("suppressed", arr);
+                Path tmp = Path.of(SUPPRESSED_FILE + ".tmp");
+                Files.writeString(tmp, GSON.toJson(root), StandardCharsets.UTF_8);
+                Files.move(tmp, file, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            } catch (Exception e) {
+                LOGGER.error("[CustomBlocks] Failed to save suppressed blocks", e);
+            }
+        });
+    }
+
+    private static void loadSuppressed() {
+        Path file = Path.of(SUPPRESSED_FILE);
+        if (!Files.exists(file)) return;
+        try {
+            String json = Files.readString(file, StandardCharsets.UTF_8);
+            com.google.gson.JsonObject root = JsonParser.parseString(json).getAsJsonObject();
+            SUPPRESSED_IDS.clear();
+            if (root.has("suppressed")) {
+                for (com.google.gson.JsonElement el : root.getAsJsonArray("suppressed")) {
+                    SUPPRESSED_IDS.add(el.getAsString());
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warn("[CustomBlocks] Failed to load suppressed_blocks.json: {}", e.getMessage());
+        }
     }
 
 
@@ -308,6 +448,7 @@ public final class SlotManager {
         SlotData data = SlotData.createTrusted(idx, customId, displayName, texture);
 
         put(data);
+        packDirty = true; // 1.11 — new block always needs a pack rebuild
 
         // Phase 1: write texture to individual file
         if (data.texture != null && data.texture.length > 0) {
@@ -360,6 +501,7 @@ public final class SlotManager {
             final byte[] texCopy = data.texture.clone();
             IO_EXECUTOR.submit(() -> writeTextureFile(slotIdx, texCopy));
         }
+        packDirty = true; // 1.11 — new slot with texture changes the pack
 
         return data;
 
@@ -375,24 +517,29 @@ public final class SlotManager {
 
         if (old == null) return;
 
-        SlotData updated = mutator.apply(old);
+        // 1.27 — stamp lastEditedAt on every mutation
+        SlotData updated = mutator.apply(old).withLastEditedAt(System.currentTimeMillis());
 
         put(updated);
 
         // Phase 1: detect texture changes and write to file
-        if (old.texture != updated.texture) {
+        // 7.42 — use Arrays.equals (content comparison) instead of != (reference equality)
+        // because withTexture() always creates a new byte[] so != is always true
+        if (!java.util.Arrays.equals(old.texture, updated.texture)) {
             final int slotIdx = updated.index;
             final byte[] texCopy = updated.texture != null ? updated.texture.clone() : null;
             IO_EXECUTOR.submit(() -> writeTextureFile(slotIdx, texCopy));
+            packDirty = true; // 1.11 — texture change rebuilds pack
         }
         for (String face : SlotData.FACE_KEYS) {
             byte[] oldFace = old.faceTextures.get(face);
             byte[] newFace = updated.faceTextures.get(face);
-            if (oldFace != newFace) {
+            if (!java.util.Arrays.equals(oldFace, newFace)) { // 7.42 — content comparison
                 final int slotIdx = updated.index;
                 final String faceName = face;
                 final byte[] faceCopy = newFace != null ? newFace.clone() : null;
                 IO_EXECUTOR.submit(() -> writeFaceTextureFile(slotIdx, faceName, faceCopy));
+                packDirty = true; // 1.11 — face texture change rebuilds pack
             }
         }
         // H4 — persist any changed variant textures
@@ -408,7 +555,11 @@ public final class SlotManager {
                 final int vi = i;
                 IO_EXECUTOR.submit(() -> writeVariantTextureFile(updated.index, vi, null));
             }
+            packDirty = true; // 1.11 — variant texture change rebuilds pack
         }
+        // 1.11 — animMeta and shape changes also affect the pack
+        if (!java.util.Objects.equals(old.animMeta, updated.animMeta)) packDirty = true;
+        if (!java.util.Objects.equals(old.shapeBoxes, updated.shapeBoxes)) packDirty = true;
     }
 
 
@@ -451,10 +602,13 @@ public final class SlotManager {
             // Phase 1: clean up texture files
             final int slotIdx = data.index;
             IO_EXECUTOR.submit(() -> deleteTextureFiles(slotIdx));
+            packDirty = true; // 1.11 — removing a block changes the pack
             CategoryManager.clearAssignments(customId);
             LockManager.onBlockDeleted(customId);
             BlockNotesManager.onBlockDeleted(customId);
             SearchIndex.invalidate();
+            // 7.31 — clear VoxelShape cache so deleted slot index doesn't bleed into a reused slot
+            com.customblocks.block.SlotBlock.invalidateShape(data.index);
         }
 
         return data;
@@ -631,9 +785,17 @@ public final class SlotManager {
 
 
 
+    @SuppressFBWarnings("MS_EXPOSE_REP")
     public static byte[] getTabIconTexture()             { return tabIconTexture; }
 
-    public static void setTabIconTexture(byte[] texture) { tabIconTexture = texture; }
+    @SuppressFBWarnings("EI_EXPOSE_STATIC_REP2")
+    public static void setTabIconTexture(byte[] texture) {
+        tabIconTexture = texture;
+        packDirty = true; // 1.11 — tab icon texture is embedded in the pack
+    }
+
+    /** 1.17 — True only after the async startup texture load has fully completed. */
+    public static boolean isStartupLoadComplete() { return startupLoadComplete; }
 
 
 
@@ -647,7 +809,9 @@ public final class SlotManager {
      */
     public static void rotateBackups(Path file) {
         try {
-            String name = file.getFileName().toString();
+            java.nio.file.Path fileName = file.getFileName();
+            if (fileName == null) return;
+            String name = fileName.toString();
             String base;
             String ext;
             if (name.endsWith(".json.gz")) {
@@ -662,6 +826,7 @@ public final class SlotManager {
                 ext = dot > 0 ? name.substring(dot) : "";
             }
             Path dir = file.getParent();
+            if (dir == null) return;
             Path bak3 = dir.resolve(base + ".bak3" + ext);
             Path bak2 = dir.resolve(base + ".bak2" + ext);
             Path bak1 = dir.resolve(base + ".bak1" + ext);
@@ -671,7 +836,19 @@ public final class SlotManager {
             if (Files.exists(file)) Files.copy(file, bak1, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             LOGGER.info("[CustomBlocks] Backup saved to {}", bak1.getFileName());
         } catch (Exception bakEx) {
+            // 1.15 Rule 4 — backup failure is serious; broadcast in-game warning if server is running
             LOGGER.warn("[CustomBlocks] Could not create backup: {}", bakEx.getMessage());
+            net.minecraft.server.MinecraftServer srv = com.customblocks.network.ResourcePackServer.getServer();
+            if (srv != null) {
+                srv.execute(() -> {
+                    for (net.minecraft.server.network.ServerPlayerEntity p : srv.getPlayerManager().getPlayerList()) {
+                        if (p.hasPermissionLevel(3)) {
+                            p.sendMessage(net.minecraft.text.Text.literal(
+                                "§c[CustomBlocks] ⚠ Backup copy FAILED — data safety reduced! Check disk space."), false);
+                        }
+                    }
+                });
+            }
         }
     }
 
@@ -688,7 +865,10 @@ public final class SlotManager {
     }
 
     private static void writeCompressedJsonAtomic(Path file, String json) throws IOException {
-        Path tempFile = file.getParent().resolve(file.getFileName().toString() + ".tmp");
+        Path parent = file.getParent();
+        java.nio.file.Path baseName = file.getFileName();
+        if (parent == null || baseName == null) throw new IOException("Cannot write atomic file: path has no parent or filename: " + file);
+        Path tempFile = parent.resolve(baseName + ".tmp");
         try (java.util.zip.GZIPOutputStream gz = new java.util.zip.GZIPOutputStream(Files.newOutputStream(tempFile));
              OutputStreamWriter osw = new OutputStreamWriter(gz, StandardCharsets.UTF_8);
              BufferedWriter bw = new BufferedWriter(osw)) {
@@ -738,6 +918,8 @@ public final class SlotManager {
                     } catch (Exception e) {
                         LOGGER.error("[CustomBlocks] Failed to generate fresh config files", e);
                     }
+                    // 1.17 — fresh start: no textures to load, mark complete immediately
+                    startupLoadComplete = true;
                     return;
                 }
             }
@@ -802,22 +984,27 @@ public final class SlotManager {
                 }
                 if (queue.isEmpty()) {
                     postProcessLoadedSlots();
-                    LOGGER.info("[CustomBlocks] Loaded {} slots ({} free).", byId.size(), freeSlotIndices.size());
+                    LOGGER.info("[CustomBlocks] Loaded {} slots ({} free). Starting async texture load...", byId.size(), freeSlotIndices.size());
+                    loadTexturesAsync(); // 1.10
                 } else {
                     LOGGER.info("[CustomBlocks] Queued {} slots for chunked startup load (batch={}).", queue.size(), STARTUP_LOAD_BATCH_SIZE);
                 }
             } else {
                 postProcessLoadedSlots();
-                LOGGER.info("[CustomBlocks] Loaded {} slots ({} free).", byId.size(), freeSlotIndices.size());
+                LOGGER.info("[CustomBlocks] Loaded {} slots ({} free). Starting async texture load...", byId.size(), freeSlotIndices.size());
+                loadTexturesAsync(); // 1.10
             }
 
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
 
             LOGGER.error("[CustomBlocks] Failed to load slot data", e);
 
             com.customblocks.gui.GuiManager.logError();
 
         }
+
+        loadSuppressed(); // 1.23
+        UndoManager.cleanupOrphans(); // 1.28 — delete leftover snapshot files from prior run
 
     }
 
@@ -852,12 +1039,132 @@ public final class SlotManager {
 
         try {
             postProcessLoadedSlots();
-            LOGGER.info("[CustomBlocks] Startup load complete: {} slots loaded in 200-entry batches.", byId.size());
-            ResourcePackServer.updatePack();
+            LOGGER.info("[CustomBlocks] JSON parse complete: {} slots loaded in 200-entry batches. Starting async texture load...", byId.size());
+            loadTexturesAsync(); // 1.10 — Phase 2: load texture .dat files on IO_EXECUTOR
         } catch (Exception postEx) {
             LOGGER.error("[CustomBlocks] Failed to finalize chunked startup load", postEx);
             com.customblocks.gui.GuiManager.logError();
         }
+    }
+
+    /**
+     * 1.10 — Phase 2 of startup: load texture .dat files for all slots on IO_EXECUTOR
+     * so the main server thread never blocks on disk I/O.
+     *
+     * For each slot: loads main texture (if missing), face textures, and variant textures.
+     * Progress is logged every 100 slots. On completion calls finalizeStartupLoad().
+     */
+    private static void loadTexturesAsync() {
+        List<SlotData> toProcess;
+        synchronized (SlotManager.class) {
+            toProcess = new ArrayList<>(byId.values());
+        }
+
+        if (!Files.exists(Path.of(TEXTURES_DIR)) || toProcess.isEmpty()) {
+            LOGGER.info("[CustomBlocks] Async texture load: nothing to load from disk.");
+            finalizeStartupLoad();
+            return;
+        }
+
+        int total = toProcess.size();
+        LOGGER.info("[CustomBlocks] Loading {} slot texture(s) asynchronously...", total);
+        long startTime = System.currentTimeMillis();
+
+        java.util.concurrent.atomic.AtomicInteger slotsDone  = new java.util.concurrent.atomic.AtomicInteger(0);
+        java.util.concurrent.atomic.AtomicInteger texLoaded  = new java.util.concurrent.atomic.AtomicInteger(0);
+        java.util.concurrent.atomic.AtomicInteger faceLoaded = new java.util.concurrent.atomic.AtomicInteger(0);
+
+        // IO_EXECUTOR is single-threaded — tasks run sequentially on a background thread.
+        for (SlotData d : toProcess) {
+            IO_EXECUTOR.submit(() -> {
+                try {
+                    // Main texture
+                    if (d.texture == null || d.texture.length == 0) {
+                        byte[] tex = readTextureFile(d.index);
+                        if (tex != null && tex.length > 0) {
+                            synchronized (SlotManager.class) {
+                                SlotData cur = byId.get(d.customId);
+                                if (cur != null && (cur.texture == null || cur.texture.length == 0)) {
+                                    put(cur.withTexture(tex));
+                                }
+                            }
+                            texLoaded.incrementAndGet();
+                        }
+                    }
+                    // Face textures
+                    for (String face : SlotData.FACE_KEYS) {
+                        if (!d.faceTextures.containsKey(face)) {
+                            byte[] faceTex = readFaceTextureFile(d.index, face);
+                            if (faceTex != null && faceTex.length > 0) {
+                                synchronized (SlotManager.class) {
+                                    SlotData cur = byId.get(d.customId);
+                                    if (cur != null && !cur.faceTextures.containsKey(face)) {
+                                        put(cur.withFaceTexture(face, faceTex));
+                                    }
+                                }
+                                faceLoaded.incrementAndGet();
+                            }
+                        }
+                    }
+                    // Variant textures (H4)
+                    if (d.variantTextures.isEmpty()) {
+                        List<byte[]> variants = readVariantTextureFiles(d.index);
+                        if (!variants.isEmpty()) {
+                            synchronized (SlotManager.class) {
+                                SlotData cur = byId.get(d.customId);
+                                if (cur != null && cur.variantTextures.isEmpty()) {
+                                    put(cur.withVariantTextures(variants));
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    LOGGER.warn("[CustomBlocks] Error loading texture for slot_{}: {}", d.index, e.getMessage());
+                }
+
+                // Progress + completion (single-threaded executor → no race on done == total)
+                int done = slotsDone.incrementAndGet();
+                if (done % 100 == 0 || done == total) {
+                    LOGGER.info("[CustomBlocks] Loading textures... {}/{} ({}%)", done, total, done * 100 / total);
+                }
+                if (done == total) {
+                    long elapsed = System.currentTimeMillis() - startTime;
+                    LOGGER.info("[CustomBlocks] All {} textures loaded in {}.{}s (async). {} main, {} face.",
+                        total, elapsed / 1000, (elapsed % 1000) / 100,
+                        texLoaded.get(), faceLoaded.get());
+                    finalizeStartupLoad();
+                }
+            });
+        }
+    }
+
+    /**
+     * 1.10+1.17 — Called after all textures are loaded (either async or immediately on fresh start).
+     * Runs the 1.9 power-of-2 scan, marks startupLoadComplete, triggers the deferred pack build.
+     */
+    private static void finalizeStartupLoad() {
+        // 1.9 — auto-fix any non-power-of-2 textures now that they're all in memory
+        synchronized (SlotManager.class) {
+            int fixed = 0;
+            for (SlotData d : new ArrayList<>(byId.values())) {
+                if (d.texture == null || d.texture.length == 0) continue;
+                int frames = com.customblocks.ImageProcessor.getVerticalFrames(d.texture);
+                if (frames > 1) continue; // animated strips handled by processAnimation
+                byte[] fixedTex = com.customblocks.ImageProcessor.ensurePowerOf2(d.texture);
+                if (fixedTex != d.texture) {
+                    put(d.withTexture(fixedTex));
+                    writeTextureFile(d.index, fixedTex);
+                    fixed++;
+                }
+            }
+            if (fixed > 0) {
+                LOGGER.warn("[CustomBlocks] 1.9 Auto-fixed {} texture(s) with non-power-of-2 dimensions.", fixed);
+                saveAll();
+            }
+        }
+        startupLoadComplete = true;
+        LOGGER.info("[CustomBlocks] Startup load complete — triggering resource pack build.");
+        com.customblocks.network.ServerPackGenerator.flushPendingBuildIfNeeded();
     }
 
     private static void postProcessLoadedSlots() throws IOException {
@@ -896,41 +1203,10 @@ public final class SlotManager {
                 }
             }
 
+            // 1.10 — Texture loading from .dat files is done asynchronously in loadTexturesAsync().
+            // Migration only: if the textures directory doesn't exist, write any textures that
+            // are already in memory (from legacy JSON base64) out to .dat files once.
             Path texDir = Path.of(TEXTURES_DIR);
-            if (Files.exists(texDir)) {
-                int texLoaded = 0, faceLoaded = 0;
-                for (SlotData d : new ArrayList<>(byId.values())) {
-                    if (d.texture == null || d.texture.length == 0) {
-                        byte[] tex = readTextureFile(d.index);
-                        if (tex != null) {
-                            put(d.withTexture(tex));
-                            texLoaded++;
-                            d = byId.get(d.customId);
-                        }
-                    }
-                    for (String face : SlotData.FACE_KEYS) {
-                        if (!d.faceTextures.containsKey(face)) {
-                            byte[] faceTex = readFaceTextureFile(d.index, face);
-                            if (faceTex != null) {
-                                put(d.withFaceTexture(face, faceTex));
-                                faceLoaded++;
-                                d = byId.get(d.customId);
-                            }
-                        }
-                    }
-                    // H4 — load variant textures from disk
-                    if (d.variantTextures.isEmpty()) {
-                        List<byte[]> variants = readVariantTextureFiles(d.index);
-                        if (!variants.isEmpty()) {
-                            put(d.withVariantTextures(variants));
-                        }
-                    }
-                }
-                if (texLoaded > 0 || faceLoaded > 0) {
-                    LOGGER.info("[CustomBlocks] Loaded {} textures and {} face textures from files.", texLoaded, faceLoaded);
-                }
-            }
-
             if (!Files.exists(texDir)) {
                 int migrated = 0;
                 for (SlotData d : byId.values()) {
@@ -946,8 +1222,21 @@ public final class SlotManager {
                     LOGGER.info("[CustomBlocks] Migration complete: wrote {} texture files to {}.", migrated, texDir);
                 }
             }
+            // 1.9 scan + pack build are deferred to finalizeStartupLoad() after async texture loading.
 
             rebuildFreeSlotSet();
+
+            // 1.16 Guard 1 — refuse to operate with maxSlots below the highest used slot index
+            int highestUsed = highestUsedSlotIndex();
+            if (highestUsed >= 0 && CustomBlocksConfig.maxSlots < highestUsed + 1) {
+                int needed = highestUsed + 1;
+                LOGGER.warn("[CustomBlocks] ⚠ maxSlots ({}) is below the highest used slot index ({}) — "
+                    + "auto-correcting to {}. Raise maxSlots in config to at least {} to keep all blocks.",
+                    CustomBlocksConfig.maxSlots, highestUsed, needed, needed);
+                CustomBlocksConfig.maxSlots = needed;
+                rebuildFreeSlotSet(); // redo with corrected value
+                CustomBlocksConfig.save(); // persist so next startup is correct
+            }
         }
     }
 
@@ -975,6 +1264,16 @@ public final class SlotManager {
         if (dirty) {
             dirty = false;
             saveAllAsync();
+        }
+        // 7.11 — wait for pending IO to complete before JVM exits (max 10s)
+        IO_EXECUTOR.shutdown();
+        try {
+            if (!IO_EXECUTOR.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                LOGGER.warn("[CustomBlocks] IO_EXECUTOR did not finish in 10s on shutdown — some data may not be written");
+            }
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            LOGGER.warn("[CustomBlocks] flushSave interrupted during shutdown");
         }
     }
 
@@ -1023,7 +1322,7 @@ public final class SlotManager {
                         // Create a backup and REFUSE to overwrite
                         Path bakFile = dir.resolve(DATA_FILE + ".bak");
                         if (!Files.exists(bakFile)) {
-                            try { Files.copy(file, bakFile); } catch (Exception ignored) {}
+                            try { Files.copy(file, bakFile); } catch (Exception e) { LOGGER.warn("[CustomBlocks] Could not write backup file {}: {}", bakFile, e.getMessage()); }
                             LOGGER.warn("[CustomBlocks] Created backup at {} (disk had {} textured, memory has {})",
                                     bakFile, diskTextured, newTextured);
                         }
@@ -1067,16 +1366,25 @@ public final class SlotManager {
 
                 Files.move(tempFile, file, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
 
-                // Fix 3: Update textured_count.txt for next save's safety check
+                // Fix 3: Update textured_count.txt for next save's safety check — 1.15: atomic
                 try {
-                    Files.writeString(countFile, String.valueOf(newTextured), StandardCharsets.UTF_8);
+                    Path countTmp = countFile.resolveSibling(countFile.getFileName() + ".tmp");
+                    Files.writeString(countTmp, String.valueOf(newTextured), StandardCharsets.UTF_8);
+                    Files.move(countTmp, countFile, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
                 } catch (Exception ignored) { /* non-critical */ }
 
-                // Pass the EXACT same snapshot to the Resource Pack generator
+                // 1.11 — only rebuild the pack if pack-relevant data (textures, models,
+                // animation metadata) changed. Metadata-only saves (rename, category, lock)
+                // must NOT trigger an expensive ZIP rebuild; that's the root cause of the
+                // GIF-placement kick: a rename save fired while an animated texture was drip-
+                // feeding → ZIP rebuilt → server thrashed → keepalive missed → kick.
+                boolean shouldRebuildPack = packDirty;
+                packDirty = false;
+                if (shouldRebuildPack) {
+                    ResourcePackServer.updatePackWithSnapshot(snapshot);
+                }
 
-                ResourcePackServer.updatePackWithSnapshot(snapshot);
-
-            } catch (Exception e) {
+            } catch (IOException | RuntimeException e) {
 
                 LOGGER.error("[CustomBlocks] Failed to save slot data asynchronously", e);
 
@@ -1125,17 +1433,31 @@ public final class SlotManager {
             }
             Files.move(tmpFile, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
 
-            // Write textures as .dat files
+            // Write textures as .dat files — 1.15: all writes are atomic
             for (SlotData data : byId.values()) {
-                if (data.texture != null && data.texture.length > 0)
-                    Files.write(texDir.resolve("slot_" + data.index + ".dat"), data.texture);
-                for (var face : data.faceTextures.entrySet())
-                    Files.write(texDir.resolve("slot_" + data.index + "_" + face.getKey() + ".dat"), face.getValue());
-                for (int vi = 0; vi < data.variantTextures.size(); vi++)
-                    Files.write(texDir.resolve("slot_" + data.index + "_var" + vi + ".dat"), data.variantTextures.get(vi));
+                if (data.texture != null && data.texture.length > 0) {
+                    Path t = texDir.resolve("slot_" + data.index + ".dat");
+                    Path tmp = texDir.resolve("slot_" + data.index + ".dat.tmp");
+                    Files.write(tmp, data.texture);
+                    Files.move(tmp, t, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+                for (var face : data.faceTextures.entrySet()) {
+                    String fname = "slot_" + data.index + "_" + face.getKey() + ".dat";
+                    Path t = texDir.resolve(fname);
+                    Path tmp = texDir.resolve(fname + ".tmp");
+                    Files.write(tmp, face.getValue());
+                    Files.move(tmp, t, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+                for (int vi = 0; vi < data.variantTextures.size(); vi++) {
+                    String vname = "slot_" + data.index + "_var" + vi + ".dat";
+                    Path t = texDir.resolve(vname);
+                    Path tmp = texDir.resolve(vname + ".tmp");
+                    Files.write(tmp, data.variantTextures.get(vi));
+                    Files.move(tmp, t, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
             }
             LOGGER.info("[CustomBlocks] D4: client data saved ({} slots, textures in {}/)", byId.size(), texDir.getFileName());
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             LOGGER.error("[CustomBlocks] Failed to save client data", e);
         }
     }
@@ -1189,13 +1511,13 @@ public final class SlotManager {
                                 }
                             }
                             put(data);
-                        } catch (Exception e) {
+                        } catch (IOException | RuntimeException e) {
                             LOGGER.warn("[CustomBlocks] Client: failed to load slot: {}", e.getMessage());
                         }
                     }
                 }
             }
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             LOGGER.error("[CustomBlocks] Failed to load client data", e);
 
         }
@@ -1251,6 +1573,11 @@ public final class SlotManager {
         // I2 — per-block hologram text override
         if (d.hasHologramText()) {
             obj.addProperty("hologramText", d.hologramText);
+        }
+
+        // 1.27 — last mutation timestamp
+        if (d.lastEditedAt > 0) {
+            obj.addProperty("lastEditedAt", d.lastEditedAt);
         }
 
 
@@ -1369,10 +1696,11 @@ public final class SlotManager {
 
 
         String hologramText = obj.has("hologramText") ? obj.get("hologramText").getAsString() : null;
+        long lastEditedAt = obj.has("lastEditedAt") ? obj.get("lastEditedAt").getAsLong() : 0L;
 
         return SlotData.createTrustedFull(index, customId, displayName, texture,
                 lightLevel, hardness, soundType, faceTextures, animMeta, shapeBoxes, noCol,
-                null, hologramText);
+                null, hologramText, lastEditedAt);
 
     }
 
@@ -1422,30 +1750,39 @@ public final class SlotManager {
 
     // ── Texture file I/O (Phase 1: separate texture files) ─────────────────
 
-    /** Write a single texture file to disk. Called when a texture changes — NOT on every save. */
+    /** Write a single texture file to disk atomically. Called when a texture changes — NOT on every save. */
     private static void writeTextureFile(int slotIndex, byte[] data) {
         try {
             Path dir = Path.of(TEXTURES_DIR);
             Files.createDirectories(dir);
+            Path target = dir.resolve("slot_" + slotIndex + ".dat");
             if (data != null && data.length > 0) {
-                Files.write(dir.resolve("slot_" + slotIndex + ".dat"), data);
+                // 1.15 — atomic write via temp file + move
+                Path tmp = dir.resolve("slot_" + slotIndex + ".dat.tmp");
+                Files.write(tmp, data);
+                Files.move(tmp, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             } else {
-                Files.deleteIfExists(dir.resolve("slot_" + slotIndex + ".dat"));
+                Files.deleteIfExists(target);
             }
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] Failed to write texture for slot_{}", slotIndex, e);
         }
     }
 
-    /** Write a face texture file. */
+    /** Write a face texture file atomically. */
     private static void writeFaceTextureFile(int slotIndex, String face, byte[] data) {
         try {
             Path dir = Path.of(TEXTURES_DIR);
             Files.createDirectories(dir);
+            String name = "slot_" + slotIndex + "_" + face + ".dat";
+            Path target = dir.resolve(name);
             if (data != null && data.length > 0) {
-                Files.write(dir.resolve("slot_" + slotIndex + "_" + face + ".dat"), data);
+                // 1.15 — atomic write
+                Path tmp = dir.resolve(name + ".tmp");
+                Files.write(tmp, data);
+                Files.move(tmp, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             } else {
-                Files.deleteIfExists(dir.resolve("slot_" + slotIndex + "_" + face + ".dat"));
+                Files.deleteIfExists(target);
             }
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] Failed to write face texture for slot_{}_{}", slotIndex, face, e);
@@ -1490,16 +1827,20 @@ public final class SlotManager {
 
     // ── H4: Variant texture file I/O ─────────────────────────────────────────
 
-    /** H4 — write a variant texture for a given slot (variantIdx 0-based). */
+    /** H4 — write a variant texture for a given slot (variantIdx 0-based) atomically. */
     private static void writeVariantTextureFile(int slotIndex, int variantIdx, byte[] data) {
         try {
             Path dir = Path.of(TEXTURES_DIR);
             Files.createDirectories(dir);
             String name = "slot_" + slotIndex + "_var" + variantIdx + ".dat";
+            Path target = dir.resolve(name);
             if (data != null && data.length > 0) {
-                Files.write(dir.resolve(name), data);
+                // 1.15 — atomic write
+                Path tmp = dir.resolve(name + ".tmp");
+                Files.write(tmp, data);
+                Files.move(tmp, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             } else {
-                Files.deleteIfExists(dir.resolve(name));
+                Files.deleteIfExists(target);
             }
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] Failed to write variant {} for slot_{}", variantIdx, slotIndex, e);

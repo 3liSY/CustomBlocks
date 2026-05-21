@@ -52,8 +52,6 @@ public final class TextSanitizer {
             .replace("\u00E2\u20AC\u02DC", "\u2018")
             .replace("\u00E2\u20AC\u2122", "\u2019");
 
-        fixed = fixed.replaceAll("\\?([0-9A-FK-ORa-fk-or])", "\u00A7$1");
-
         return fixed
             .replace("Search closed ? nothing was searched.", "Search closed \u2014 nothing was searched.")
             .replace("Bulk apply complete ? ", "Bulk apply complete \u2014 ")

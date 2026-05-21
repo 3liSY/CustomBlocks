@@ -90,6 +90,12 @@ public final class HelpRegistry {
         add("Admin", "/cb showcase <id>", "Spawn a 30s floating display entity of the block", "customblocks.use");
         add("Admin", "/cb panic [confirm]", "Emergency 30s snapshot rollback", "customblocks.admin");
         add("Admin", "/cb recover", "GUI for snapshot restoration", "customblocks.admin");
+        sec("Templates");
+        add("Templates", "/cb template save <name> <blockId>", "Save a block's properties as a reusable template", "customblocks.edit");
+        add("Templates", "/cb template apply <name> <blockId>", "Apply a template's properties to a block", "customblocks.edit");
+        add("Templates", "/cb template list", "List all saved templates", "customblocks.edit");
+        add("Templates", "/cb template delete <name>", "Delete a saved template", "customblocks.edit");
+        add("Templates", "/cb help scopes", "Scope expression syntax reference (all, category:key, name:*, favorites, etc.)", "customblocks.use");
     }
 
     private static void sec(String name) {

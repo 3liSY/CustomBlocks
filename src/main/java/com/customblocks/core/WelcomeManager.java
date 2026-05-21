@@ -49,7 +49,7 @@ public final class WelcomeManager {
                 for (JsonElement e : root.getAsJsonArray("players")) {
                     try {
                         KNOWN_PLAYERS.add(UUID.fromString(e.getAsString()));
-                    } catch (Exception ignored) {}
+                    } catch (IllegalArgumentException ignored) {}
                 }
             }
         } catch (Exception ex) {
@@ -60,7 +60,8 @@ public final class WelcomeManager {
     public static void save() {
         if (!loaded) return;
         try {
-            Files.createDirectories(DATA_PATH.getParent());
+            Path wParent = DATA_PATH.getParent();
+            if (wParent != null) Files.createDirectories(wParent);
             JsonObject root = new JsonObject();
             JsonArray arr = new JsonArray();
             for (UUID u : KNOWN_PLAYERS) arr.add(u.toString());

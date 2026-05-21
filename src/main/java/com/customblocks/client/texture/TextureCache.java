@@ -44,7 +44,9 @@ public class TextureCache {
             try {
                 NativeImage img = NativeImage.read(new ByteArrayInputStream(bytes));
                 DECODED.putIfAbsent(customId, img);
-            } catch (IOException ignored) {}
+            } catch (IOException e) {
+                CustomBlocksMod.LOGGER.debug("[CB] Preload decode failed for {}: {}", customId, e.getMessage());
+            }
         });
     }
 
@@ -61,7 +63,7 @@ public class TextureCache {
             NativeImageBackedTexture tex = new NativeImageBackedTexture(image);
             Identifier texId = Identifier.of(CustomBlocksMod.MOD_ID, "dynamic/" + customId);
             var tm = MinecraftClient.getInstance().getTextureManager();
-            try { tm.destroyTexture(texId); } catch (Exception ignored) {}
+            try { tm.destroyTexture(texId); } catch (Exception e) { CustomBlocksMod.LOGGER.debug("[CB] destroyTexture {}: {}", texId, e.getMessage()); }
             tm.registerTexture(texId, tex);
             TexInfo info = new TexInfo(texId, w, h);
             CACHE.put(customId, info);
@@ -105,7 +107,7 @@ public class TextureCache {
         DECODED.clear();
         var tm = MinecraftClient.getInstance().getTextureManager();
         for (TexInfo info : CACHE.values()) {
-            try { tm.destroyTexture(info.id()); } catch (Exception ignored) {}
+            try { tm.destroyTexture(info.id()); } catch (Exception e) { CustomBlocksMod.LOGGER.debug("[CB] destroyTexture {}: {}", info.id(), e.getMessage()); }
         }
         CACHE.clear();
     }

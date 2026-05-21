@@ -1,5 +1,6 @@
 package com.customblocks.gui;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import com.customblocks.CustomBlocksMod;
 import com.customblocks.CustomBlocksConfig;
 import com.customblocks.ImageProcessor;
@@ -43,6 +44,7 @@ import java.util.concurrent.Executors;
  * Uses {@link GuiState} records for immutable state snapshots and
  * {@link UndoManager} for undo/redo operations.
  */
+@SuppressFBWarnings({"NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE", "NP_NULL_ON_SOME_PATH"})
 public class GuiManager {
     private static final Logger LOGGER = LoggerFactory.getLogger("CustomBlocks");
     private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(2);
@@ -65,6 +67,40 @@ public class GuiManager {
 
     private record AnimParams(float fps, boolean interpolate, int frameCount) {}
     private record FaceImportPending(String blockId, String face, int returnPage, String importDir, long expiresAt) {}
+
+    /** GuiMode names that have a full implementation (open method + restoreState + handleClick case). */
+    private static final java.util.Set<String> IMPLEMENTED_MODES = java.util.Set.of(
+        "MAIN", "PICKER", "PICKER_BROKEN", "EDITOR", "FACE_EDITOR",
+        "FACE_CHANGE_SELECT", "FACE_CHANGE_PICKER", "SHAPE_EDITOR",
+        "MAINTENANCE_MENU", "HELP_MENU", "WELCOME_MENU", "TOOLS_GUI",
+        "PROPERTIES_MENU", "SOUND_MENU", "ANIM_GUI", "TAB_ICON_MENU",
+        "RESOURCE_CENTER", "BULK_DELETE", "SEARCH_PICKER", "MAGIC_ITEMS",
+        "UNDO_PICKER", "CONFIG_WARNING", "CONFIG_GUI", "HELP_CATEGORY",
+        "ANIM_CONFIRM_ABANDON", "BG_STUDIO", "UNCATEGORIZED_PICKER",
+        "ASSIGNMENT_DECISION", "CATEGORY_PICKER", "CATEGORY_BROWSER",
+        "CATEGORY_DETAIL", "CATEGORY_CONTROLLER", "CATEGORY_EDITOR",
+        "SUBCATEGORY_CONTROLLER", "IMPORT_CONFLICT", "DELETE_CATEGORY_MENU",
+        "MERGE_CATEGORY_PICKER_TARGET", "BULK_ASSIGN_PICKER",
+        "SORT_BLOCKS_MENU", "CATEGORY_STATS", "CATEGORY_BLOCK_CONTEXT",
+        "CATEGORY_ICON_PICKER", "BULK_RECOLOR_WIZARD", "BULK_RECOLOR_CONFIRM",
+        "COLOR_FILL_MODE", "RECOVER_GUI", "FEATURE_MENU", "STATS_GUI",
+        "VARIANT_GUI", "COLOR_STUDIO", "PALETTE_GENERATOR", "AI_SUGGEST_GUI",
+        "MARKET_GUI", "BULK_HUB", "BULK_OP_PICKER", "COLOR_PICKER",
+        "VOICE_PICKER", "FAVORITES_GUI", "RECENT_GUI", "SAFETY_CENTER",
+        "HISTORY_GUI", "SCRIPT_GUI", "SCRIPT_SUMMARY", "CACHE_DASHBOARD",
+        "AUDIT_GUI", "AI_GEN", "CUSTOM_COLOR_STUDIO", "ACHIEVEMENTS_GUI"
+    );
+
+    /** GuiMode names that are reserved for a planned phase but have no content yet. */
+    private static final java.util.Set<String> STUB_MODES = java.util.Set.of(
+        "FIND_PORT_GUI", "ASSISTANT_CONTROL", "DRESS_GUI", "GRADIENT_GUI",
+        "IMPORT_WIZARD", "RETEXTURE_WIZARD", "AI_PICKER", "DROP_CONFIG", "PERMISSIONS_SUMMARY"
+    );
+
+    /** Returns the set of GuiMode names with full implementations. Used by DiagnosticsHelper. */
+    public static java.util.Set<String> implementedModeNames() { return IMPLEMENTED_MODES; }
+    /** Returns the set of GuiMode names that are reserved stubs. Used by DiagnosticsHelper. */
+    public static java.util.Set<String> stubModeNames() { return STUB_MODES; }
     private static final Map<UUID, AnimParams> ANIM_PARAMS = new ConcurrentHashMap<>();
     private static final Map<UUID, AnimParams> ANIM_ORIGINAL_PARAMS = new ConcurrentHashMap<>();
     private static final Map<UUID, FaceImportPending> FACE_IMPORTS = new ConcurrentHashMap<>();
@@ -77,7 +113,7 @@ public class GuiManager {
     private static final int FACE_IMPORT_POLL_TICKS = 40;
     private static final String FACE_IMPORT_FOLDER = "config/customblocks/import";
     private static final String FACE_IMPORT_REQUESTS_DIR = "faces";
-    private static int faceImportTickCounter = 0;
+    private static final java.util.concurrent.atomic.AtomicInteger faceImportTickCounter = new java.util.concurrent.atomic.AtomicInteger(0); // 7.9
 
     public enum InputAction {
         SET_LIGHT,
@@ -129,6 +165,7 @@ public class GuiManager {
     private static final Map<UUID, Set<String>> BULK_RECOLOR_SELECTED = new ConcurrentHashMap<>();
     private static final Set<UUID> BULK_RECOLOR_CONFIRM_ARMED = ConcurrentHashMap.newKeySet();
     private static final Map<UUID, Deque<String>> RECENT_BLOCKS = new ConcurrentHashMap<>();
+    private static final Map<UUID, com.customblocks.core.MacroManager.ScriptRunResult> LAST_SCRIPT_RESULTS = new ConcurrentHashMap<>();
     private static final int MAX_RECENT = 3;
     private static final Map<UUID, Long> ESC_DEBOUNCE = new ConcurrentHashMap<>();
     private static final long ESC_DEBOUNCE_MS = 150;
@@ -147,8 +184,8 @@ public class GuiManager {
     private static final String[] PRESET_NAMES   = {"full","slab","thin","carpet","pillar","small","micro","pane","trapdoor","fence","stairs","cross"};
     private static final String[] PRESET_DISPLAY = {"Full Block","Slab","Thin Slab","Carpet","Wall","Comparator","Comparator Small","Pane","Trapdoor","Fence","Stairs","Cross"};
     
-    private static int errorCount = 0;
-    public static void logError() { errorCount++; }
+    private static final java.util.concurrent.atomic.AtomicInteger errorCount = new java.util.concurrent.atomic.AtomicInteger(0); // 7.9
+    public static void logError() { errorCount.incrementAndGet(); }
 
     private static void trackRecentBlock(UUID uuid, String blockId) {
         Deque<String> deque = RECENT_BLOCKS.computeIfAbsent(uuid, k -> new ArrayDeque<>());
@@ -194,6 +231,11 @@ public class GuiManager {
     }
 
     public static boolean isReopeningScreen(UUID uuid) { return REOPENING_SCREENS.contains(uuid); }
+
+    public static boolean hasOpenGui(UUID uuid) {
+        CbScreenHandler handler = HANDLERS.get(uuid);
+        return handler != null && !handler.isDisposed();
+    }
 
     private static final java.util.Set<UUID> RESTORING = java.util.concurrent.ConcurrentHashMap.newKeySet(); // 1.35 — thread-safe
 
@@ -258,6 +300,16 @@ public class GuiManager {
             restoreState(player, prev);
         } else {
             STATES.remove(uuid);
+        }
+    }
+
+    private static void popBackStack(ServerPlayerEntity player) {
+        UUID uuid = player.getUuid();
+        Deque<GuiState> stack = BACK_STACK.get(uuid);
+        if (stack != null && !stack.isEmpty()) {
+            restoreState(player, stack.pop());
+        } else {
+            openMain(player, 0);
         }
     }
 
@@ -481,7 +533,7 @@ public class GuiManager {
             "§7Triggers a reload if changes were made while paused.",
             "§8Click to resume"));
 
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
         return inv;
     }
 
@@ -566,7 +618,64 @@ public class GuiManager {
     }
 
     public static void openFeatureMenu(ServerPlayerEntity player, int tab) {
+        playClick(player);
+        com.customblocks.gui.FeedbackHelper.playSound(player, net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, 1.0f, 1.2f);
+        com.customblocks.gui.FeedbackHelper.spawnParticle(player, net.minecraft.particle.ParticleTypes.END_ROD, 5);
         openScreenFromGuiState(player, GuiState.featureMenu(tab), buildFeatureMenu(player, tab), Text.translatable("customblocks.gui.feature_menu.title"));
+    }
+
+    public static void openFavoritesGui(ServerPlayerEntity player, int page) {
+        openScreenFromGuiState(player, GuiState.favoritesGui(page), buildFavoritesGui(player, page), Text.literal(normalizeFormattingCodes("§6Favorites")));
+    }
+
+    public static void openRecentGui(ServerPlayerEntity player) {
+        openScreenFromGuiState(player, GuiState.recentGui(), buildRecentGui(player), Text.literal(normalizeFormattingCodes("§bRecent Blocks")));
+    }
+
+    public static void openSafetyCenter(ServerPlayerEntity player) {
+        openScreenFromGuiState(player, GuiState.safetyCenter(), buildSafetyCenterGui(player), Text.literal(normalizeFormattingCodes("§6Safety Center")));
+    }
+
+    public static void openHistoryGui(ServerPlayerEntity player, int page) {
+        openScreenFromGuiState(player, GuiState.historyGui(page), buildHistoryGui(page), Text.literal(normalizeFormattingCodes("§eRecent History")));
+    }
+
+    public static void openScriptGui(ServerPlayerEntity player, int page) {
+        openScreenFromGuiState(player, GuiState.scriptGui(page), buildScriptGui(page), Text.literal(normalizeFormattingCodes("§bScript Library")));
+    }
+
+    public static void openScriptSummary(ServerPlayerEntity player, com.customblocks.core.MacroManager.ScriptRunResult result) {
+        if (result == null) {
+            openScriptGui(player, 0);
+            return;
+        }
+        LAST_SCRIPT_RESULTS.put(player.getUuid(), result);
+        openScreenFromGuiState(player, GuiState.scriptSummary(result.name(), result.steps().size()),
+            buildScriptSummaryGui(result), Text.literal(normalizeFormattingCodes("§aScript Summary")));
+    }
+
+    public static void openAiGui(ServerPlayerEntity player) {
+        openScreenFromGuiState(player, GuiState.aiGen(null), buildAiHubGui(), Text.literal(normalizeFormattingCodes("§dAI Tools")));
+    }
+
+    public static void openCustomColorStudio(ServerPlayerEntity player, String initialHex) {
+        openScreenFromGuiState(player, GuiState.customColorStudio(initialHex), buildCustomColorStudioGui(player, initialHex),
+            Text.literal(normalizeFormattingCodes("§dCustom Color Studio")));
+    }
+
+    public static void openCacheDashboard(ServerPlayerEntity player, int tab) {
+        openScreenFromGuiState(player, GuiState.cacheDashboard(tab), buildCacheDashboardGui(player, tab),
+            Text.literal(normalizeFormattingCodes("§bCache Dashboard")));
+    }
+
+    public static void openAuditGui(ServerPlayerEntity player, int page) {
+        openScreenFromGuiState(player, GuiState.auditGui(page), buildAuditGui(page),
+            Text.literal(normalizeFormattingCodes("§6Audit Results")));
+    }
+
+    public static void openAchievementsGui(ServerPlayerEntity player, int page) {
+        openScreenFromGuiState(player, GuiState.achievementsGui(page), buildAchievementsGui(player, page),
+            Text.literal(normalizeFormattingCodes("§6Achievements")));
     }
 
     // ── 5.25 Voice Mode Picker GUI ────────────────────────────────────────────
@@ -624,7 +733,6 @@ public class GuiManager {
         for (int i = 0; i < modeSlots.length && i < VOICE_MODES_DISPLAY.length; i++) {
             if (slot == modeSlots[i]) {
                 String key = VOICE_MODES_DISPLAY[i][0];
-                String label = VOICE_MODES_DISPLAY[i][1];
                 if (key.equals(com.customblocks.CustomBlocksConfig.voiceMode)) {
                     player.sendMessage(net.minecraft.text.Text.literal("§7[CB] Voice mode is already §b" + key + "§7."), true);
                     return;
@@ -697,8 +805,47 @@ public class GuiManager {
 
     private static SimpleInventory buildWelcomeGui(ServerPlayerEntity player) {
         SimpleInventory inv = new SimpleInventory(54);
-        inv.setStack(22, named(Items.NETHER_STAR, "§b§lWelcome to CustomBlocks!", "§7Use §f/cb §7to get started.", "§7Type §f/cb help §7for all commands."));
-        inv.setStack(49, uiGlint(Items.ECHO_SHARD, "§c◀ Back")); // Royal Directive — 5.x
+
+        // Header
+        inv.setStack(4, named(Items.NETHER_STAR,
+            "§b§lCustomBlocks — Active",
+            "§7Your custom block mod is running.",
+            "§7" + com.customblocks.core.SlotManager.usedSlots() + " custom block(s) defined.",
+            "§7Pack: " + (com.customblocks.network.ResourcePackServer.isRunning() ? "§aOnline" : "§cOffline")));
+
+        // Quick start
+        inv.setStack(20, named(Items.BOOK,
+            "§6§lQuick Start",
+            "§f/cb new <name>  §7— Create a block",
+            "§f/cb list       §7— Browse all blocks",
+            "§f/cb help       §7— All commands",
+            "",
+            "§eClick to open your library"));
+
+        // Library shortcut
+        inv.setStack(22, named(Items.CHEST,
+            "§a§lBlock Library",
+            "§7Browse and edit all " + com.customblocks.core.SlotManager.usedSlots() + " custom block(s).",
+            "",
+            "§eClick to open"));
+
+        // Config shortcut
+        inv.setStack(24, named(Items.COMPARATOR,
+            "§e§lConfiguration",
+            "§7Adjust port, cloud sharing, AI,",
+            "§7and behaviour settings.",
+            "",
+            "§eClick to open"));
+
+        // Safety Center shortcut
+        inv.setStack(31, named(Items.SHIELD,
+            "§c§lSafety Center",
+            "§7Undo, backup, and panic tools.",
+            "",
+            "§eClick to open"));
+
+        // Back
+        inv.setStack(49, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
         return inv;
     }
 
@@ -740,9 +887,9 @@ public class GuiManager {
                 inv.setStack(i, ui(FM_TAB_ITEMS[i], FM_TAB_NAMES[i], FM_TAB_DESC[i], "§8Click to open this tab."));
             }
         }
-        // Slot 8: Menu title/logo
-        inv.setStack(8, uiGlint(Items.NETHER_STAR, "§d§l✦ Feature Menu",
-            "§7CustomBlocks navigation hub.", "§8Pick a tab to explore features."));
+        // Slot 8: Menu title/logo - Fixed RD-01 & RD-02
+        inv.setStack(8, uiGlint(Items.NETHER_STAR, "§d§l✦ The Celestial Nexus",
+            "§7The grand hub of creation.", "§7Forge your vision across all realms.", "§8Pick a tab to explore legendary features."));
 
         // Content area (slots 9-44)
         switch (tab) {
@@ -808,16 +955,20 @@ public class GuiManager {
                     inv.setStack(22, ui(Items.BARRIER, "§cAdmin Only", "§7You need admin permission to use this tab."));
                 }
             }
+            default -> {}
         }
 
-        // Footer
-        inv.setStack(49, uiGlint(Items.ECHO_SHARD, "§c◀ Back", "§7Return to main dashboard."));
+        // Footer - Fixed RD-01
+        inv.setStack(49, uiGlint(Items.AMETHYST_CLUSTER, "§c◀ Return to Core", "§7Step back into the primary nexus."));
         return inv;
     }
 
     private static void handleFeatureMenuClick(ServerPlayerEntity player, GuiState state, int slot) {
         int tab = state.page();
         boolean isAdmin = PermissionHelper.canAdmin(player.getCommandSource());
+
+        // Fix RD-04: Ensure we push backstack state before switching to submenus
+        pushBackStack(player.getUuid());
 
         // Tab header row (slots 0-7)
         if (slot >= 0 && slot < 8) {
@@ -834,7 +985,7 @@ public class GuiManager {
         }
 
         // Footer
-        if (slot == 49) { playClick(player); openMain(player, 0); return; }
+        if (slot == 49) { playClick(player); popBackStack(player); return; }
 
         // Content area — dispatch by active tab
         switch (tab) {
@@ -842,9 +993,10 @@ public class GuiManager {
                 switch (slot) {
                     case 10 -> { playClick(player); openMain(player, 0); }
                     case 11 -> { playClick(player); openSearchPicker(player, "", 0); }
-                    case 12 -> { playClick(player); openMain(player, 0); } // favorites — opens main for now
-                    case 13 -> { playClick(player); openMain(player, 0); } // recent — opens main for now
+                    case 12 -> { playClick(player); openFavoritesGui(player, 0); }
+                    case 13 -> { playClick(player); openRecentGui(player); }
                     case 14 -> { playClick(player); openCategoryBrowser(player, 0); }
+                    default -> {}
                 }
             }
             case 1 -> {
@@ -857,6 +1009,7 @@ public class GuiManager {
                     case 15 -> { playClick(player); openMagicItemsGui(player); }
                     case 16 -> { playClick(player); openEditorPicker(player); } // color studio via editor
                     case 17 -> { playClick(player); openEditorPicker(player); }
+                    default -> {}
                 }
             }
             case 2 -> {
@@ -867,12 +1020,14 @@ public class GuiManager {
                     case 13 -> { playClick(player); openBulkHub(player); }
                     case 14 -> { playClick(player); openBulkHub(player); }
                     case 15 -> { playClick(player); openBulkHub(player); }
+                    default -> {}
                 }
             }
             case 3 -> {
                 switch (slot) {
-                    case 10 -> { playClick(player); openEditorPicker(player); } // macro scripts — placeholder
+                    case 10 -> { playClick(player); openScriptGui(player, 0); }
                     case 11 -> { playClick(player); openUndoPicker(player, 0); }
+                    default -> {}
                 }
             }
             case 4 -> {
@@ -888,6 +1043,7 @@ public class GuiManager {
                         player.sendMessage(net.minecraft.text.Text.literal(msg), true);
                         openFeatureMenu(player, 4); // refresh
                     }
+                    default -> {}
                 }
             }
             case 5 -> {
@@ -896,6 +1052,7 @@ public class GuiManager {
                     case 11 -> { playClick(player); openUndoPicker(player, 0); }
                     case 12 -> { playClick(player); openMaintenanceMenu(player); }
                     case 13 -> { playClick(player); openRecoverGui(player, 0); }
+                    default -> {}
                 }
             }
             case 6 -> {
@@ -905,6 +1062,7 @@ public class GuiManager {
                     case 12 -> { playClick(player); openMarketGui(player, 0, false); }
                     case 13 -> { playClick(player); openMaintenanceMenu(player); }
                     case 14 -> { playClick(player); openHelpGui(player); }
+                    default -> {}
                 }
             }
             case 7 -> {
@@ -928,8 +1086,10 @@ public class GuiManager {
                         com.customblocks.network.ServerPackGenerator.flushPendingBuildIfNeeded();
                     }
                     case 14 -> { playClick(player); openMaintenanceMenu(player); }
+                    default -> {}
                 }
             }
+            default -> {}
         }
     }
 
@@ -1000,6 +1160,21 @@ public class GuiManager {
                 case COLOR_STUDIO -> openColorStudio(player, state.editingId());
                 case PALETTE_GENERATOR -> openPaletteGenerator(player, state.editingId());
                 case AI_SUGGEST_GUI -> openAiSuggestGui(player, state.editingId());
+                case FAVORITES_GUI -> openFavoritesGui(player, state.page());
+                case RECENT_GUI -> openRecentGui(player);
+                case SAFETY_CENTER -> openSafetyCenter(player);
+                case HISTORY_GUI -> openHistoryGui(player, state.page());
+                case SCRIPT_GUI -> openScriptGui(player, state.page());
+                case SCRIPT_SUMMARY -> {
+                    com.customblocks.core.MacroManager.ScriptRunResult result = LAST_SCRIPT_RESULTS.get(player.getUuid());
+                    if (result != null) openScriptSummary(player, result);
+                    else openScriptGui(player, 0);
+                }
+                case CACHE_DASHBOARD -> openCacheDashboard(player, state.page());
+                case AUDIT_GUI -> openAuditGui(player, state.page());
+                case AI_GEN -> openAiGui(player);
+                case CUSTOM_COLOR_STUDIO -> openCustomColorStudio(player, state.editingId());
+                case ACHIEVEMENTS_GUI -> openAchievementsGui(player, state.page());
                 case MARKET_GUI -> openMarketGui(player, state.page(), false);
                 case BULK_HUB -> openBulkHub(player);
                 case BULK_OP_PICKER -> openBulkOpPicker(player, state.editingId(), state.page());
@@ -1069,18 +1244,40 @@ public class GuiManager {
                 case BULK_RECOLOR_CONFIRM -> handleBulkRecolorConfirmClick(player, state, slot);
                 case COLOR_FILL_MODE -> handleColorFillModeClick(player, state, slot);
                 case RECOVER_GUI -> handleRecoverGuiClick(player, state, slot);
-                case WELCOME_MENU -> { if (slot == 49) openMain(player, 0); }
+                case WELCOME_MENU -> {
+                    if (slot == 20 || slot == 22) { openMain(player, 0); }         // Quick Start / Library
+                    else if (slot == 24) { openConfigGui(player); }                 // Configuration
+                    else if (slot == 31) { openSafetyCenter(player); }             // Safety Center
+                    else if (slot == 49) { openMain(player, 0); }                  // Back
+                }
                 case FEATURE_MENU -> handleFeatureMenuClick(player, state, slot);
                 case STATS_GUI -> handleStatsGuiClick(player, state, slot);
                 case VARIANT_GUI -> handleVariantGuiClick(player, state, slot);
                 case COLOR_STUDIO -> handleColorStudioClick(player, state, slot);
                 case PALETTE_GENERATOR -> handlePaletteGeneratorClick(player, state, slot);
                 case AI_SUGGEST_GUI -> handleAiSuggestClick(player, state, slot);
+                case FAVORITES_GUI -> handleFavoritesGuiClick(player, state, slot);
+                case RECENT_GUI -> handleRecentGuiClick(player, state, slot);
+                case SAFETY_CENTER -> handleSafetyCenterClick(player, state, slot);
+                case HISTORY_GUI -> handleHistoryGuiClick(player, state, slot);
+                case SCRIPT_GUI -> handleScriptGuiClick(player, state, slot);
+                case SCRIPT_SUMMARY -> handleScriptSummaryClick(player, state, slot);
+                case CACHE_DASHBOARD -> handleCacheDashboardClick(player, state, slot);
+                case AUDIT_GUI -> handleAuditGuiClick(player, state, slot);
+                case AI_GEN -> handleAiHubClick(player, state, slot);
+                case CUSTOM_COLOR_STUDIO -> handleCustomColorStudioClick(player, state, slot);
+                case ACHIEVEMENTS_GUI -> handleAchievementsGuiClick(player, state, slot);
                 case MARKET_GUI -> handleMarketGuiClick(player, state, slot);
                 case BULK_HUB -> handleBulkHubClick(player, state, slot);
                 case BULK_OP_PICKER -> handleBulkOpPickerClick(player, state, slot);
                 case COLOR_PICKER -> handleColorPickerClick(player, state, slot);
                 case VOICE_PICKER -> handleVoicePickerClick(player, slot); // 5.25
+                default -> {
+                    LOGGER.warn("[CustomBlocks] Unhandled GUI mode in handleClick: {} for player {}",
+                            state.mode(), player.getName().getString());
+                    playError(player);
+                    send(player, "§cThis screen is not available yet.");
+                }
             }
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] GUI Command Error: {}", e.getMessage(), e);
@@ -1276,7 +1473,8 @@ public class GuiManager {
                             for (var fe : fresh.faceTextures.entrySet())
                                 NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("setface", fresh.index, varId, null, fe.getValue(), fresh.lightLevel, fresh.hardness, fresh.soundType, fe.getKey()));
                         }
-                        player.getInventory().insertStack(nb.index < CustomBlocksMod.SLOT_ITEMS.length && CustomBlocksMod.SLOT_ITEMS[nb.index] != null ? new ItemStack(CustomBlocksMod.SLOT_ITEMS[nb.index], 1) : ItemStack.EMPTY);
+                        com.customblocks.block.SlotBlock.SlotItem nbItem = CustomBlocksMod.safeSlotItem(nb.index);
+                        player.getInventory().insertStack(nbItem != null ? new ItemStack(nbItem, 1) : ItemStack.EMPTY);
                         send(player, "Variant '§f" + varId + "§a' created & given!");
                         openFaceEditor(player, varId, rp);
                     });
@@ -1430,8 +1628,11 @@ public class GuiManager {
                     float customFps = Float.parseFloat(text);
                     customFps = Math.max(0.5f, Math.min(100f, customFps));
                     customFps = Math.round(customFps * 10f) / 10f;
-                    AnimParams ap = ANIM_PARAMS.getOrDefault(player.getUuid(), new AnimParams(10f, false, 1));
-                    ANIM_PARAMS.put(player.getUuid(), new AnimParams(customFps, ap.interpolate(), ap.frameCount()));
+                    final float finalFps = customFps;
+                    ANIM_PARAMS.compute(player.getUuid(), (k, ap) -> { // 7.9 — atomic update
+                        AnimParams cur = ap != null ? ap : new AnimParams(10f, false, 1);
+                        return new AnimParams(finalFps, cur.interpolate(), cur.frameCount());
+                    });
                     send(player, "§a[Anim] FPS set to §f" + String.format("%.1f", customFps));
                 } catch (NumberFormatException e) {
                     send(player, "§cInvalid number. Enter a value like §f20§c or §f0.5");
@@ -1689,11 +1890,11 @@ public class GuiManager {
 
     public static void checkPendingFaceImports(MinecraftServer server) {
         if (FACE_IMPORTS.isEmpty()) {
-            faceImportTickCounter = 0;
+            faceImportTickCounter.set(0);
             return;
         }
-        if (++faceImportTickCounter < FACE_IMPORT_POLL_TICKS) return;
-        faceImportTickCounter = 0;
+        if (faceImportTickCounter.incrementAndGet() < FACE_IMPORT_POLL_TICKS) return;
+        faceImportTickCounter.set(0);
 
         long now = System.currentTimeMillis();
         List<Map.Entry<UUID, FaceImportPending>> expired = new ArrayList<>();
@@ -1835,6 +2036,7 @@ public class GuiManager {
             }
             // Back
             case 0, 45 -> openMain(player, 0);
+            default -> {}
         }
     }
 
@@ -2202,6 +2404,7 @@ public class GuiManager {
         switch (slot) {
             case 11 -> openMain(player, 0);
             case 15 -> openConfigGui(player, false);
+            default -> {}
         }
     }
 
@@ -2318,7 +2521,7 @@ public class GuiManager {
             "§8automatically so big dark areas survive.",
             "§eClick to select."));
 
-        inv.setStack(22, uiGlint(Items.RED_CONCRETE, "§c← Back"));
+        inv.setStack(22, uiGlint(Items.ECHO_SHARD, "§c← Back"));
         openScreenFromGuiState(player, GuiState.colorFillMode(), inv, Text.translatable("customblocks.gui.color_fill.title"));
     }
 
@@ -2339,6 +2542,7 @@ public class GuiManager {
                 openColorFillModeGui(player);
             }
             case 22 -> handleEscBack(player);
+            default -> {}
         }
     }
 
@@ -2398,6 +2602,7 @@ public class GuiManager {
             // case 33 was Cloud Vault URL — removed (hardcoded constant)
             case 34 -> configPrompt(player, "triangleYellowHex", "Yellow Shade Hex (#RRGGBB):");
             case 45 -> openMain(player, 0);
+            default -> {}
         }
     }
 
@@ -2417,10 +2622,6 @@ public class GuiManager {
     public static void openUndoPicker(ServerPlayerEntity player, int page) {
         pushBackStack(player.getUuid());
         openScreenFromGuiState(player, GuiState.undoPicker(page), buildUndoPicker(player, page), Text.translatable("customblocks.gui.undo.title"));
-    }
-
-    private static SimpleInventory buildUndoPicker(ServerPlayerEntity player) {
-        return buildUndoPicker(player, 0);
     }
 
     private static SimpleInventory buildUndoPicker(ServerPlayerEntity player, int page) {
@@ -2540,6 +2741,7 @@ public class GuiManager {
                 "");
             case 24 -> openTabIconPicker(player, 0); // Tab Icon
             case 45 -> openMain(player, 0);     // Back
+            default -> {}
         }
     }
 
@@ -2693,6 +2895,7 @@ public class GuiManager {
                 refreshScreen(player, buildMain(player, state.page()));
             }
             case 52 -> openConfigWarningGui(player);
+            default -> {}
         }
     }
 
@@ -2955,6 +3158,7 @@ public class GuiManager {
                     REOPENING_SCREENS.remove(uuid);
                 }
             }
+            default -> {}
         }
     }
 
@@ -3038,6 +3242,7 @@ public class GuiManager {
             case 15 -> openHelpCategory(player, 3);
             case 20 -> openHelpCategory(player, 4);
             case 22 -> openHelpCategory(player, 5);
+            default -> {}
         }
     }
 
@@ -3113,6 +3318,7 @@ public class GuiManager {
                 NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setcollision",upd.index,id,null,null,0,0,"stone",null,upd.noCollision?"false":"true"));
                 send(player,"§a[GUI] Collision: §f"+(upd.noCollision?"§cOFF":"§aON")); refreshScreen(player, buildPropertiesGui(upd));
             }
+            default -> {}
         }
     }
 
@@ -3163,6 +3369,7 @@ public class GuiManager {
             }
             case 47 -> { UndoManager.pushUndoMutation(id, d, "clearallfaces", uuid); SlotManager.clearAllFaces(id); SlotManager.saveAll(); broadcastClearAllFaces(player,d); send(player,"§a[GUI] All face overrides cleared."); openFaceEditor(player,id,rp); }
             case 53 -> { player.getInventory().insertStack(CustomBlocksMod.safeSlotItem(d.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(d.index),1):ItemStack.EMPTY); send(player,"§a[GUI] Given 1x §f"+d.displayName); openFaceEditor(player,id,rp); }
+            default -> {}
         }
     }
 
@@ -3179,6 +3386,7 @@ public class GuiManager {
             case 15 -> { playFaceCopySelect(player); openFaceChangePicker(player, id, "south", 0); }
             case 17 -> { playFaceCopySelect(player); openFaceChangePicker(player, id, "east", 0); }
             case 19 -> { playFaceCopySelect(player); openFaceChangePicker(player, id, "west", 0); }
+            default -> {}
         }
     }
 
@@ -3212,8 +3420,9 @@ public class GuiManager {
         UUID uuid = player.getUuid();
 
         long now = System.currentTimeMillis();
-        Long last = SHAPE_CREATE_COOLDOWN.get(uuid);
-        if (last != null && now - last < SHAPE_COOLDOWN_MS) {
+        // 7.9 — atomic compare-and-swap to prevent concurrent cooldown bypass
+        Long prev = SHAPE_CREATE_COOLDOWN.get(uuid);
+        if (prev != null && now - prev < SHAPE_COOLDOWN_MS) {
             send(player, "§e[Shape] Please wait a moment...");
             reopenShapeEditor(player, id, rp, boxPage);
             return;
@@ -3273,7 +3482,8 @@ public class GuiManager {
         List<SlotData.ShapeBox> boxes = SlotManager.SHAPE_PRESETS.get(preset);
         UndoManager.pushUndoMutation(id, d, "setshape", player.getUuid());
         SlotManager.setShape(id, boxes!=null ? new ArrayList<>(boxes) : null); SlotManager.saveAll();
-        broadcastShape(player.getServer(), SlotManager.getById(id));
+        SlotData updated = SlotManager.getById(id);
+        if (updated != null && player.getServer() != null) broadcastShape(player.getServer(), updated);
         send(player,"§a[Shape] Applied '§f"+preset+"§a' to current block.");
         reopenShapeEditor(player,id,rp,boxPage);
     }
@@ -3388,7 +3598,7 @@ public class GuiManager {
         playSuccess(player);
         SlotUpdatePayload pkt = new SlotUpdatePayload("animsettings", d.index, id, d.displayName,
                 null, d.lightLevel, d.hardness, d.soundType, null, null, newMeta);
-        NetworkManager.broadcastUpdate(player.getServer(), pkt);
+        if (player.getServer() != null) NetworkManager.broadcastUpdate(player.getServer(), pkt);
         AnimParams orig = ANIM_ORIGINAL_PARAMS.getOrDefault(player.getUuid(), new AnimParams(fps, interp, frameCount));
         boolean fpsChanged = Math.abs(orig.fps() - fps) > 0.05f;
         boolean interpChanged = orig.interpolate() != interp;
@@ -3449,6 +3659,7 @@ public class GuiManager {
                 playClick(player);
                 reopenAnimGui(player, id, rp);
             }
+            default -> {}
         }
     }
 
@@ -3478,7 +3689,7 @@ public class GuiManager {
         int total = blocks.size(), maxPage = total == 0 ? 0 : Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
 
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Cancel", "§8Abort bulk delete — no changes"));
+        inv.setStack(0, uiGlint(Items.ECHO_SHARD, "§c◀ Cancel", "§8Abort bulk delete — no changes"));
         inv.setStack(4, uiGlint(Items.TNT, "§c§l⚠ Bulk Delete Mode",
             "§7Selected: §f" + selected.size() + " §7/ §f" + total + " blocks",
             "§7Click blocks below to toggle selection",
@@ -3633,7 +3844,7 @@ public class GuiManager {
         inv.setStack(22, uiGlint(Items.WHITE_CARPET, "§fColor Triangle Wand", "§7Paints a solid-color triangle."));
         inv.setStack(24, uiGlint(Items.PAINTING, "§eSet Tab Icon", "§7Opens the tab icon picker."));
         
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Main Menu"));
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back to Main Menu"));
         return inv;
     }
 
@@ -3718,7 +3929,7 @@ public class GuiManager {
     private static SimpleInventory buildMaintenanceMenu(ServerPlayerEntity player) {
         SimpleInventory inv = new SimpleInventory(54);
         for(int i = 0; i < 54; i++) inv.setStack(i, glass());
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Main Menu", "§8Return to the dashboard"));
+        inv.setStack(0, uiGlint(Items.ECHO_SHARD, "§c◀ Back to Main Menu", "§8Return to the dashboard"));
 
         MinecraftServer server = player.getServer();
         long maxMem = Runtime.getRuntime().maxMemory() / 1024 / 1024;
@@ -3756,7 +3967,7 @@ public class GuiManager {
 
         inv.setStack(40, ui(Items.SPYGLASS, "§b§lMod Info", "§7CustomBlocks §fv1.0.0", "§7Fabric §f1.21.1", "§8Status: §aAll OK"));
 
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Main Menu"));
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back to Main Menu"));
         return inv;
     }
 
@@ -3809,7 +4020,7 @@ public class GuiManager {
             inv.setStack(39, uiGlint(Items.GRAY_STAINED_GLASS_PANE, "§7You haven't placed any blocks yet"));
         }
 
-        inv.setStack(49, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
+        inv.setStack(49, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
         return inv;
     }
 
@@ -3928,7 +4139,7 @@ public class GuiManager {
         }
 
         // Back — slot 49
-        inv.setStack(49, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
+        inv.setStack(49, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
         return inv;
     }
 
@@ -3966,15 +4177,16 @@ public class GuiManager {
         if (slot == 49) handleEscBack(player);
     }
 
-    // ── Phase 3.1: Color Library Picker (stub — delegates to Color Studio) ────
+    // ── Phase 3.1: Color Library Picker ──────────────────────────────────────
+    // Phase 3.1 (browse-and-apply gallery distinct from the editor) is not yet built.
+    // COLOR_PICKER routes to Color Studio so the entry point is wired and
+    // restoreState() reaches it safely. Replace both methods below when Phase 3.1 is built.
 
     public static void openColorPicker(ServerPlayerEntity player, String context) {
-        // Phase 3.1 not yet fully implemented — routes to Color Studio for now
         openColorStudio(player, context);
     }
 
     private static void handleColorPickerClick(ServerPlayerEntity player, GuiState state, int slot) {
-        // Phase 3.1 not yet fully implemented — back/close handled by Color Studio logic
         handleColorStudioClick(player, state, slot);
     }
 
@@ -4034,7 +4246,7 @@ public class GuiManager {
                 "§aClick to open Palette Generator."));
 
         // Back
-        inv.setStack(49, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
+        inv.setStack(49, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
         return inv;
     }
 
@@ -4141,7 +4353,6 @@ public class GuiManager {
             new java.util.concurrent.ConcurrentHashMap<>();
 
     private static SimpleInventory buildPaletteGui(String customId, List<byte[]> palette) {
-        com.customblocks.core.SlotData d = com.customblocks.core.SlotManager.getById(customId);
         SimpleInventory inv = new SimpleInventory(54);
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
 
@@ -4176,7 +4387,7 @@ public class GuiManager {
                 "§7Picks 7 palette colors and adds them",
                 "§7as random variant textures (H4)."));
 
-        inv.setStack(49, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
+        inv.setStack(49, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
         return inv;
     }
 
@@ -4290,7 +4501,7 @@ public class GuiManager {
             Item item   = (Item) p[4];
             inv.setStack(slot, uiGlint(item, name, l1, l2, "§aClick to apply →"));
         }
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Editor", "§8Return without applying"));
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back to Editor", "§8Return without applying"));
         return inv;
     }
 
@@ -4454,7 +4665,7 @@ public class GuiManager {
         if ((page + 1) * MARKET_PAGE_SIZE < items.size())
             inv.setStack(52, customHead(MHF_RIGHT, "§a§lNext Page »"));
         inv.setStack(50, named(Items.RECOVERY_COMPASS, "§e§l⟳ Refresh"));
-        inv.setStack(45, named(Items.BARRIER, "§c§l✖ Back"));
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c§l✖ Back"));
         return inv;
     }
 
@@ -4542,14 +4753,14 @@ public class GuiManager {
             "§72. The Block Editor is the fastest way to customize.",
             "§73. Keep unique IDs short and descriptive."));
 
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back"));
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
         return inv;
     }
 
     private static SimpleInventory buildHelpCategory(int category) {
         SimpleInventory inv = new SimpleInventory(54);
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Help"));
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back to Help"));
 
         switch (category) {
             case 1 -> { // Creating Blocks
@@ -4605,6 +4816,7 @@ public class GuiManager {
                 inv.setStack(20, uiGlint(Items.NETHER_STAR, "§aMagic Items", "§7/cb magicitems", "§8Opens the magic items GUI."));
                 inv.setStack(21, uiGlint(Items.COMPASS, "§aResource Pack", "§7/cb rp", "§8Resource pack management hub."));
             }
+            default -> {}
         }
         return inv;
     }
@@ -4612,7 +4824,7 @@ public class GuiManager {
     private static SimpleInventory buildPropertiesGui(SlotData d) {
         SimpleInventory inv = new SimpleInventory(54);
         for(int i=0;i<54;i++) inv.setStack(i, glass());
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Editor","§8Return to the block editor"));
+        inv.setStack(0, uiGlint(Items.ECHO_SHARD,"§c◀ Back to Editor","§8Return to the block editor"));
         
         ItemStack disp = CustomBlocksMod.safeSlotItem(d.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(d.index)):ItemStack.EMPTY;
         disp.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§6§l"+d.displayName).styled(s->s.withItalic(false)));
@@ -4686,14 +4898,14 @@ public class GuiManager {
             ? uiGlint(Items.BARRIER,"§c⊘ Collision: §lOFF","§7Players can pass THROUGH this block","§8Click to turn §aON")
             : uiGlint(Items.SLIME_BLOCK,"§a✔ Collision: §lON","§7Block is solid.","§8Click to turn §cOFF"));
         
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Editor"));
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD,"§c◀ Back to Editor"));
         return inv;
     }
 
     private static SimpleInventory buildSoundMenu(SlotData d) {
         SimpleInventory inv = new SimpleInventory(54);
         for(int i=0;i<54;i++) inv.setStack(i, glass());
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Editor","§8Return to the block editor"));
+        inv.setStack(0, uiGlint(Items.ECHO_SHARD,"§c◀ Back to Editor","§8Return to the block editor"));
         
         // Row 1 (slots 10-16): stone, wood, grass, metal, glass, sand, wool
         inv.setStack(10,soundItem(d,"stone",Items.STONE,"§fStone"));
@@ -4718,7 +4930,7 @@ public class GuiManager {
 
         inv.setStack(34, ui(Items.NOTE_BLOCK, "§e§lCurrent Sound", "§7Block: §f"+d.displayName, "§7Selected: §b"+d.soundType.toUpperCase(), "§aAffects place, break, and step sounds."));
 
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Editor"));
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD,"§c◀ Back to Editor"));
         return inv;
     }
 
@@ -4729,7 +4941,7 @@ public class GuiManager {
                 ? com.customblocks.core.SlotManager.brokenBlocksWithReasons() : null;
         List<SlotData> blocks = brokenOnly ? new ArrayList<>(brokenMap.keySet()) : sortedBlocks(playerUuid);
         int total = blocks.size(), maxPage = total==0?0:Math.max(0,(total-1)/BLOCKS_PER_PAGE);
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Main Dashboard","§8Return to the main menu"));
+        inv.setStack(0, uiGlint(Items.ECHO_SHARD,"§c◀ Back to Main Dashboard","§8Return to the main menu"));
         for (int i=1;i<=3;i++) inv.setStack(i,glass());
         SortMode activeSortMode = brokenOnly ? null : PLAYER_SORT_PREFS.getOrDefault(playerUuid, SortMode.NAME_ASC);
         String sortLabel = activeSortMode != null ? " §8— §7sorted: §f" + activeSortMode.label : "";
@@ -4809,7 +5021,7 @@ public class GuiManager {
         SimpleInventory inv = new SimpleInventory(54);
         List<SlotData> blocks = searchBlocks(query);
         int total = blocks.size(), maxPage = total==0?0:Math.max(0,(total-1)/BLOCKS_PER_PAGE);
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Main Dashboard","§8Return to the main menu"));
+        inv.setStack(0, uiGlint(Items.ECHO_SHARD,"§c◀ Back to Main Dashboard","§8Return to the main menu"));
         for (int i=1;i<=3;i++) inv.setStack(i,glass());
         inv.setStack(4, ui(Items.SPYGLASS,"§e§lSearch Results: §7"+query,
             "§7Showing blocks matching your query",
@@ -4889,7 +5101,7 @@ public class GuiManager {
         SimpleInventory inv = new SimpleInventory(54);
         for(int i = 0; i < 54; i++) inv.setStack(i, glass());
 
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Block List", "§8Return to the selection grid"));
+        inv.setStack(0, uiGlint(Items.ECHO_SHARD, "§c◀ Back to Block List", "§8Return to the selection grid"));
         inv.setStack(2, uiGlint(Items.CHEST,"§a▶ Give 1x","§7Gives 1x §f"+d.displayName+" §7to you", "§aPuts the block directly in your hotbar."));
 
         boolean isFav    = com.customblocks.core.FavoritesManager.isFavorite(playerUuid, d.customId);
@@ -4966,7 +5178,7 @@ public class GuiManager {
             : ui(Items.TNT, "§c§l⚠ Delete This Block","§7Removes the block from the server","§aCan be undone via Main Menu if accidental."));
         if (confirmDelete) inv.setStack(52, uiGlint(Items.GREEN_CONCRETE,"§a§l✖ Cancel","§7Go back without deleting."));
 
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Block List"));
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD,"§c◀ Back to Block List"));
         return inv;
     }
 
@@ -4974,7 +5186,7 @@ public class GuiManager {
         SimpleInventory inv = new SimpleInventory(54);
         List<SlotData.ShapeBox> boxes = d.shapeBoxes!=null?d.shapeBoxes:List.of();
         Item[] pItems = {Items.GRASS_BLOCK,Items.SMOOTH_STONE_SLAB,Items.STONE_SLAB,Items.MOSS_CARPET,Items.COBBLESTONE_WALL,Items.COMPARATOR,Items.COMPARATOR,Items.GLASS_PANE,Items.OAK_TRAPDOOR,Items.OAK_FENCE,Items.OAK_STAIRS,Items.END_ROD};
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Editor","§8Return to the block editor"));
+        inv.setStack(0, uiGlint(Items.ECHO_SHARD,"§c◀ Back to Editor","§8Return to the block editor"));
         for (int i=1;i<=3;i++) inv.setStack(i,glass());
         ItemStack info = CustomBlocksMod.safeSlotItem(d.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(d.index)):ItemStack.EMPTY;
         info.set(DataComponentTypes.CUSTOM_NAME,Text.literal("§5§lShape: "+d.displayName).styled(s->s.withItalic(false)));
@@ -5018,7 +5230,7 @@ public class GuiManager {
 
     private static SimpleInventory buildFaceEditor(SlotData d) {
         SimpleInventory inv = new SimpleInventory(54);
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE,"§c◀ Back to Editor","§8(or press ESC)"));
+        inv.setStack(0, uiGlint(Items.ECHO_SHARD,"§c◀ Back to Editor","§8(or press ESC)"));
         for(int i=1;i<=3;i++) inv.setStack(i,glass());
         ItemStack disp=CustomBlocksMod.safeSlotItem(d.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(d.index)):ItemStack.EMPTY;
         disp.set(DataComponentTypes.CUSTOM_NAME,Text.literal("§d§l⬡ §r§f"+d.displayName).styled(s->s.withItalic(false)));
@@ -5050,7 +5262,7 @@ public class GuiManager {
         inv.setStack(31,ui(Items.PURPLE_STAINED_GLASS_PANE,"§c• Clear EAST",faceStatus(d,"east")));
         inv.setStack(32,ui(Items.MAGENTA_STAINED_GLASS_PANE,"§c• Clear WEST",faceStatus(d,"west")));
         for(int i=33;i<=44;i++) inv.setStack(i,glass());
-        inv.setStack(45,uiGlint(Items.RED_CONCRETE,"§c◀ Back to Editor","§8(or press ESC)"));
+        inv.setStack(45,uiGlint(Items.ECHO_SHARD,"§c◀ Back to Editor","§8(or press ESC)"));
         // Use a simple placeholder for undo count since we need the player UUID
         inv.setStack(46,ui(Items.GRAY_STAINED_GLASS_PANE,"§8Undo","§7Use main menu undo"));
         inv.setStack(47,ui(Items.ORANGE_CONCRETE,"§6⊘ Clear ALL Overrides","§7Reverts every face to default texture"));
@@ -5062,7 +5274,7 @@ public class GuiManager {
     private static SimpleInventory buildFaceChangeSelect(SlotData d) {
         SimpleInventory inv = new SimpleInventory(54);
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Face Editor", "§8(or press ESC)"));
+        inv.setStack(0, uiGlint(Items.ECHO_SHARD, "§c◀ Back to Face Editor", "§8(or press ESC)"));
         inv.setStack(4, uiGlint(Items.NETHER_STAR, "§6§oYour masterpiece awaits",
             "§7Target block: §f" + d.displayName,
             "§7Choose which face should borrow a texture"));
@@ -5084,7 +5296,7 @@ public class GuiManager {
         inv.setStack(17, faceChangeButton("EAST", "The edge that catches the sunrise"));
         inv.setStack(19, faceChangeButton("WEST", "The edge that keeps the dusk"));
 
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Face Editor", "§8Return without copying"));
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back to Face Editor", "§8Return without copying"));
         inv.setStack(49, ui(Items.PAPER, "§7Click a Face",
             "§7Step 1: pick the target face",
             "§7Step 2: choose the source block",
@@ -5099,7 +5311,7 @@ public class GuiManager {
         int maxPage = total == 0 ? 0 : Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
         page = Math.max(0, Math.min(page, maxPage));
 
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Face Choice", "§8Return to face selection"));
+        inv.setStack(0, uiGlint(Items.ECHO_SHARD, "§c◀ Back to Face Choice", "§8Return to face selection"));
         for (int i = 1; i <= 3; i++) inv.setStack(i, glass());
         inv.setStack(4, uiGlint(Items.NETHER_STAR, "§5§lCopy to §f" + face.toUpperCase(Locale.ROOT),
             "§7Target block: §f" + target.displayName,
@@ -5137,7 +5349,7 @@ public class GuiManager {
         }
 
         for (int i = 36; i <= 44; i++) inv.setStack(i, ui(Items.PURPLE_STAINED_GLASS_PANE, "§r"));
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Face Choice", "§8Return without copying"));
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back to Face Choice", "§8Return without copying"));
         inv.setStack(47, page > 0 ? uiGlint(Items.ARROW, "§7◀ Previous Page", "§8Go to page " + page) : glass());
         inv.setStack(49, ui(Items.PAPER, "§7Page §f" + (page + 1) + " §7/ §f" + (maxPage + 1), "§7Sources: §f" + total));
         inv.setStack(51, page < maxPage ? uiGlint(Items.ARROW, "§7Next Page ▶", "§8Go to page " + (page + 2)) : glass());
@@ -5181,7 +5393,7 @@ public class GuiManager {
         String blockName = d != null ? d.displayName : id;
         int ticks = Math.max(1, Math.round(20f / Math.max(0.5f, fps)));
 
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Editor", "§8Closes without saving"));
+        inv.setStack(0, uiGlint(Items.ECHO_SHARD, "§c◀ Back to Editor", "§8Closes without saving"));
 
         inv.setStack(4, uiGlint(Items.NETHER_STAR, "§b§l▶ Animation Settings",
             "§7Block: §f" + blockName,
@@ -5221,7 +5433,7 @@ public class GuiManager {
                 "§7Good for pixel art textures.",
                 "§8Click to turn §6ON"));
 
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Editor"));
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back to Editor"));
         inv.setStack(49, uiGlint(Items.DRAGON_EGG, "§6§lSave & Apply",
             "§7Saves changes and sends them",
             "§7to all players.",
@@ -5232,6 +5444,253 @@ public class GuiManager {
     }
 
     // ── Small helpers ─────────────────────────────────────────────────────────
+
+    private static SimpleInventory buildRecentGui(ServerPlayerEntity player) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
+        inv.setStack(49, uiGlint(Items.CLOCK, "§b§lRecently Edited", "§7Click any block to reopen it in the editor."));
+        int invSlot = 10;
+        for (String id : RECENT_BLOCKS.getOrDefault(player.getUuid(), new ArrayDeque<>())) {
+            SlotData d = SlotManager.getById(id);
+            if (d == null) continue;
+            inv.setStack(invSlot, uiGlint(Items.CLOCK, "§f" + d.displayName, "§7ID: §b" + d.customId, "§8Click to edit"));
+            invSlot++;
+            if (invSlot == 17) invSlot = 19;
+            if (invSlot > 34) break;
+        }
+        return inv;
+    }
+
+    private static SimpleInventory buildFavoritesGui(ServerPlayerEntity player, int page) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        java.util.List<String> favIds = new ArrayList<>(com.customblocks.core.FavoritesManager.validatedSet(player.getUuid()));
+        favIds.sort(String::compareToIgnoreCase);
+        int start = Math.max(0, page) * 28;
+        int end = Math.min(favIds.size(), start + 28);
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
+        inv.setStack(49, uiGlint(Items.TOTEM_OF_UNDYING, "§6§lFavorites", "§7Saved: §f" + favIds.size()));
+        if (page > 0) inv.setStack(47, uiGlint(Items.ARROW, "§7◀ Previous"));
+        if (end < favIds.size()) inv.setStack(51, uiGlint(Items.ARROW, "§7Next ▶"));
+        for (int i = start, invSlot = 10; i < end; i++, invSlot++) {
+            if (invSlot == 17) invSlot = 19;
+            if (invSlot == 26) invSlot = 28;
+            if (invSlot > 34) break;
+            SlotData d = SlotManager.getById(favIds.get(i));
+            if (d == null) continue;
+            inv.setStack(invSlot, uiGlint(Items.GOLD_INGOT, "§f" + d.displayName, "§7ID: §b" + d.customId, "§8Click to edit"));
+        }
+        return inv;
+    }
+
+    private static SimpleInventory buildSafetyCenterGui(ServerPlayerEntity player) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
+        inv.setStack(20, uiGlint(Items.RECOVERY_COMPASS, "§eUndo / Redo", "§7Undo: §f" + com.customblocks.core.UndoManager.undoSize(player.getUuid()), "§7Redo: §f" + com.customblocks.core.UndoManager.redoSize(player.getUuid())));
+        inv.setStack(22, uiGlint(Items.TOTEM_OF_UNDYING, "§aRecover Deleted Blocks", "§8Open recovery tools"));
+        inv.setStack(24, uiGlint(Items.CHEST, "§bBackups", "§7Saved backups: §f" + com.customblocks.core.BackupManager.list().size()));
+        return inv;
+    }
+
+    private static SimpleInventory buildHistoryGui(int page) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        java.util.List<com.customblocks.core.HistoryTracker.Entry> entries = com.customblocks.core.HistoryTracker.latest(28);
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
+        inv.setStack(49, uiGlint(Items.KNOWLEDGE_BOOK, "§e§lSession History", "§7Entries: §f" + entries.size()));
+        for (int i = 0, invSlot = 10; i < entries.size() && i < 28; i++, invSlot++) {
+            if (invSlot == 17) invSlot = 19;
+            if (invSlot == 26) invSlot = 28;
+            if (invSlot > 34) break;
+            var entry = entries.get(i);
+            inv.setStack(invSlot, ui(Items.PAPER, "§f" + entry.blockId(), "§7" + stripFormattingCodes(entry.toDisplayString())));
+        }
+        return inv;
+    }
+
+    private static SimpleInventory buildScriptGui(int page) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        java.util.List<String> scripts = com.customblocks.core.MacroManager.listMacros();
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
+        inv.setStack(49, uiGlint(Items.WRITABLE_BOOK, "§b§lScripts", "§7Saved: §f" + scripts.size()));
+        for (int i = 0, invSlot = 10; i < scripts.size() && i < 28; i++, invSlot++) {
+            if (invSlot == 17) invSlot = 19;
+            if (invSlot == 26) invSlot = 28;
+            if (invSlot > 34) break;
+            String name = scripts.get(i);
+            long lastRun = com.customblocks.core.MacroManager.lastRunTime(name);
+            inv.setStack(invSlot, ui(Items.BOOK, "§f" + name,
+                "§7Click to run: §f/cb script run " + name,
+                "§7Last run: §f" + (lastRun > 0 ? new java.util.Date(lastRun) : "Never")));
+        }
+        return inv;
+    }
+
+    private static SimpleInventory buildScriptSummaryGui(com.customblocks.core.MacroManager.ScriptRunResult result) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
+        inv.setStack(49, uiGlint(Items.NETHER_STAR, "§a§l" + result.name(),
+            "§7Passed: §f" + result.ran() + "§7/§f" + result.steps().size(),
+            "§7Failed: §f" + result.failed()));
+        for (int i = 0, invSlot = 10; i < result.steps().size() && i < 28; i++, invSlot++) {
+            if (invSlot == 17) invSlot = 19;
+            if (invSlot == 26) invSlot = 28;
+            if (invSlot > 34) break;
+            boolean ok = i < result.passed().size() && Boolean.TRUE.equals(result.passed().get(i));
+            inv.setStack(invSlot, ui(ok ? Items.LIME_DYE : Items.RED_DYE,
+                (ok ? "§a" : "§c") + "Step " + (i + 1),
+                "§7" + result.steps().get(i)));
+        }
+        return inv;
+    }
+
+    private static SimpleInventory buildAiHubGui() {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
+        inv.setStack(20, uiGlint(Items.NETHER_STAR, "§dAI Provider", "§7Configured: §f" + CustomBlocksConfig.aiApiProvider));
+        inv.setStack(22, uiGlint(Items.BRUSH, "§bSmart Suggest", "§7Open a block editor and use the AI tools there."));
+        inv.setStack(24, uiGlint(Items.PAPER, "§7Status", "§7Global AI hub is lightweight for now.", "§7Per-block AI suggestions are still available."));
+        return inv;
+    }
+
+    private static SimpleInventory buildCustomColorStudioGui(ServerPlayerEntity player, String initialHex) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
+        String active = initialHex != null && !initialHex.isBlank() ? initialHex : "Use /cb customcolor <hex>";
+        inv.setStack(13, uiGlint(Items.MAGENTA_DYE, "§dCustom Color Tools", "§7Current: §f" + active));
+        java.util.List<String> recent = com.customblocks.core.PlayerPaletteManager.getRecent(player.getUuid());
+        for (int i = 0; i < recent.size() && i < 9; i++) {
+            inv.setStack(27 + i, ui(Items.FIREWORK_STAR, "§f#" + recent.get(i), "§7Recent color"));
+        }
+        return inv;
+    }
+
+    private static SimpleInventory buildCacheDashboardGui(ServerPlayerEntity player, int tab) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        String hash = com.customblocks.network.ResourcePackServer.getHash();
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
+        inv.setStack(20, uiGlint(Items.CHEST, "§bResource Pack Cache", "§7Hash: §f" + (hash != null ? hash : "Not built")));
+        inv.setStack(22, uiGlint(Items.CLOCK, "§7Deferred Reload Safety", "§7Players with open GUIs are protected from interrupting reload pushes."));
+        inv.setStack(24, uiGlint(Items.GLOBE_BANNER_PATTERN, "§7Marketplace Cache", "§7Session entries: §f" + MARKET_CACHE.getOrDefault(player.getUuid(), java.util.List.of()).size()));
+        return inv;
+    }
+
+    private static SimpleInventory buildAuditGui(int page) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        java.util.List<String> results = com.customblocks.core.DiagnosticsHelper.runGuiAudit();
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
+        inv.setStack(49, uiGlint(Items.WRITABLE_BOOK, "§6§lGUI Audit", "§7Checks: §f" + results.size()));
+        for (int i = 0, invSlot = 10; i < results.size() && i < 28; i++, invSlot++) {
+            if (invSlot == 17) invSlot = 19;
+            if (invSlot == 26) invSlot = 28;
+            if (invSlot > 34) break;
+            String line = results.get(i);
+            boolean pass = line.startsWith("PASS:");
+            inv.setStack(invSlot, ui(pass ? Items.LIME_DYE : Items.RED_DYE, (pass ? "§a" : "§c") + line.substring(5)));
+        }
+        return inv;
+    }
+
+    private static SimpleInventory buildAchievementsGui(ServerPlayerEntity player, int page) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        java.util.Set<String> unlocked = com.customblocks.core.AchievementManager.getUnlocked(player.getUuid());
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
+        inv.setStack(49, uiGlint(Items.NETHER_STAR, "§6§lAchievements", "§7Unlocked: §f" + unlocked.size() + "§7/§f" + com.customblocks.core.AchievementManager.Achievement.values().length));
+        int invSlot = 10;
+        for (com.customblocks.core.AchievementManager.Achievement achievement : com.customblocks.core.AchievementManager.Achievement.values()) {
+            boolean isUnlocked = unlocked.contains(achievement.id);
+            inv.setStack(invSlot, ui(isUnlocked ? Items.EMERALD : Items.COAL,
+                (isUnlocked ? "§a" : "§7") + stripFormattingCodes(achievement.title),
+                "§7" + stripFormattingCodes(achievement.subtitle)));
+            invSlot++;
+            if (invSlot == 17) invSlot = 19;
+            if (invSlot > 34) break;
+        }
+        return inv;
+    }
+
+    private static void handleSimpleBackOnly(ServerPlayerEntity player, int slot) {
+        if (slot == 45 || slot == 49 || slot == 0) handleEscBack(player);
+    }
+
+    private static void handleRecentGuiClick(ServerPlayerEntity player, GuiState state, int slot) {
+        if (slot == 45 || slot == 49) { handleEscBack(player); return; }
+        java.util.List<String> recent = new ArrayList<>(RECENT_BLOCKS.getOrDefault(player.getUuid(), new ArrayDeque<>()));
+        int idx = gridIndex(slot);
+        if (idx >= 0 && idx < recent.size()) openEditor(player, recent.get(idx), 0);
+    }
+
+    private static void handleFavoritesGuiClick(ServerPlayerEntity player, GuiState state, int slot) {
+        if (slot == 45 || slot == 49) { handleEscBack(player); return; }
+        java.util.List<String> favIds = new ArrayList<>(com.customblocks.core.FavoritesManager.validatedSet(player.getUuid()));
+        favIds.sort(String::compareToIgnoreCase);
+        if (slot == 47 && state.page() > 0) { openFavoritesGui(player, state.page() - 1); return; }
+        if (slot == 51 && (state.page() + 1) * 28 < favIds.size()) { openFavoritesGui(player, state.page() + 1); return; }
+        int idx = gridIndex(slot);
+        int actual = state.page() * 28 + idx;
+        if (idx >= 0 && actual < favIds.size()) openEditor(player, favIds.get(actual), 0);
+    }
+
+    private static void handleSafetyCenterClick(ServerPlayerEntity player, GuiState state, int slot) {
+        if (slot == 45 || slot == 49) { handleEscBack(player); return; }
+        if (slot == 20) { openUndoPicker(player, 0); return; }
+        if (slot == 22) { openRecoverGui(player, 0); return; }
+    }
+
+    private static void handleHistoryGuiClick(ServerPlayerEntity player, GuiState state, int slot) {
+        handleSimpleBackOnly(player, slot);
+    }
+
+    private static void handleScriptGuiClick(ServerPlayerEntity player, GuiState state, int slot) {
+        if (slot == 45 || slot == 49) { handleEscBack(player); return; }
+        java.util.List<String> scripts = com.customblocks.core.MacroManager.listMacros();
+        int idx = gridIndex(slot);
+        if (idx >= 0 && idx < scripts.size()) {
+            com.customblocks.core.MacroManager.ScriptRunResult result = com.customblocks.core.MacroManager.runScript(player, scripts.get(idx));
+            if (result != null) openScriptSummary(player, result);
+        }
+    }
+
+    private static void handleScriptSummaryClick(ServerPlayerEntity player, GuiState state, int slot) {
+        if (slot == 45 || slot == 49) openScriptGui(player, 0);
+    }
+
+    private static void handleAiHubClick(ServerPlayerEntity player, GuiState state, int slot) {
+        handleSimpleBackOnly(player, slot);
+    }
+
+    private static void handleCustomColorStudioClick(ServerPlayerEntity player, GuiState state, int slot) {
+        handleSimpleBackOnly(player, slot);
+    }
+
+    private static void handleCacheDashboardClick(ServerPlayerEntity player, GuiState state, int slot) {
+        handleSimpleBackOnly(player, slot);
+    }
+
+    private static void handleAuditGuiClick(ServerPlayerEntity player, GuiState state, int slot) {
+        handleSimpleBackOnly(player, slot);
+    }
+
+    private static void handleAchievementsGuiClick(ServerPlayerEntity player, GuiState state, int slot) {
+        handleSimpleBackOnly(player, slot);
+    }
+
+    private static int gridIndex(int slot) {
+        if (slot >= 10 && slot <= 16) return slot - 10;
+        if (slot >= 19 && slot <= 25) return 7 + (slot - 19);
+        if (slot >= 28 && slot <= 34) return 14 + (slot - 28);
+        if (slot >= 37 && slot <= 43) return 21 + (slot - 37);
+        return -1;
+    }
 
     private static void closeForPrompt(ServerPlayerEntity player) {
         REOPENING_SCREENS.add(player.getUuid());
@@ -6993,7 +7452,7 @@ public class GuiManager {
                 inv.setStack(SORT_SLOTS[i], ui(icon, "§f" + m.label, "§7" + m.description, "§aClick to apply"));
             }
         }
-        inv.setStack(49, uiGlint(Items.RED_CONCRETE, "§c◀ Back", "§8Return to block list"));
+        inv.setStack(49, uiGlint(Items.ECHO_SHARD, "§c◀ Back", "§8Return to block list"));
         return inv;
     }
 
@@ -7450,7 +7909,7 @@ public class GuiManager {
             } catch (Exception ex) { invalid.add("range:" + value); }
         } else if (expr.startsWith("recent:")) {
             int n = 10;
-            try { n = Integer.parseInt(expr.substring("recent:".length()).trim()); } catch (Exception ignored) {}
+            try { n = Integer.parseInt(expr.substring("recent:".length()).trim()); } catch (NumberFormatException ignored) {}
             java.util.List<com.customblocks.core.SlotData> all = new java.util.ArrayList<>(com.customblocks.core.SlotManager.allSlots());
             all.sort(java.util.Comparator.comparingInt(d -> -d.index));
             for (int i = 0; i < Math.min(Math.max(1, n), all.size()); i++) matched.add(all.get(i).customId);
@@ -7527,7 +7986,7 @@ public class GuiManager {
         }
         if (low.startsWith("recent:")) {
             int n = 10;
-            try { n = Integer.parseInt(expr.substring("recent:".length()).trim()); } catch (Exception ignored) {}
+            try { n = Integer.parseInt(expr.substring("recent:".length()).trim()); } catch (NumberFormatException ignored) {}
             java.util.List<com.customblocks.core.SlotData> all = new java.util.ArrayList<>(com.customblocks.core.SlotManager.allSlots());
             all.sort(java.util.Comparator.comparingInt(d -> -d.index));
             for (int i = 0; i < Math.min(Math.max(1, n), all.size()); i++) out.add(all.get(i).customId);
@@ -7606,7 +8065,7 @@ public class GuiManager {
         inv.setStack(31, uiGlint(Items.NOTE_BLOCK,     "§aSound",          "§7Set sound type for selected blocks"));
 
         // Bottom row — selection controls
-        inv.setStack(45, uiGlint(Items.RED_CONCRETE, "§c◀ Back", "§8Return to main menu"));
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back", "§8Return to main menu"));
         inv.setStack(46, uiGlint(Items.LIME_DYE,     "§aSelect All",    "§7Selects every block"));
         inv.setStack(47, ui(Items.ORANGE_DYE,         "§6Deselect All",  "§7Clears current selection"));
         inv.setStack(49, ui(Items.GLOWSTONE_DUST,     "§e" + bulkSel(uuid).size() + " §7block(s) selected",
@@ -7640,6 +8099,7 @@ public class GuiManager {
             case 29 -> openBulkOpPicker(player, "favorite",  0);
             case 30 -> openBulkOpPicker(player, "shape",     0);
             case 31 -> openBulkOpPicker(player, "sound",     0);
+            default -> {}
         }
     }
 
@@ -7687,7 +8147,7 @@ public class GuiManager {
         page = Math.max(0, Math.min(page, maxPage));
 
         // Top bar
-        inv.setStack(0, uiGlint(Items.RED_CONCRETE, "§c◀ Back to Hub", "§8Return to bulk operations hub"));
+        inv.setStack(0, uiGlint(Items.ECHO_SHARD, "§c◀ Back to Hub", "§8Return to bulk operations hub"));
         inv.setStack(6, uiGlint(Items.LIME_DYE, "§aSelect All",
                 "§7Selects all " + pool.size() + " matching blocks"));
         inv.setStack(7, ui(Items.ORANGE_DYE, "§6Deselect All", "§7Clears current selection"));

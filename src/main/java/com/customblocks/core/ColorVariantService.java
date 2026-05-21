@@ -1,5 +1,6 @@
 package com.customblocks.core;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import com.customblocks.CustomBlocksMod;
 import com.customblocks.gui.ColorPickerHelper;
 import com.customblocks.network.NetworkManager;
@@ -435,6 +436,7 @@ public final class ColorVariantService {
         return Character.toUpperCase(normalized.charAt(0)) + normalized.substring(1).replace('_', ' ');
     }
 
+    @SuppressFBWarnings({"EI_EXPOSE_REP", "EI_EXPOSE_REP2"})
     public record PreparedVariant(byte[] baseTexture, Map<String, byte[]> faceTextures) {}
 
     public record CreationResult(SlotData slotData, boolean created, String targetId, String targetName) {}

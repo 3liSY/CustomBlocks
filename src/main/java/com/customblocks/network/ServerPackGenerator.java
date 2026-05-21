@@ -1,5 +1,6 @@
 package com.customblocks.network;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import com.customblocks.CustomBlocksConfig;
 import com.customblocks.CustomBlocksMod;
 import com.customblocks.core.SlotData;
@@ -22,6 +23,23 @@ public class ServerPackGenerator {
     private static final int    PACK_FORMAT = 34;
     private static final String MOD_ID      = CustomBlocksMod.MOD_ID;
 
+    /**
+     * 1.17 — If a pack build is requested before startup texture loading is complete,
+     * we defer it here and run it once the flag flips.
+     */
+    private static volatile boolean pendingBuildRequest = false;
+
+    /**
+     * 1.17 — Called by SlotManager.finalizeStartupLoad() when the async texture load
+     * finishes. Triggers exactly one deferred pack build if one was queued.
+     */
+    public static void flushPendingBuildIfNeeded() {
+        if (pendingBuildRequest) {
+            pendingBuildRequest = false;
+            com.customblocks.network.ResourcePackServer.updatePack();
+        }
+    }
+
     private static final Map<String, String> FACE_TO_MC = Map.of(
             "top",    "up",
             "bottom", "down",
@@ -40,16 +58,26 @@ public class ServerPackGenerator {
     /**
      * The Royal Architect Fix: Generates the ZIP directly to disk from a frozen snapshot.
      */
+    @SuppressFBWarnings("RV_RETURN_VALUE_IGNORED_BAD_PRACTICE")
     public static void generateZipWithSnapshot(SlotManager.Snapshot snapshot, File outputFile) {
+        // 1.17 — Don't build a pack before textures are loaded; the result would be all
+        // purple/black checkerboard for every client who joins during the startup window.
+        if (!com.customblocks.core.SlotManager.isStartupLoadComplete()) {
+            pendingBuildRequest = true;
+            CustomBlocksMod.LOGGER.info("[CustomBlocks] 1.17 Pack build deferred — startup texture load not yet complete.");
+            return;
+        }
         try {
             if (outputFile.getParentFile() != null) {
                 outputFile.getParentFile().mkdirs();
             }
+            // 1.11 Fix TOCTOU: Write to a .tmp file first, then atomically move to the live file.
+            File tmpFile = new File(outputFile.getAbsolutePath() + ".tmp");
             // Track paths already written so a duplicate (e.g. two SlotData with
             // the same index, corrupted state) cannot abort the entire pack build
             // with ZipException: duplicate entry.
             java.util.Set<String> writtenPaths = new java.util.HashSet<>();
-            try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(outputFile))) {
+            try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(tmpFile))) {
 
                 // pack.mcmeta
                 JsonObject pack = new JsonObject();
@@ -81,11 +109,16 @@ public class ServerPackGenerator {
 
                     // default texture
                     if (data.texture != null && data.texture.length > 0) {
-                        addZipEntry(zos, "assets/" + MOD_ID + "/textures/block/" + slotKey + ".png", data.texture, writtenPaths);
+                        // 1.9 — validation gate: fix non-power-of-2 textures before they
+                        // reach the atlas and silently kill mipmapping for every block.
+                        int frames = com.customblocks.ImageProcessor.getVerticalFrames(data.texture);
+                        byte[] texBytes = (frames == 1)
+                            ? com.customblocks.ImageProcessor.ensurePowerOf2(data.texture)
+                            : data.texture; // animated strips: ensurePowerOf2 must not be called
+                        addZipEntry(zos, "assets/" + MOD_ID + "/textures/block/" + slotKey + ".png", texBytes, writtenPaths);
                         // Use actual pixel dimensions as source of truth so the
                         // mcmeta is still written even when animMeta is null from
                         // legacy save data or a lost packet. Prevents stacked-frames.
-                        int frames = com.customblocks.ImageProcessor.getVerticalFrames(data.texture);
                         if (frames > 1) {
                             String effectiveMeta = (data.animMeta != null && !data.animMeta.isEmpty())
                                     ? data.animMeta
@@ -102,6 +135,9 @@ public class ServerPackGenerator {
                         for (Map.Entry<String, byte[]> face : data.faceTextures.entrySet()) {
                             String faceKey = face.getKey();
                             byte[] faceBytes = face.getValue();
+                            // 1.9 — validation gate for face textures (static only)
+                            int faceFrames = com.customblocks.ImageProcessor.getVerticalFrames(faceBytes);
+                            if (faceFrames == 1) faceBytes = com.customblocks.ImageProcessor.ensurePowerOf2(faceBytes);
                             String facePath = "assets/" + MOD_ID + "/textures/block/" + slotKey + "_" + faceKey + ".png";
                             addZipEntry(zos, facePath, faceBytes, writtenPaths);
 
@@ -191,6 +227,61 @@ public class ServerPackGenerator {
                     addZipEntry(zos, "assets/" + MOD_ID + "/models/item/" + slotKey + ".json", GSON.toJson(im).getBytes(StandardCharsets.UTF_8), writtenPaths);
                 }
 
+                // ── 1.8: Placeholder files for empty registered slots ─────────────
+                // Every slot index 0..maxSlots-1 that has no SlotData must still have
+                // blockstate + model files so Minecraft doesn't log "missing model" errors.
+                // All empty slots share one model (customblocks:block/empty_slot) and one
+                // 1×1 transparent texture.  This adds zero visible geometry to the world.
+                int totalRegistered = com.customblocks.CustomBlocksConfig.maxSlots;
+                boolean emptySlotTextureWritten = false;
+                boolean emptySlotModelWritten   = false;
+                for (int ei = 0; ei < totalRegistered; ei++) {
+                    if (dedupedByIndex.containsKey(ei)) continue; // has real data
+                    String eslotKey = "slot_" + ei;
+
+                    // Shared texture — write only once
+                    if (!emptySlotTextureWritten) {
+                        addZipEntry(zos,
+                            "assets/" + MOD_ID + "/textures/block/empty_slot_tex.png",
+                            PLACEHOLDER_PNG, writtenPaths);
+                        emptySlotTextureWritten = true;
+                    }
+
+                    // Shared model — write only once
+                    if (!emptySlotModelWritten) {
+                        // A model with no elements renders as completely invisible
+                        JsonObject emTex = new JsonObject();
+                        emTex.addProperty("particle", MOD_ID + ":block/empty_slot_tex");
+                        JsonObject emModel = new JsonObject();
+                        emModel.addProperty("parent", "minecraft:block/block");
+                        emModel.add("textures", emTex);
+                        emModel.add("elements", new com.google.gson.JsonArray()); // no geometry
+                        addZipEntry(zos,
+                            "assets/" + MOD_ID + "/models/block/empty_slot.json",
+                            GSON.toJson(emModel).getBytes(StandardCharsets.UTF_8), writtenPaths);
+                        emptySlotModelWritten = true;
+                    }
+
+                    // Per-empty-slot blockstate pointing to the shared model
+                    JsonObject emVariant = new JsonObject();
+                    emVariant.addProperty("model", MOD_ID + ":block/empty_slot");
+                    JsonObject emVariants = new JsonObject();
+                    emVariants.add("", emVariant);
+                    JsonObject emBs = new JsonObject();
+                    emBs.add("variants", emVariants);
+                    addZipEntry(zos,
+                        "assets/" + MOD_ID + "/blockstates/" + eslotKey + ".json",
+                        GSON.toJson(emBs).getBytes(StandardCharsets.UTF_8), writtenPaths);
+
+                    // Per-empty-slot item model pointing to the shared block model
+                    JsonObject emItemModel = new JsonObject();
+                    emItemModel.addProperty("parent", MOD_ID + ":block/empty_slot");
+                    addZipEntry(zos,
+                        "assets/" + MOD_ID + "/models/item/" + eslotKey + ".json",
+                        GSON.toJson(emItemModel).getBytes(StandardCharsets.UTF_8), writtenPaths);
+                }
+                // ─────────────────────────────────────────────────────────────────
+
                 // Tab Icon
                 byte[] tabIcon = snapshot.tabIcon();
                 if (tabIcon != null && tabIcon.length > 0) {
@@ -199,6 +290,7 @@ public class ServerPackGenerator {
                 } else {
                     addZipEntry(zos, "assets/" + MOD_ID + "/textures/item/tab_icon.png", PLACEHOLDER_PNG, writtenPaths);
                 }
+                addGeneratedItemModel(zos, "tab_icon", "customblocks:item/tab_icon", writtenPaths);
 
                 addGeneratedItemModel(zos, "black_square", "minecraft:item/black_dye", writtenPaths);
                 addGeneratedItemModel(zos, "yellow_square", "minecraft:item/yellow_dye", writtenPaths);
@@ -214,6 +306,10 @@ public class ServerPackGenerator {
                 addGeneratedItemModel(zos, "amethyst_chisel", "minecraft:item/amethyst_shard", writtenPaths);
                 addGeneratedItemModel(zos, "diamond_triangle", "minecraft:item/diamond", writtenPaths);
             }
+            // Move atomically to prevent TOCTOU race conditions
+            java.nio.file.Files.move(tmpFile.toPath(), outputFile.toPath(), 
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE, 
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } catch (Exception e) {
             CustomBlocksMod.LOGGER.error("[CustomBlocks] Failed to generate server pack ZIP", e);
         }

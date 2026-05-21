@@ -183,7 +183,7 @@ public class ColorSquareItem extends Item {
                     variantTexture = ColorTriangleItem.recolourTexture(baseBlock.texture, r, g, b,
                         com.customblocks.CustomBlocksConfig.useTrappedHoleFill());
                 } catch (Exception recolorEx) {
-                    // fall back to plain copy if recoloring fails
+                    CustomBlocksMod.LOGGER.debug("[CB] Hex recolor failed, using base copy: {}", recolorEx.getMessage());
                 }
             }
             SlotData created = SlotManager.assign(targetId, baseBlock.displayName + " (" + color.label() + ")", variantTexture);
@@ -201,7 +201,9 @@ public class ColorSquareItem extends Item {
         }
 
         // Client notify + forced redraw without neighbor churn keeps the swap snappy for recording.
-        world.setBlockState(pos, CustomBlocksMod.SLOT_BLOCKS[target.index].getDefaultState(),
+        SlotBlock targetBlock = CustomBlocksMod.safeSlotBlock(target.index);
+        if (targetBlock == null) return ActionResult.FAIL;
+        world.setBlockState(pos, targetBlock.getDefaultState(),
             Block.NOTIFY_LISTENERS | Block.REDRAW_ON_MAIN_THREAD | Block.FORCE_STATE);
 
         if (player != null) {

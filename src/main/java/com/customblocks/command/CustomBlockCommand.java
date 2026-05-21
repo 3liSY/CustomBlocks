@@ -1,16 +1,20 @@
 package com.customblocks.command;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import com.customblocks.CustomBlocksMod;
 import com.customblocks.CustomBlocksConfig;
 import com.customblocks.core.ColorVariantService;
 import com.customblocks.gui.FeedbackHelper;
 import com.customblocks.gui.GuiManager;
+import com.customblocks.gui.ColorLibrary;
 import com.customblocks.ImageProcessor;
 import com.customblocks.core.FavoritesManager;
 import com.customblocks.core.IncidentRecorder;
+import com.customblocks.core.PlayerPaletteManager;
 import com.customblocks.core.SlotData;
 import com.customblocks.core.SlotManager;
 import com.customblocks.core.UndoManager;
+import com.customblocks.item.ColorTriangleItem;
 import com.customblocks.network.NetworkManager;
 import com.customblocks.command.PermissionHelper;
 import com.customblocks.block.SlotBlock;
@@ -32,6 +36,7 @@ import net.minecraft.text.Text;
 import com.customblocks.gui.ChatHelper;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -41,7 +46,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class CustomBlockCommand {
-    private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(2);
+    // 7.9 — bounded queue (max 20) with CallerRunsPolicy prevents unbounded accumulation
+    private static final ExecutorService EXECUTOR = new java.util.concurrent.ThreadPoolExecutor(
+        2, 2, 60L, java.util.concurrent.TimeUnit.SECONDS,
+        new java.util.concurrent.LinkedBlockingQueue<>(20),
+        new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy());
     private static final java.net.http.HttpClient HTTP = java.net.http.HttpClient.newBuilder()
         .connectTimeout(java.time.Duration.ofSeconds(5))
         .build();
@@ -264,17 +273,22 @@ public class CustomBlockCommand {
                             ChatHelper.error(ctx.getSource(), ChatHelper.formattedKey("cmd.player_only_gui"));
                             return 0;
                         }
+                        ChatHelper.warn(ctx.getSource(), "/cb bulkcolor is deprecated. Use /cb bulkrecolor instead.");
                         GuiManager.openBulkRecolorWizard(p, 0);
                         return 1;
                     })
                     .then(CommandManager.argument("color", StringArgumentType.word())
                         .suggests((ctx, b) -> { b.suggest("green"); b.suggest("yellow"); b.suggest("black"); return b.buildFuture(); })
-                        .executes(ctx -> cmdBulkRecolor(ctx.getSource(),
-                            StringArgumentType.getString(ctx, "color"),
-                            "all",
-                            false))
+                        .executes(ctx -> {
+                            ChatHelper.warn(ctx.getSource(), "/cb bulkcolor is deprecated. Use /cb bulkrecolor instead.");
+                            return cmdBulkRecolor(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "color"),
+                                "all",
+                                false);
+                        })
                         .then(CommandManager.argument("scope", StringArgumentType.greedyString())
                             .executes(ctx -> {
+                                ChatHelper.warn(ctx.getSource(), "/cb bulkcolor is deprecated. Use /cb bulkrecolor instead.");
                                 String scope = StringArgumentType.getString(ctx, "scope");
                                 boolean apply = scope.contains("--apply");
                                 String exclude = "";
@@ -657,6 +671,9 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("undo")
                     .requires(PermissionHelper::canUndo)
                     .executes(ctx -> cmdUndo(ctx.getSource()))
+                    .then(CommandManager.literal("clear")
+                        .requires(PermissionHelper::canUndo)
+                        .executes(ctx -> cmdUndoClear(ctx.getSource())))
                     .then(CommandManager.argument("count", IntegerArgumentType.integer(1, 50))
                         .executes(ctx -> cmdUndoN(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "count")))
                     .then(CommandManager.argument("count_text", StringArgumentType.greedyString())
@@ -770,6 +787,8 @@ public class CustomBlockCommand {
 
                 .then(CommandManager.literal("help")
                     .executes(ctx -> cmdHelp(ctx.getSource(), 1))
+                    .then(CommandManager.literal("scopes")
+                        .executes(ctx -> cmdHelpScopes(ctx.getSource())))
                     .then(CommandManager.argument("page", IntegerArgumentType.integer(1, 500))
                         .executes(ctx -> cmdHelp(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "page")))))
 
@@ -1136,14 +1155,40 @@ public class CustomBlockCommand {
                         .executes(ctx -> cmdExportPng(ctx.getSource(),
                             StringArgumentType.getString(ctx, "id")))))
 
-                // ── showcase (Phase H1) ──────────────────────────────────────
+                // ── showcase (Phase H1 + 4C) ────────────────────────────────
                 .then(CommandManager.literal("showcase")
                     .requires(PermissionHelper::canUse)
                     .executes(ctx -> usage(ctx.getSource(), "showcase"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
                         .executes(ctx -> cmdShowcase(ctx.getSource(),
-                            StringArgumentType.getString(ctx, "id")))))
+                            StringArgumentType.getString(ctx, "id"))))
+                    // Phase 4C: /cb showcase config <x> <y> <z> source <source>
+                    .then(CommandManager.literal("config")
+                        .requires(PermissionHelper::canEdit)
+                        .then(CommandManager.argument("x", IntegerArgumentType.integer())
+                        .then(CommandManager.argument("y", IntegerArgumentType.integer())
+                        .then(CommandManager.argument("z", IntegerArgumentType.integer())
+                        .then(CommandManager.argument("source", StringArgumentType.greedyString())
+                            .executes(ctx -> {
+                                int bx = IntegerArgumentType.getInteger(ctx, "x");
+                                int by = IntegerArgumentType.getInteger(ctx, "y");
+                                int bz = IntegerArgumentType.getInteger(ctx, "z");
+                                String src = StringArgumentType.getString(ctx, "source");
+                                ServerPlayerEntity player = ctx.getSource().getPlayer();
+                                if (player == null) {
+                                    ChatHelper.error(ctx.getSource(), "§cThis command requires a player.");
+                                    return 0;
+                                }
+                                net.minecraft.util.math.BlockPos bpos =
+                                    new net.minecraft.util.math.BlockPos(bx, by, bz);
+                                com.customblocks.gui.ShowcaseManager.updateConfig(
+                                    player.getServerWorld(), bpos, src, 5);
+                                ctx.getSource().sendFeedback(
+                                    () -> Text.literal("§aShowcase at " + bx + "," + by + "," + bz
+                                        + " updated to source §f" + src + "§a."), false);
+                                return 1;
+                            })))))))
 
                 // ── macro (Phase P1/P2) ────────────────────────────────────
                 .then(CommandManager.literal("macro")
@@ -1231,12 +1276,436 @@ public class CustomBlockCommand {
                                     return 1;
                                 })))));
 
+                // ── script (Phase 10.1 — renamed/parallel to macro) ───────────
+                tree.then(CommandManager.literal("script")
+                    .requires(PermissionHelper::canEdit)
+                    .executes(ctx -> usage(ctx.getSource(), "script"))
+                    .then(CommandManager.literal("record")
+                        .then(CommandManager.argument("name", StringArgumentType.word())
+                            .executes(ctx -> {
+                                var p = ctx.getSource().getPlayer();
+                                if (p == null) return 0;
+                                String n = StringArgumentType.getString(ctx, "name");
+                                com.customblocks.core.MacroManager.startRecording(p.getUuid(), n);
+                                ChatHelper.info(ctx.getSource(), "§b[Script] §aRecording started: §f" + n);
+                                ChatHelper.info(ctx.getSource(), "§7Block edits are now captured. Run §f/cb script stop §7to finish.");
+                                return 1;
+                            })))
+                    .then(CommandManager.literal("stop")
+                        .executes(ctx -> {
+                            var p = ctx.getSource().getPlayer();
+                            if (p == null) return 0;
+                            String n = com.customblocks.core.MacroManager.recordingName(p.getUuid());
+                            if (n == null) { ChatHelper.warn(ctx.getSource(), "§7No script recording in progress."); return 0; }
+                            int count = com.customblocks.core.MacroManager.stopRecording(p.getUuid());
+                            if (count < 0) { ChatHelper.error(ctx.getSource(), "§cFailed to save script."); return 0; }
+                            ChatHelper.success(ctx.getSource(), "§b[Script] §aSaved §f" + n + " §awith §f" + count + " §astep(s).");
+                            return 1;
+                        }))
+                    .then(CommandManager.literal("run")
+                        .then(CommandManager.argument("name", StringArgumentType.word())
+                            .executes(ctx -> {
+                                var p = ctx.getSource().getPlayer();
+                                if (p == null) return 0;
+                                String n = StringArgumentType.getString(ctx, "name");
+                                if (com.customblocks.core.MacroManager.isRunning(p.getUuid())) {
+                                    ChatHelper.error(ctx.getSource(), "§cA script is already running. Wait for it to finish.");
+                                    return 0;
+                                }
+                                com.customblocks.core.MacroManager.ScriptRunResult result =
+                                    com.customblocks.core.MacroManager.runScript(p, n);
+                                if (result == null) {
+                                    ChatHelper.error(ctx.getSource(), "§cScript '§f" + n + "§c' not found or corrupt.");
+                                    return 0;
+                                }
+                                ChatHelper.success(ctx.getSource(), "§b[Script] §f" + n + " §acomplete — §f"
+                                    + result.ran() + "§a/§f" + result.steps().size() + " §asteps passed.");
+                                com.customblocks.gui.GuiManager.openScriptSummary(p, result);
+                                return result.ran();
+                            })))
+                    .then(CommandManager.literal("list")
+                        .executes(ctx -> {
+                            var scripts = com.customblocks.core.MacroManager.listMacros();
+                            if (scripts.isEmpty()) { ChatHelper.info(ctx.getSource(), "§7No scripts saved."); return 1; }
+                            ChatHelper.info(ctx.getSource(), "§b[Script] §7Saved scripts §8(" + scripts.size() + ")§7:");
+                            scripts.forEach(s -> ChatHelper.info(ctx.getSource(), "  §f" + s));
+                            return 1;
+                        }))
+                    .then(CommandManager.literal("delete")
+                        .then(CommandManager.argument("name", StringArgumentType.word())
+                            .executes(ctx -> {
+                                String n = StringArgumentType.getString(ctx, "name");
+                                boolean ok = com.customblocks.core.MacroManager.deleteMacro(n);
+                                if (!ok) { ChatHelper.warn(ctx.getSource(), "§7Script '§f" + n + "§7' not found."); return 0; }
+                                ChatHelper.success(ctx.getSource(), "§b[Script] §cDeleted §f" + n);
+                                return 1;
+                            })))
+                    .then(CommandManager.literal("show")
+                        .then(CommandManager.argument("name", StringArgumentType.word())
+                            .executes(ctx -> {
+                                String n = StringArgumentType.getString(ctx, "name");
+                                var cmds = com.customblocks.core.MacroManager.loadMacro(n);
+                                if (cmds == null) { ChatHelper.error(ctx.getSource(), "§cScript '§f" + n + "§c' not found."); return 0; }
+                                ChatHelper.info(ctx.getSource(), "§b[Script] §f" + n + " §8(" + cmds.size() + " steps)§7:");
+                                for (int i = 0; i < cmds.size(); i++)
+                                    ChatHelper.info(ctx.getSource(), "  §8" + (i + 1) + ". §f" + cmds.get(i));
+                                return 1;
+                            })))
+                    .then(CommandManager.literal("add")
+                        .then(CommandManager.argument("name", StringArgumentType.word())
+                            .then(CommandManager.argument("command", StringArgumentType.greedyString())
+                                .executes(ctx -> {
+                                    String n   = StringArgumentType.getString(ctx, "name");
+                                    String cmd = StringArgumentType.getString(ctx, "command");
+                                    boolean ok = com.customblocks.core.MacroManager.addCommand(n, cmd);
+                                    if (!ok) { ChatHelper.error(ctx.getSource(), "§cFailed to save script."); return 0; }
+                                    ChatHelper.success(ctx.getSource(), "§b[Script] §aStep added to §f" + n);
+                                    return 1;
+                                })))));
+
+                // ── scriptgui (Phase 10.1) ─────────────────────────────────────
+                tree.then(CommandManager.literal("scriptgui")
+                    .requires(PermissionHelper::canEdit)
+                    .executes(ctx -> {
+                        var p = ctx.getSource().getPlayer();
+                        if (p == null) return 0;
+                        com.customblocks.gui.GuiManager.openScriptGui(p, 0);
+                        return 1;
+                    }));
+
                 // ── market (Phase L3) ──────────────────────────────────────────
                 tree.then(CommandManager.literal("market")
                     .executes(ctx -> {
                         var p = ctx.getSource().getPlayer();
                         if (p == null) return 0;
                         com.customblocks.gui.GuiManager.openMarketGui(p, 0, false);
+                        return 1;
+                    }));
+
+                // ── 3.2 palette ────────────────────────────────────────────────
+                tree.then(CommandManager.literal("palette")
+                    .requires(PermissionHelper::canUse)
+                    .executes(ctx -> cmdPaletteList(ctx.getSource()))
+                    .then(CommandManager.literal("list")
+                        .executes(ctx -> cmdPaletteList(ctx.getSource())))
+                    .then(CommandManager.literal("add")
+                        .then(CommandManager.argument("hex", StringArgumentType.word())
+                            .executes(ctx -> cmdPaletteAdd(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "hex")))))
+                    .then(CommandManager.literal("remove")
+                        .then(CommandManager.argument("index", IntegerArgumentType.integer(1, com.customblocks.core.PlayerPaletteManager.MAX_PALETTE_SIZE))
+                            .executes(ctx -> cmdPaletteRemove(ctx.getSource(),
+                                IntegerArgumentType.getInteger(ctx, "index")))))
+                    .then(CommandManager.literal("clear")
+                        .executes(ctx -> cmdPaletteClear(ctx.getSource()))));
+
+                // ── 3.6 tolerance ──────────────────────────────────────────────
+                tree.then(CommandManager.literal("tolerance")
+                    .requires(PermissionHelper::canUse)
+                    .executes(ctx -> cmdToleranceShow(ctx.getSource()))
+                    .then(CommandManager.literal("reset")
+                        .executes(ctx -> cmdToleranceReset(ctx.getSource())))
+                    .then(CommandManager.argument("value", IntegerArgumentType.integer(10, 80))
+                        .executes(ctx -> cmdToleranceSet(ctx.getSource(),
+                            IntegerArgumentType.getInteger(ctx, "value")))));
+
+                // ── Phase 4.3 recent ───────────────────────────────────────────
+                tree.then(CommandManager.literal("recent")
+                    .requires(PermissionHelper::canUse)
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p == null) {
+                            ChatHelper.error(ctx.getSource(), ChatHelper.formattedKey("cmd.console_player_only"));
+                            return 0;
+                        }
+                        GuiManager.openRecentGui(p);
+                        return 1;
+                    }));
+
+                // ── Phase 4.4 find ─────────────────────────────────────────────
+                tree.then(CommandManager.literal("find")
+                    .requires(PermissionHelper::canUse)
+                    .executes(ctx -> usage(ctx.getSource(), "find"))
+                    .then(CommandManager.argument("blockId", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .executes(ctx -> {
+                            ServerPlayerEntity p = ctx.getSource().getPlayer();
+                            if (p == null) {
+                                ChatHelper.error(ctx.getSource(), ChatHelper.formattedKey("cmd.console_player_only"));
+                                return 0;
+                            }
+                            String id = StringArgumentType.getString(ctx, "blockId");
+                            com.customblocks.BlockFinder.findBlocks(p, id, 128, false);
+                            return 1;
+                        })
+                        .then(CommandManager.literal("--count")
+                            .executes(ctx -> {
+                                ServerPlayerEntity p = ctx.getSource().getPlayer();
+                                if (p == null) {
+                                    ChatHelper.error(ctx.getSource(), ChatHelper.formattedKey("cmd.console_player_only"));
+                                    return 0;
+                                }
+                                String id = StringArgumentType.getString(ctx, "blockId");
+                                com.customblocks.BlockFinder.findBlocks(p, id, 128, true);
+                                return 1;
+                            }))
+                        .then(CommandManager.argument("radius", IntegerArgumentType.integer(16, 512))
+                            .executes(ctx -> {
+                                ServerPlayerEntity p = ctx.getSource().getPlayer();
+                                if (p == null) {
+                                    ChatHelper.error(ctx.getSource(), ChatHelper.formattedKey("cmd.console_player_only"));
+                                    return 0;
+                                }
+                                String id = StringArgumentType.getString(ctx, "blockId");
+                                int radius = IntegerArgumentType.getInteger(ctx, "radius");
+                                com.customblocks.BlockFinder.findBlocks(p, id, radius, false);
+                                return 1;
+                            }))));
+
+                // ── Phase 4B.2 shapelist / shapepreview ────────────────────────
+                tree.then(CommandManager.literal("shapelist")
+                    .requires(PermissionHelper::canUse)
+                    .executes(ctx -> {
+                        ServerCommandSource src = ctx.getSource();
+                        ChatHelper.info(src, "§b§lAvailable Shape Presets:");
+                        for (String key : SlotManager.SHAPE_PRESETS.keySet()) {
+                            ChatHelper.info(src, "  §f" + key);
+                        }
+                        ChatHelper.info(src, "§7Use §f/cb setshape <id> <preset> §7to apply.");
+                        return 1;
+                    }));
+
+                tree.then(CommandManager.literal("shapepreview")
+                    .requires(PermissionHelper::canUse)
+                    .executes(ctx -> usage(ctx.getSource(), "shapepreview"))
+                    .then(CommandManager.argument("preset", StringArgumentType.word())
+                        .suggests(SHAPE_SUGGESTIONS)
+                        .executes(ctx -> {
+                            String preset = StringArgumentType.getString(ctx, "preset");
+                            if (!SlotManager.SHAPE_PRESETS.containsKey(preset)) {
+                                ChatHelper.error(ctx.getSource(), "§cUnknown shape preset '§f" + preset + "§c'. Use §f/cb shapelist §cto see all presets.");
+                                return 0;
+                            }
+                            ChatHelper.info(ctx.getSource(), "§7Shape preview: place a block with preset §b" + preset + "§7 to see its shape in-world.");
+                            return 1;
+                        })));
+
+                // ── Phase 5.15 template ────────────────────────────────────────
+                tree.then(CommandManager.literal("template")
+                    .requires(PermissionHelper::canEdit)
+                    .executes(ctx -> usage(ctx.getSource(), "template"))
+                    // /cb template save <name> <blockId>
+                    .then(CommandManager.literal("save")
+                        .executes(ctx -> usage(ctx.getSource(), "template save <name> <blockId>"))
+                        .then(CommandManager.argument("name", StringArgumentType.word())
+                            .then(CommandManager.argument("blockId", StringArgumentType.word())
+                                .suggests(BLOCK_SUGGESTIONS)
+                                .executes(ctx -> cmdTemplateSave(ctx.getSource(),
+                                    StringArgumentType.getString(ctx, "name"),
+                                    StringArgumentType.getString(ctx, "blockId"))))))
+                    // /cb template apply <name> <blockId>
+                    .then(CommandManager.literal("apply")
+                        .executes(ctx -> usage(ctx.getSource(), "template apply <name> <blockId>"))
+                        .then(CommandManager.argument("name", StringArgumentType.word())
+                            .then(CommandManager.argument("blockId", StringArgumentType.word())
+                                .suggests(BLOCK_SUGGESTIONS)
+                                .executes(ctx -> cmdTemplateApply(ctx.getSource(),
+                                    StringArgumentType.getString(ctx, "name"),
+                                    StringArgumentType.getString(ctx, "blockId"))))))
+                    // /cb template list
+                    .then(CommandManager.literal("list")
+                        .executes(ctx -> cmdTemplateList(ctx.getSource())))
+                    // /cb template delete <name>
+                    .then(CommandManager.literal("delete")
+                        .executes(ctx -> usage(ctx.getSource(), "template delete <name>"))
+                        .then(CommandManager.argument("name", StringArgumentType.word())
+                            .executes(ctx -> cmdTemplateDelete(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "name"))))));
+
+                // ── /cb backup ────────────────────────────────────────────────
+                tree.then(CommandManager.literal("backup")
+                    .requires(PermissionHelper::canAdmin)
+                    .executes(ctx -> usage(ctx.getSource(), "backup <create|list|restore|delete>"))
+                    .then(CommandManager.literal("create")
+                        .executes(ctx -> cmdBackupCreate(ctx.getSource(), "manual"))
+                        .then(CommandManager.argument("name", StringArgumentType.word())
+                            .executes(ctx -> cmdBackupCreate(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "name")))))
+                    .then(CommandManager.literal("list")
+                        .executes(ctx -> cmdBackupList(ctx.getSource())))
+                    .then(CommandManager.literal("restore")
+                        .executes(ctx -> usage(ctx.getSource(), "backup restore <name>"))
+                        .then(CommandManager.argument("name", StringArgumentType.greedyString())
+                            .executes(ctx -> cmdBackupRestore(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "name")))))
+                    .then(CommandManager.literal("delete")
+                        .executes(ctx -> usage(ctx.getSource(), "backup delete <name>"))
+                        .then(CommandManager.argument("name", StringArgumentType.greedyString())
+                            .executes(ctx -> cmdBackupDelete(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "name")))))
+                    .then(CommandManager.literal("expiry")
+                        .executes(ctx -> usage(ctx.getSource(), "backup expiry <name> <hours>"))
+                        .then(CommandManager.argument("name", StringArgumentType.word())
+                            .then(CommandManager.argument("hours", IntegerArgumentType.integer(1, 720))
+                                .executes(ctx -> cmdBackupExpiry(ctx.getSource(),
+                                    StringArgumentType.getString(ctx, "name"),
+                                    IntegerArgumentType.getInteger(ctx, "hours")))))));
+
+                // ── /cb safety ────────────────────────────────────────────────
+                tree.then(CommandManager.literal("safety")
+                    .requires(PermissionHelper::canAdmin)
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p == null) { ChatHelper.error(ctx.getSource(), "Player only."); return 0; }
+                        com.customblocks.gui.GuiManager.openSafetyCenter(p);
+                        return 1;
+                    }));
+
+                // ── /cb historygui ────────────────────────────────────────────
+                tree.then(CommandManager.literal("historygui")
+                    .requires(PermissionHelper::canAdmin)
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p == null) { ChatHelper.error(ctx.getSource(), "Player only."); return 0; }
+                        com.customblocks.gui.GuiManager.openHistoryGui(p, 0);
+                        return 1;
+                    }));
+
+                // ── /cb ai (Phase 11.1) ────────────────────────────────────────
+                tree.then(CommandManager.literal("ai")
+                    .requires(PermissionHelper::canUse)
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p == null) { ChatHelper.error(ctx.getSource(), "Player only."); return 0; }
+                        com.customblocks.gui.GuiManager.openAiGui(p);
+                        return 1;
+                    }));
+
+                // ── /cb customcolor (Phase 11.2) ───────────────────────────────
+                tree.then(CommandManager.literal("customcolor")
+                    .requires(PermissionHelper::canGive)
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p == null) { ChatHelper.error(ctx.getSource(), "Player only."); return 0; }
+                        com.customblocks.gui.GuiManager.openCustomColorStudio(p, null);
+                        return 1;
+                    })
+                    .then(CommandManager.literal("square")
+                        .then(CommandManager.argument("hex", StringArgumentType.word())
+                            .executes(ctx -> cmdGiveCustomColorToolsInternal(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "hex")))))
+                    .then(CommandManager.literal("triangle")
+                        .then(CommandManager.argument("hex", StringArgumentType.word())
+                            .executes(ctx -> cmdGiveCustomColorToolsInternal(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "hex")))))
+                    .then(CommandManager.argument("hex", StringArgumentType.word())
+                        .executes(ctx -> cmdGiveCustomColorToolsInternal(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "hex")))));
+
+                // ── /cb config (Phase 10.2) ────────────────────────────────────
+                tree.then(CommandManager.literal("config")
+                    .requires(PermissionHelper::canConfig)
+                    .executes(ctx -> cmdConfigList(ctx.getSource()))
+                    .then(CommandManager.literal("max-slots")
+                        .executes(ctx -> cmdConfigGet(ctx.getSource(), "max-slots", String.valueOf(com.customblocks.CustomBlocksConfig.maxSlots)))
+                        .then(CommandManager.argument("value", IntegerArgumentType.integer(1, 100_000))
+                            .executes(ctx -> cmdConfigSetInt(ctx.getSource(), "max-slots", IntegerArgumentType.getInteger(ctx, "value")))))
+                    .then(CommandManager.literal("undo-depth")
+                        .executes(ctx -> cmdConfigGet(ctx.getSource(), "undo-depth", String.valueOf(com.customblocks.CustomBlocksConfig.maxUndoDepth)))
+                        .then(CommandManager.argument("value", IntegerArgumentType.integer(1, 100_000))
+                            .executes(ctx -> cmdConfigSetInt(ctx.getSource(), "undo-depth", IntegerArgumentType.getInteger(ctx, "value")))))
+                    .then(CommandManager.literal("gif-limit")
+                        .executes(ctx -> cmdConfigGet(ctx.getSource(), "gif-limit", String.valueOf(com.customblocks.CustomBlocksConfig.maxGifSizeMb)))
+                        .then(CommandManager.argument("value", IntegerArgumentType.integer(1, 64))
+                            .executes(ctx -> cmdConfigSetInt(ctx.getSource(), "gif-limit", IntegerArgumentType.getInteger(ctx, "value")))))
+                    .then(CommandManager.literal("texture-size")
+                        .executes(ctx -> cmdConfigGet(ctx.getSource(), "texture-size", String.valueOf(com.customblocks.CustomBlocksConfig.defaultTextureSize)))
+                        .then(CommandManager.argument("value", IntegerArgumentType.integer(16, 512))
+                            .executes(ctx -> cmdConfigSetInt(ctx.getSource(), "texture-size", IntegerArgumentType.getInteger(ctx, "value")))))
+                    .then(CommandManager.literal("instant-click")
+                        .executes(ctx -> cmdConfigGet(ctx.getSource(), "instant-click", String.valueOf(com.customblocks.CustomBlocksConfig.instantClickAggressivenessMs)))
+                        .then(CommandManager.argument("value", IntegerArgumentType.integer(0, 10_000))
+                            .executes(ctx -> cmdConfigSetInt(ctx.getSource(), "instant-click", IntegerArgumentType.getInteger(ctx, "value")))))
+                    .then(CommandManager.literal("hologram")
+                        .executes(ctx -> cmdConfigGet(ctx.getSource(), "hologram", String.valueOf(com.customblocks.CustomBlocksConfig.hologramEnabled)))
+                        .then(CommandManager.argument("value", com.mojang.brigadier.arguments.BoolArgumentType.bool())
+                            .executes(ctx -> cmdConfigSetBool(ctx.getSource(), "hologram", com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "value")))))
+                    .then(CommandManager.literal("hologram-height")
+                        .executes(ctx -> cmdConfigGet(ctx.getSource(), "hologram-height", String.valueOf(com.customblocks.CustomBlocksConfig.hologramHeight)))
+                        .then(CommandManager.argument("value", com.mojang.brigadier.arguments.FloatArgumentType.floatArg(0.1f, 5.0f))
+                            .executes(ctx -> cmdConfigSetFloat(ctx.getSource(), "hologram-height", com.mojang.brigadier.arguments.FloatArgumentType.getFloat(ctx, "value")))))
+                    .then(CommandManager.literal("sounds")
+                        .executes(ctx -> cmdConfigGet(ctx.getSource(), "sounds", String.valueOf(com.customblocks.CustomBlocksConfig.soundsEnabled)))
+                        .then(CommandManager.argument("value", com.mojang.brigadier.arguments.BoolArgumentType.bool())
+                            .executes(ctx -> cmdConfigSetBool(ctx.getSource(), "sounds", com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "value")))))
+                    .then(CommandManager.literal("particles")
+                        .executes(ctx -> cmdConfigGet(ctx.getSource(), "particles", String.valueOf(com.customblocks.CustomBlocksConfig.particlesEnabled)))
+                        .then(CommandManager.argument("value", com.mojang.brigadier.arguments.BoolArgumentType.bool())
+                            .executes(ctx -> cmdConfigSetBool(ctx.getSource(), "particles", com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "value")))))
+                    .then(CommandManager.literal("marketplace")
+                        .executes(ctx -> cmdConfigGet(ctx.getSource(), "marketplace", String.valueOf(com.customblocks.CustomBlocksConfig.marketplaceEnabled)))
+                        .then(CommandManager.argument("value", com.mojang.brigadier.arguments.BoolArgumentType.bool())
+                            .executes(ctx -> cmdConfigSetBool(ctx.getSource(), "marketplace", com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "value")))))
+                    .then(CommandManager.literal("voice")
+                        .executes(ctx -> cmdConfigGet(ctx.getSource(), "voice", com.customblocks.CustomBlocksConfig.voiceMode))
+                        .then(CommandManager.argument("value", StringArgumentType.word())
+                            .executes(ctx -> cmdConfigSetVoice(ctx.getSource(), StringArgumentType.getString(ctx, "value")))))
+                    .then(CommandManager.literal("backup-interval")
+                        .executes(ctx -> cmdConfigGet(ctx.getSource(), "backup-interval", String.valueOf(com.customblocks.CustomBlocksConfig.autoSnapshotMinutes)))
+                        .then(CommandManager.argument("value", IntegerArgumentType.integer(1, 1440))
+                            .executes(ctx -> cmdConfigSetInt(ctx.getSource(), "backup-interval", IntegerArgumentType.getInteger(ctx, "value")))))
+                    .then(CommandManager.literal("ai-provider")
+                        .executes(ctx -> cmdConfigGet(ctx.getSource(), "ai-provider",
+                            com.customblocks.CustomBlocksConfig.aiApiProvider.isEmpty() ? "off" : com.customblocks.CustomBlocksConfig.aiApiProvider))
+                        .then(CommandManager.argument("value", StringArgumentType.word())
+                            .executes(ctx -> cmdConfigSetAiProvider(ctx.getSource(), StringArgumentType.getString(ctx, "value")))))
+                    .then(CommandManager.literal("ai-key")
+                        .executes(ctx -> cmdConfigGet(ctx.getSource(), "ai-key",
+                            com.customblocks.CustomBlocksConfig.aiApiKey.isEmpty() ? "[not set]" : "[hidden]"))
+                        .then(CommandManager.argument("value", StringArgumentType.word())
+                            .executes(ctx -> cmdConfigSetAiKey(ctx.getSource(), StringArgumentType.getString(ctx, "value")))))
+                    .then(CommandManager.literal("ai-variations")
+                        .executes(ctx -> cmdConfigGet(ctx.getSource(), "ai-variations", String.valueOf(com.customblocks.CustomBlocksConfig.aiMaxVariations)))
+                        .then(CommandManager.argument("value", IntegerArgumentType.integer(1, 8))
+                            .executes(ctx -> cmdConfigSetInt(ctx.getSource(), "ai-variations", IntegerArgumentType.getInteger(ctx, "value")))))
+                    .then(CommandManager.literal("ai-style")
+                        .executes(ctx -> cmdConfigGet(ctx.getSource(), "ai-style", com.customblocks.CustomBlocksConfig.aiTextureStyle))
+                        .then(CommandManager.argument("value", StringArgumentType.word())
+                            .executes(ctx -> cmdConfigSetAiStyle(ctx.getSource(), StringArgumentType.getString(ctx, "value"))))));
+
+                // ── /cb cache (Phase 10.3) ─────────────────────────────────────
+                tree.then(CommandManager.literal("cache")
+                    .requires(PermissionHelper::canAdmin)
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p == null) { ChatHelper.error(ctx.getSource(), "Player only."); return 0; }
+                        com.customblocks.gui.GuiManager.openCacheDashboard(p, 0);
+                        return 1;
+                    }));
+
+                // ── /cb audit (Phase 10.4) ─────────────────────────────────────
+                tree.then(CommandManager.literal("audit")
+                    .requires(PermissionHelper::canAdmin)
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p == null) { ChatHelper.error(ctx.getSource(), "Player only."); return 0; }
+                        com.customblocks.gui.GuiManager.openAuditGui(p, 0);
+                        return 1;
+                    }));
+
+                // ── /cb screenshot (Phase 10.5) ────────────────────────────────
+                tree.then(CommandManager.literal("screenshot")
+                    .requires(PermissionHelper::canUse)
+                    .then(CommandManager.argument("id", StringArgumentType.word())
+                        .executes(ctx -> cmdScreenshot(ctx.getSource(), StringArgumentType.getString(ctx, "id")))));
+
+                // ── /cb achievements (Phase 12.1) ─────────────────────────────
+                tree.then(CommandManager.literal("achievements")
+                    .requires(PermissionHelper::canUse)
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p == null) { ChatHelper.error(ctx.getSource(), "Player only."); return 0; }
+                        com.customblocks.gui.GuiManager.openAchievementsGui(p, 0);
                         return 1;
                     }));
 
@@ -1723,7 +2192,14 @@ public class CustomBlockCommand {
         try {
             if (code.startsWith("CB~") || code.startsWith("CB3!")) {
                 String hash = code.startsWith("CB~") ? code.substring(3).trim() : code.substring(4).trim();
-                java.nio.file.Path exportFile = java.nio.file.Path.of("config/customblocks/exports", hash + ".json");
+                // 7.36 — validate hash contains only safe characters before using as filename
+                if (!hash.matches("[A-Za-z0-9!@#$%&_\\-\\.]{1,50}"))
+                    throw new IllegalArgumentException("Invalid share code format.");
+                // 7.36 — prevent path traversal: verify resolved path stays inside exports dir
+                java.nio.file.Path exportsDir = java.nio.file.Path.of("config/customblocks/exports").toAbsolutePath().normalize();
+                java.nio.file.Path exportFile = exportsDir.resolve(hash + ".json").normalize();
+                if (!exportFile.startsWith(exportsDir))
+                    throw new IllegalArgumentException("Invalid share code.");
                 if (java.nio.file.Files.exists(exportFile)) {
                     return importDecodedBlock(src,
                         java.nio.file.Files.readString(exportFile, java.nio.charset.StandardCharsets.UTF_8),
@@ -1767,18 +2243,32 @@ public class CustomBlockCommand {
         }
     }
 
+    private static final int MAX_IMPORT_JSON_BYTES = 2 * 1024 * 1024; // 7.35 — 2 MB cap
+
     private static String decodeInlineImportCode(String code) throws Exception {
         if (code.startsWith("CB2!")) {
             byte[] compressed = java.util.Base64.getDecoder().decode(code.substring(4));
+            // 7.35 — reject oversized compressed input before even starting decompression
+            if (compressed.length > 1_048_576)
+                throw new Exception("Import code is too large.");
             try (java.util.zip.GZIPInputStream gz = new java.util.zip.GZIPInputStream(new java.io.ByteArrayInputStream(compressed));
                  java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
                 byte[] buf = new byte[4096];
-                int n;
-                while ((n = gz.read(buf)) != -1) out.write(buf, 0, n);
+                int n, total = 0;
+                while ((n = gz.read(buf)) != -1) {
+                    total += n;
+                    if (total > MAX_IMPORT_JSON_BYTES)
+                        throw new Exception("Import data too large (max 2 MB).");
+                    out.write(buf, 0, n);
+                }
                 return out.toString(java.nio.charset.StandardCharsets.UTF_8);
             }
         }
-        return new String(java.util.Base64.getDecoder().decode(code.substring(3)), java.nio.charset.StandardCharsets.UTF_8);
+        // CB! path — cap the decoded output too (7.35)
+        byte[] decoded = java.util.Base64.getDecoder().decode(code.substring(3));
+        if (decoded.length > MAX_IMPORT_JSON_BYTES)
+            throw new Exception("Import data too large (max 2 MB).");
+        return new String(decoded, java.nio.charset.StandardCharsets.UTF_8);
     }
 
     private static int importDecodedBlock(ServerCommandSource src, String json, boolean fromCloud) {
@@ -1808,7 +2298,7 @@ public class CustomBlockCommand {
             if (obj.has("shape")) {
                 java.util.List<SlotData.ShapeBox> shapeBoxes = new java.util.ArrayList<>();
                 for (com.google.gson.JsonElement el : obj.getAsJsonArray("shape")) {
-                    try { shapeBoxes.add(SlotData.ShapeBox.parse(el.getAsString())); } catch (Exception ignored) {}
+                    try { shapeBoxes.add(SlotData.ShapeBox.parse(el.getAsString())); } catch (IllegalArgumentException ignored) {}
                 }
                 if (!shapeBoxes.isEmpty()) SlotManager.setShape(id, shapeBoxes);
             }
@@ -1889,10 +2379,11 @@ public class CustomBlockCommand {
     }
 
     private static void cacheCloudShare(String hash, String json) throws java.io.IOException {
-        java.nio.file.Path exportDir = java.nio.file.Path.of("config/customblocks/exports");
+        java.nio.file.Path exportDir = java.nio.file.Path.of("config/customblocks/exports").toAbsolutePath().normalize();
         java.nio.file.Files.createDirectories(exportDir);
-        // 1.15 — atomic write
-        java.nio.file.Path target = exportDir.resolve(hash + ".json");
+        // 7.36 — prevent path traversal: verify resolved path stays inside exports dir
+        java.nio.file.Path target = exportDir.resolve(hash + ".json").normalize();
+        if (!target.startsWith(exportDir)) throw new java.io.IOException("Invalid share code.");
         java.nio.file.Path tmp = exportDir.resolve(hash + ".json.tmp");
         java.nio.file.Files.writeString(tmp, json, java.nio.charset.StandardCharsets.UTF_8);
         java.nio.file.Files.move(tmp, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
@@ -1917,14 +2408,16 @@ public class CustomBlockCommand {
         if (!SlotManager.hasId(id)) { src.sendMessage(notFound(id)); return 0; }
         SlotData d = SlotManager.getById(id);
         UndoManager.pushUndoMutation(id, d, "rename", getPlayerUuid(src));
-        SlotManager.rename(id, newName);
+        // 7.22 — strip raw § formatting codes so they don't bleed into tooltips/chat
+        String sanitizedName = newName.replaceAll("§[0-9a-fk-orA-FK-OR]", "");
+        SlotManager.rename(id, sanitizedName);
         SlotManager.saveAll();
         NetworkManager.broadcastUpdate(src.getServer(),
-            new SlotUpdatePayload("rename", d.index, id, newName, null, 0, 0, "stone"));
-        ChatHelper.success(src, ChatHelper.formattedKey("cmd.rename_done", newName));
+            new SlotUpdatePayload("rename", d.index, id, sanitizedName, null, 0, 0, "stone"));
+        ChatHelper.success(src, ChatHelper.formattedKey("cmd.rename_done", sanitizedName));
         // P1 — macro recording hook
         java.util.UUID _renUuid = getPlayerUuid(src);
-        if (_renUuid != null) com.customblocks.core.MacroManager.record(_renUuid, "rename " + id + " " + newName);
+        if (_renUuid != null) com.customblocks.core.MacroManager.record(_renUuid, "rename " + id + " " + sanitizedName);
         return 1;
     }
 
@@ -2490,6 +2983,15 @@ public class CustomBlockCommand {
         return 1;
     }
 
+    /** Phase 9.1 — clear the player's undo and redo stacks. */
+    private static int cmdUndoClear(ServerCommandSource src) {
+        UUID uuid = getPlayerUuid(src);
+        int size = UndoManager.undoSize(uuid);
+        UndoManager.clearPlayer(uuid);
+        ChatHelper.success(src, "§aUndo stack cleared. §8(" + size + " entr" + (size == 1 ? "y" : "ies") + " removed)");
+        return 1;
+    }
+
     /** Undo the last block modification (retexture, setface, setglow, delete, create, …). */
     private static int cmdUndo(ServerCommandSource src) {
         if (UndoManager.undoSize(getPlayerUuid(src)) == 0) {
@@ -2825,6 +3327,7 @@ public class CustomBlockCommand {
     }
 
 
+    @SuppressFBWarnings("RV_RETURN_VALUE_IGNORED_BAD_PRACTICE")
     private static int cmdImportFolder(ServerCommandSource src) {
         File importDir = new File("config/customblocks/import");
         if (!importDir.exists()) {
@@ -2867,6 +3370,11 @@ public class CustomBlockCommand {
                 if (SlotManager.hasId(id)) { skipped.add(id); continue; }
                 if (toAdd.size() >= free) { failed.add(id + "(no slot)"); continue; }
                 try {
+                    // Item 7.35 / DoS protection: cap individual image file size to 8MB
+                    if (img.length() > 8 * 1024 * 1024) {
+                        failed.add(id + "(file > 8MB)");
+                        continue;
+                    }
                     byte[] raw = java.nio.file.Files.readAllBytes(img.toPath());
                     String animMeta = null;
                     byte[] bytes;
@@ -2918,6 +3426,7 @@ public class CustomBlockCommand {
         return 1;
     }
 
+    @SuppressFBWarnings("RV_RETURN_VALUE_IGNORED_BAD_PRACTICE")
     private static int cmdExport(ServerCommandSource src) {
         File dir = new File("config/customblocks"); dir.mkdirs();
         File out = new File(dir, "export.json");
@@ -2947,7 +3456,7 @@ public class CustomBlockCommand {
                 new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(root, fw);
             }
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.export_json_done", SlotManager.usedSlots()));
-        } catch (Exception e) { ChatHelper.error(src, ChatHelper.formattedKey("cmd.export_failed", e.getMessage())); }
+        } catch (IOException | RuntimeException e) { ChatHelper.error(src, ChatHelper.formattedKey("cmd.export_failed", e.getMessage())); }
         return 1;
     }
 
@@ -2968,7 +3477,9 @@ public class CustomBlockCommand {
             ServerPlayerEntity p = src.getPlayerOrThrow();
             p.sendMessage(ChatHelper.rawPrefixed("").append(Text.literal("  " + ChatHelper.formattedKey("cmd.listgui_hint")).styled(s -> s.withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.RUN_COMMAND, "/cb listgui")).withFormatting(net.minecraft.util.Formatting.UNDERLINE))), false);
             p.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.list_breakdown_hint")));
-        } catch(Exception ignored) {}
+        } catch(Exception e) {
+            CustomBlocksMod.LOGGER.debug("[CB] cmdList: not a player ({}), skipping GUI hint", e.getMessage());
+        }
 
         java.util.List<SlotData> sorted = new java.util.ArrayList<>(SlotManager.allSlots());
         sorted.removeIf(d -> "tab_icon".equals(d.customId));
@@ -3040,6 +3551,7 @@ public class CustomBlockCommand {
             ChatHelper.error(src, ChatHelper.formattedKey("cmd.console_player_only"));
             return 0;
         }
+        GuiManager.playClick(p);
         sendVoicePickerLines(p);
         return 1;
     }
@@ -3241,15 +3753,51 @@ public class CustomBlockCommand {
 
     private static int cmdBulkRecolor(ServerCommandSource src, String colorRaw, String scopeExprRaw, String excludeExprRaw, boolean apply) {
         if (apply) com.customblocks.core.SnapshotManager.takeSnapshot("pre_op_bulk_recolor");
-        String color = colorRaw == null ? "" : colorRaw.trim().toLowerCase(java.util.Locale.ROOT);
-        if (!color.equals("green") && !color.equals("yellow") && !color.equals("black")) {
-            ChatHelper.error(src, ChatHelper.formattedKey("cmd.bulk_recolor_unknown_color", colorRaw));
-            return 0;
+        // ── 3.8 Full color resolution ─────────────────────────────────────────
+        // Priority: built-in green/yellow/black → ColorLibrary name → hex string
+        String colorInput = colorRaw == null ? "" : colorRaw.trim();
+        String colorLower = colorInput.toLowerCase(java.util.Locale.ROOT);
+
+        int[] rgb;
+        String colorLabel;
+
+        if (colorLower.equals("green")) {
+            rgb = CustomBlocksConfig.builtInTriangleRgb("green", 30, 140, 30);
+            colorLabel = "Green";
+        } else if (colorLower.equals("yellow")) {
+            rgb = CustomBlocksConfig.builtInTriangleRgb("yellow", 240, 200, 20);
+            colorLabel = "Yellow";
+        } else if (colorLower.equals("black")) {
+            rgb = new int[]{20, 20, 20};
+            colorLabel = "Black";
+        } else {
+            // Try ColorLibrary name lookup first, then hex parse
+            String resolved = ColorLibrary.resolve(colorInput);
+            if (resolved != null) {
+                int rgbInt = Integer.parseInt(resolved.startsWith("#") ? resolved.substring(1) : resolved, 16);
+                rgb = new int[]{(rgbInt >> 16) & 0xFF, (rgbInt >> 8) & 0xFF, rgbInt & 0xFF};
+                // Use the library's canonical name if it was a named color
+                ColorLibrary.LibColor libCol = null;
+                for (ColorLibrary.LibColor c : ColorLibrary.ALL) {
+                    if (c.hex().equalsIgnoreCase(resolved)) { libCol = c; break; }
+                }
+                colorLabel = (libCol != null) ? libCol.name()
+                    : Character.toUpperCase(colorInput.charAt(0)) + colorInput.substring(1);
+            } else {
+                List<String> suggestions = ColorLibrary.suggest(colorInput);
+                String hint = suggestions.isEmpty() ? "" : " §7Did you mean: §f" + String.join("§7, §f", suggestions) + "§7?";
+                ChatHelper.error(src, "§cUnknown color '§f" + colorInput + "§c'. Use a color name (red, coral, navy...) or hex code (#FF5500)." + hint);
+                return 0;
+            }
         }
+
         if (!CustomBlocksConfig.isColorToolModeConfigured()) {
             ChatHelper.error(src, ChatHelper.formattedKey("cmd.bulk_unconfigured_color_mode"));
             return 0;
         }
+
+        // Use a URL-safe color key derived from the label for block IDs
+        String color = colorLabel.toLowerCase(java.util.Locale.ROOT).replace(" ", "_");
 
         String scopeExpr = (scopeExprRaw == null || scopeExprRaw.isBlank()) ? "all" : scopeExprRaw.trim();
         ScopeResolution scope = resolveBulkRecolorScope(src, scopeExpr);
@@ -3265,13 +3813,6 @@ public class CustomBlockCommand {
         if (!exclude.matched().isEmpty()) {
             ids.removeAll(exclude.matched());
         }
-
-        int[] rgb = switch (color) {
-            case "green" -> CustomBlocksConfig.builtInTriangleRgb("green", 30, 140, 30);
-            case "yellow" -> CustomBlocksConfig.builtInTriangleRgb("yellow", 240, 200, 20);
-            default -> new int[]{20, 20, 20};
-        };
-        String colorLabel = Character.toUpperCase(color.charAt(0)) + color.substring(1);
 
         if (!apply) {
             java.util.List<String> sample = ids.stream().limit(8).toList();
@@ -3629,6 +4170,7 @@ public class CustomBlockCommand {
     }
 
 
+    @SuppressFBWarnings("NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE")
     private static int cmdBlockAdd(ServerCommandSource src, String rawId, String rawCat) {
         String catKey = sanitize(rawCat);
         com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(catKey);
@@ -3670,6 +4212,7 @@ public class CustomBlockCommand {
         }
     }
 
+    @SuppressFBWarnings("NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE")
     private static int cmdBulkBlockAdd(ServerCommandSource src, String rawCat, String rawIds) {
         String catKey = sanitize(rawCat);
         com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(catKey);
@@ -3773,6 +4316,7 @@ public class CustomBlockCommand {
         return 1;
     }
 
+    @SuppressFBWarnings("RV_RETURN_VALUE_IGNORED_BAD_PRACTICE")
     private static int cmdExportCategory(ServerCommandSource src, String rawCat) {
         String catKey = sanitize(rawCat);
         com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(catKey);
@@ -3827,12 +4371,13 @@ public class CustomBlockCommand {
             }
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.export_category_done",
                 cat.displayName(), blocks.size(), out.getName()));
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             ChatHelper.error(src, ChatHelper.formattedKey("cmd.export_failed", e.getMessage()));
         }
         return 1;
     }
 
+    @SuppressFBWarnings("RV_RETURN_VALUE_IGNORED_BAD_PRACTICE")
     private static int cmdExportAll(ServerCommandSource src) {
         File dir = new File("config/customblocks"); dir.mkdirs();
         File out = new File(dir, "export_all_categories.json");
@@ -3869,7 +4414,7 @@ public class CustomBlockCommand {
                 new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(root, fw);
             }
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.export_all_categories_done", out.getName()));
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             ChatHelper.error(src, ChatHelper.formattedKey("cmd.export_failed", e.getMessage()));
         }
         return 1;
@@ -4035,7 +4580,7 @@ public class CustomBlockCommand {
                                 }
                             }
                             ChatHelper.success(src, ChatHelper.formattedKey("cmd.cloud_import_assignments_done", displayName, imported));
-                        } catch (Exception ex) {
+                        } catch (RuntimeException ex) {
                             ChatHelper.error(src, ChatHelper.formattedKey("cmd.cloud_parse_error", ex.getMessage()));
                         }
                     });
@@ -4044,7 +4589,7 @@ public class CustomBlockCommand {
                         ChatHelper.error(src, ChatHelper.formattedKey("cmd.cloud_download_failed", resp.statusCode()));
                     });
                 }
-            } catch (Exception e) {
+            } catch (IOException | InterruptedException | RuntimeException e) {
                 src.getServer().execute(() -> {
                     ChatHelper.error(src, ChatHelper.formattedKey("cmd.cloud_unavailable"));
                     ServerPlayerEntity p = src.getPlayer();
@@ -4126,6 +4671,8 @@ public class CustomBlockCommand {
             case "macro"        -> "macro record <name> | stop | run <name> | list | show <name> | add <name> <cmd> | delete <name>";
             case "market"       -> "market  — browse the Cloud Vault marketplace and import shared blocks";
             case "resume"       -> "resume  — reopen last ESC-saved GUI (bulk ops, search, editors, category flows, import conflict, recover, undo history, …)";
+            case "find"         -> "find <blockId> [radius]  — scan loaded chunks for placed instances (--count for count only)";
+            case "shapepreview" -> "shapepreview <preset>  — show info about a shape preset";
             default -> "help";
         };
         ChatHelper.warn(src, ChatHelper.formattedKey("cmd.usage", msg));
@@ -4148,30 +4695,32 @@ public class CustomBlockCommand {
      * Trigger light updates for all blocks of a given slot in a 32-block radius
      * around every online player. Runs off the main thread.
      */
+    // 7.39 — Option B: targeted chunk relight instead of 274,625-position scan.
+    // We tell the lighting engine to recheck each placed block's own chunk and
+    // its immediate neighbours. Vanilla propagates glow changes automatically.
     private static void triggerGlowUpdate(MinecraftServer server, int slotIndex) {
         String slotKey = "slot_" + slotIndex;
-        thread(() -> {
-            server.execute(() -> {
-                for (net.minecraft.server.network.ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
-                    net.minecraft.server.world.ServerWorld world = p.getServerWorld();
-                    int cx = p.getBlockX(), cy = p.getBlockY(), cz = p.getBlockZ();
-                    net.minecraft.util.math.BlockPos.Mutable mpos = new net.minecraft.util.math.BlockPos.Mutable();
-                    int radius = 32;
-                    for (int x = cx - radius; x <= cx + radius; x++) {
-                        for (int y = Math.max(world.getBottomY(), cy - radius);
-                             y <= Math.min(world.getTopY() - 1, cy + radius); y++) {
-                            for (int z = cz - radius; z <= cz + radius; z++) {
-                                mpos.set(x, y, z);
-                                net.minecraft.block.BlockState st = world.getBlockState(mpos);
-                                if (st.getBlock() instanceof com.customblocks.block.SlotBlock sb
-                                        && sb.getSlotKey().equals(slotKey)) {
-                                    world.getLightingProvider().checkBlock(mpos.toImmutable());
-                                }
-                            }
+        server.execute(() -> {
+            for (net.minecraft.server.world.ServerWorld world : server.getWorlds()) {
+                for (net.minecraft.server.network.ServerPlayerEntity p : world.getPlayers()) {
+                    int cx = p.getChunkPos().x;
+                    int cz = p.getChunkPos().z;
+                    for (int dx = -1; dx <= 1; dx++) {
+                        for (int dz = -1; dz <= 1; dz++) {
+                            net.minecraft.world.chunk.WorldChunk chunk = world.getChunkManager()
+                                    .getWorldChunk(cx + dx, cz + dz);
+                            if (chunk == null) continue;
+                            chunk.getBlockEntityPositions().stream()
+                                .filter(pos -> {
+                                    net.minecraft.block.BlockState st = chunk.getBlockState(pos);
+                                    return st.getBlock() instanceof com.customblocks.block.SlotBlock sb
+                                        && sb.getSlotKey().equals(slotKey);
+                                })
+                                .forEach(pos -> world.getLightingProvider().checkBlock(pos));
                         }
                     }
                 }
-            });
+            }
         });
     }
 
@@ -4500,7 +5049,7 @@ public class CustomBlockCommand {
                 }
                 src.getServer().execute(() ->
                         ChatHelper.success(src, "§aExported §f" + blocks.size() + " §7block(s) to §f" + zipPath));
-            } catch (Exception e) {
+            } catch (IOException | RuntimeException e) {
                 src.getServer().execute(() ->
                         ChatHelper.error(src, "§cExport failed: §f" + e.getMessage()));
             }
@@ -4715,5 +5264,463 @@ public class CustomBlockCommand {
             MAP.put("cross",     List.of(new SlotData.ShapeBox(6,0,0,10,16,16), new SlotData.ShapeBox(0,0,6,16,16,10)));
         }
         static List<SlotData.ShapeBox> get(String name) { return MAP.get(name); }
+    }
+
+    // ── 3.2 / 3.6 / 3.8 command implementations (Phase 3 non-GUI) ───────────
+
+    private static int cmdPaletteList(ServerCommandSource src) {
+        ServerPlayerEntity player = src.getPlayer();
+        if (player == null) { ChatHelper.error(src, ChatHelper.formattedKey("cmd.console_player_only")); return 0; }
+        List<String> palette = PlayerPaletteManager.getPalette(player.getUuid());
+        if (palette.isEmpty()) {
+            ChatHelper.info(src, "§7Your color palette is empty. Use §f/cb palette add <hex> §7to save colors.");
+            return 1;
+        }
+        ChatHelper.info(src, "§6§lYour Color Palette §7(" + palette.size() + "/" + PlayerPaletteManager.MAX_PALETTE_SIZE + ")§7:");
+        for (int i = 0; i < palette.size(); i++) {
+            final String hex = palette.get(i);
+            // Try to resolve a color name from the library
+            ColorLibrary.LibColor named = null;
+            for (ColorLibrary.LibColor c : ColorLibrary.ALL) {
+                if (c.hex().equalsIgnoreCase(hex)) { named = c; break; }
+            }
+            final String label = (named != null) ? named.name() : hex;
+            final int displayIndex = i + 1;
+            src.sendFeedback(() -> Text.literal("  §8" + displayIndex + ". §f" + label + " §8(" + hex + ")"), false);
+        }
+        return 1;
+    }
+
+    private static int cmdPaletteAdd(ServerCommandSource src, String hexArg) {
+        ServerPlayerEntity player = src.getPlayer();
+        if (player == null) { ChatHelper.error(src, ChatHelper.formattedKey("cmd.console_player_only")); return 0; }
+        String normalized = PlayerPaletteManager.normalize(hexArg);
+        if (normalized == null) {
+            ChatHelper.error(src, "§cInvalid hex color '§f" + hexArg + "§c'. Use 6-character hex like §fFF5500 §cor §f#FF5500§c.");
+            return 0;
+        }
+        List<String> palette = PlayerPaletteManager.getPalette(player.getUuid());
+        if (palette.size() >= PlayerPaletteManager.MAX_PALETTE_SIZE) {
+            ChatHelper.error(src, "§cPalette full (§f" + PlayerPaletteManager.MAX_PALETTE_SIZE + " §ccolors max). Remove one first with §f/cb palette remove <index>§c.");
+            return 0;
+        }
+        boolean added = PlayerPaletteManager.addColor(player.getUuid(), hexArg);
+        if (!added) {
+            ChatHelper.warn(src, "§7Color §f" + normalized + " §7is already in your palette.");
+            return 0;
+        }
+        ChatHelper.success(src, "§aAdded §f" + normalized + " §ato your color palette.");
+        return 1;
+    }
+
+    private static int cmdPaletteRemove(ServerCommandSource src, int index1Based) {
+        ServerPlayerEntity player = src.getPlayer();
+        if (player == null) { ChatHelper.error(src, ChatHelper.formattedKey("cmd.console_player_only")); return 0; }
+        List<String> palette = PlayerPaletteManager.getPalette(player.getUuid());
+        if (index1Based < 1 || index1Based > palette.size()) {
+            ChatHelper.error(src, "§cIndex §f" + index1Based + " §cis out of range. Your palette has §f" + palette.size() + " §ccolor(s).");
+            return 0;
+        }
+        String removed = palette.get(index1Based - 1);
+        PlayerPaletteManager.removeColor(player.getUuid(), index1Based - 1);
+        ChatHelper.success(src, "§aRemoved §f" + removed + " §afrom your color palette.");
+        return 1;
+    }
+
+    private static int cmdPaletteClear(ServerCommandSource src) {
+        ServerPlayerEntity player = src.getPlayer();
+        if (player == null) { ChatHelper.error(src, ChatHelper.formattedKey("cmd.console_player_only")); return 0; }
+        List<String> palette = PlayerPaletteManager.getPalette(player.getUuid());
+        int count = palette.size();
+        // Remove all entries by iterating in reverse (index-safe)
+        for (int i = count - 1; i >= 0; i--) {
+            PlayerPaletteManager.removeColor(player.getUuid(), i);
+        }
+        ChatHelper.success(src, "§aCleared §f" + count + " §acolor(s) from your palette.");
+        return 1;
+    }
+
+    // ── 3.6 Tolerance command implementations ────────────────────────────────
+
+    private static int cmdToleranceShow(ServerCommandSource src) {
+        ServerPlayerEntity player = src.getPlayer();
+        if (player == null) { ChatHelper.error(src, ChatHelper.formattedKey("cmd.console_player_only")); return 0; }
+        int current = ColorTriangleItem.effectiveTolerance(player.getUuid());
+        boolean overridden = ColorTriangleItem.PLAYER_TOLERANCE.containsKey(player.getUuid());
+        String suffix = overridden ? " §8(custom)" : " §8(default)";
+        ChatHelper.info(src, "§7Flood-fill tolerance: §f" + current + suffix + " §7— range 10–80. Set with §f/cb tolerance <value>§7.");
+        return 1;
+    }
+
+    private static int cmdToleranceSet(ServerCommandSource src, int value) {
+        ServerPlayerEntity player = src.getPlayer();
+        if (player == null) { ChatHelper.error(src, ChatHelper.formattedKey("cmd.console_player_only")); return 0; }
+        ColorTriangleItem.PLAYER_TOLERANCE.put(player.getUuid(), value);
+        ChatHelper.success(src, "§aTolerance set to §f" + value + "§a. Range: 10–80.");
+        return 1;
+    }
+
+    private static int cmdToleranceReset(ServerCommandSource src) {
+        ServerPlayerEntity player = src.getPlayer();
+        if (player == null) { ChatHelper.error(src, ChatHelper.formattedKey("cmd.console_player_only")); return 0; }
+        ColorTriangleItem.PLAYER_TOLERANCE.remove(player.getUuid());
+        int def = ColorTriangleItem.effectiveTolerance(player.getUuid());
+        ChatHelper.success(src, "§aTolerance reset to default (§f" + def + "§a).");
+        return 1;
+    }
+
+    // ── Phase 5.15 Template implementations ─────────────────────────────────
+
+    @SuppressFBWarnings("NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE")
+    private static int cmdTemplateSave(ServerCommandSource src, String name, String blockId) {
+        if (!SlotManager.hasId(blockId)) {
+            ChatHelper.error(src, "§cBlock not found: §f" + blockId + "§c. §7Use /cb list to see block IDs.");
+            return 0;
+        }
+        SlotData data = SlotManager.getById(blockId);
+        if (data == null) { ChatHelper.error(src, ChatHelper.formattedKey("cmd.console_player_only")); return 0; }
+        String author = src.getPlayer() != null ? src.getPlayer().getGameProfile().getName() : "server";
+        boolean ok = com.customblocks.core.TemplateManager.save(name, data, author);
+        if (!ok) {
+            ChatHelper.error(src, "§cTemplate name cannot be blank.");
+            return 0;
+        }
+        ChatHelper.success(src, "§aTemplate §f" + name + " §asaved from §f" + blockId
+            + "§a. §7Properties: sound=" + data.soundType
+            + ", glow=" + data.lightLevel
+            + ", hardness=" + data.hardness + ".");
+        return 1;
+    }
+
+    private static int cmdTemplateApply(ServerCommandSource src, String name, String blockId) {
+        if (!com.customblocks.core.TemplateManager.exists(name)) {
+            ChatHelper.error(src, "§cTemplate §f" + name + " §cnot found. §7Use /cb template list to see templates.");
+            return 0;
+        }
+        if (!SlotManager.hasId(blockId)) {
+            ChatHelper.error(src, "§cBlock not found: §f" + blockId + "§c. §7Use /cb list to see block IDs.");
+            return 0;
+        }
+        boolean ok = com.customblocks.core.TemplateManager.apply(name, blockId);
+        if (!ok) {
+            ChatHelper.error(src, "§cFailed to apply template §f" + name + "§c to §f" + blockId + "§c.");
+            return 0;
+        }
+        com.customblocks.network.NetworkManager.broadcastFullSync(src.getServer());
+        ChatHelper.success(src, "§aTemplate §f" + name + " §aapplied to §f" + blockId + "§a.");
+        return 1;
+    }
+
+    private static int cmdTemplateList(ServerCommandSource src) {
+        var templates = com.customblocks.core.TemplateManager.getAll();
+        if (templates.isEmpty()) {
+            ChatHelper.info(src, "§7No templates saved. Create one with §f/cb template save <name> <blockId>§7.");
+            return 1;
+        }
+        ChatHelper.info(src, "§b§lBlock Templates §7(" + templates.size() + ")§7:");
+        for (com.customblocks.core.TemplateManager.Template t : templates) {
+            String by = (t.createdBy() != null && !t.createdBy().isBlank()) ? " §8by §7" + t.createdBy() : "";
+            ChatHelper.info(src, "  §f" + t.name()
+                + " §8— §7sound=" + t.soundType()
+                + " glow=" + t.lightLevel()
+                + " hardness=" + t.hardness()
+                + by);
+        }
+        ChatHelper.info(src, "§7Apply with §f/cb template apply <name> <blockId>§7.");
+        return 1;
+    }
+
+    private static int cmdTemplateDelete(ServerCommandSource src, String name) {
+        boolean ok = com.customblocks.core.TemplateManager.delete(name);
+        if (!ok) {
+            ChatHelper.error(src, "§cTemplate §f" + name + " §cnot found. §7Use /cb template list to see templates.");
+            return 0;
+        }
+        ChatHelper.success(src, "§aTemplate §f" + name + " §adeleted.");
+        return 1;
+    }
+
+    // ── Phase 5.14 Help scopes ────────────────────────────────────────────────
+
+    private static int cmdHelpScopes(ServerCommandSource src) {
+        ChatHelper.info(src, "§b§lScope Expressions §7— filter sets of blocks for bulk commands");
+        ChatHelper.info(src, "");
+        ChatHelper.info(src, "§e§lBasic scopes:");
+        ChatHelper.info(src, "  §fall §7— every block on the server");
+        ChatHelper.info(src, "  §f<id1,id2,...> §7— explicit comma-separated IDs (e.g. §fmarble,oak_log§7)");
+        ChatHelper.info(src, "  §ffavorites §7— all blocks you have starred with §f/cb favorite");
+        ChatHelper.info(src, "");
+        ChatHelper.info(src, "§e§lCategory scopes:");
+        ChatHelper.info(src, "  §fcategory:<key> §7— all blocks in a category (e.g. §fcategory:stone§7)");
+        ChatHelper.info(src, "  §fname:<pattern> §7— blocks whose ID contains pattern (e.g. §fname:marble§7)");
+        ChatHelper.info(src, "");
+        ChatHelper.info(src, "§e§lFilter tokens (for /cb search):");
+        ChatHelper.info(src, "  §fcategory:<key> §7— filter by category");
+        ChatHelper.info(src, "  §fanimated:true|false §7— animated blocks only");
+        ChatHelper.info(src, "  §fglow:>5 §7— blocks with glow level > 5 (supports <, >, =)");
+        ChatHelper.info(src, "  §flocked:true|false §7— locked/unlocked blocks");
+        ChatHelper.info(src, "  §ffavorite:true|false §7— favorited blocks");
+        ChatHelper.info(src, "  §fsound:<type> §7— blocks with a specific sound type");
+        ChatHelper.info(src, "  §fcreated:today|week|month §7— filter by creation time");
+        ChatHelper.info(src, "  §fhas:variants|shape|faces|glow §7— feature presence check");
+        ChatHelper.info(src, "  §fcolor:<name|#hex> §7— approximate color match");
+        ChatHelper.info(src, "  §fhardness:>2.0 §7— hardness comparison");
+        ChatHelper.info(src, "  §f<bare text> §7— searches ID and display name");
+        ChatHelper.info(src, "");
+        ChatHelper.info(src, "§e§lExamples:");
+        ChatHelper.info(src, "  §f/cb bulkrecolor category:stone red §7— recolor all stone blocks");
+        ChatHelper.info(src, "  §f/cb bulkdelete marble,oak_log §7— delete two specific blocks");
+        ChatHelper.info(src, "  §f/cb search glow:>0 category:plants §7— glowing plant blocks");
+        ChatHelper.info(src, "  §f/cb search animated:true has:variants §7— animated blocks with variants");
+        return 1;
+    }
+
+    // ── 9.4 /cb backup ───────────────────────────────────────────────────────
+
+    private static int cmdBackupCreate(ServerCommandSource src, String name) {
+        // sanitize name
+        String safe = name.replaceAll("[^A-Za-z0-9_\\-]", "_");
+        EXECUTOR.submit(() -> {
+            try {
+                java.nio.file.Path path = com.customblocks.core.BackupManager.create(safe);
+                long bytes = java.nio.file.Files.size(path);
+                String size = String.format("%.1f MB", bytes / 1_048_576.0);
+                src.getServer().execute(() ->
+                    ChatHelper.success(src, "Backup created: §b" + path.getFileName() + " §7(" + size + ")"));
+            } catch (Exception e) {
+                src.getServer().execute(() ->
+                    ChatHelper.error(src, "Backup failed: " + e.getMessage()));
+            }
+        });
+        ChatHelper.info(src, "§7Creating backup '" + safe + "'...");
+        return 1;
+    }
+
+    private static int cmdBackupList(ServerCommandSource src) {
+        var list = com.customblocks.core.BackupManager.list();
+        if (list.isEmpty()) { ChatHelper.info(src, "§7No backups found. Create one with /cb backup create."); return 1; }
+        ChatHelper.info(src, "§e§lBackups (" + list.size() + "):");
+        for (var b : list) {
+            String exp = b.expiresAt() > 0
+                ? " §8[expires in " + ((b.expiresAt() - System.currentTimeMillis()) / 3_600_000) + "h]"
+                : "";
+            ChatHelper.info(src, "  §f" + b.name() + " §7— §b" + b.sizeKb() + " KB §7— " + b.created() + exp);
+        }
+        return 1;
+    }
+
+    private static int cmdBackupRestore(ServerCommandSource src, String name) {
+        boolean ok = com.customblocks.core.BackupManager.restore(name);
+        if (!ok) { ChatHelper.error(src, "Backup '" + name + "' not found or is corrupt."); return 0; }
+        NetworkManager.broadcastFullSync(src.getServer());
+        ChatHelper.success(src, "Backup '" + name + "' restored. All blocks reloaded.");
+        return 1;
+    }
+
+    private static int cmdBackupDelete(ServerCommandSource src, String name) {
+        boolean ok = com.customblocks.core.BackupManager.delete(name);
+        if (!ok) { ChatHelper.error(src, "Backup '" + name + "' not found."); return 0; }
+        ChatHelper.success(src, "Backup '" + name + "' deleted.");
+        return 1;
+    }
+
+    private static int cmdBackupExpiry(ServerCommandSource src, String name, int hours) {
+        boolean ok = com.customblocks.core.BackupManager.setExpiry(name, hours);
+        if (!ok) { ChatHelper.error(src, "Backup '" + name + "' not found."); return 0; }
+        ChatHelper.success(src, "Backup '" + name + "' will auto-delete in §f" + hours + " §ahours if not restored.");
+        return 1;
+    }
+
+    // ── Phase 10.2 — Config subcommand helpers ─────────────────────────────────
+
+    private static int cmdConfigList(ServerCommandSource src) {
+        ChatHelper.info(src, "§6§lCustomBlocks Config Settings:");
+        ChatHelper.info(src, "  §emax-slots §7= §f" + com.customblocks.CustomBlocksConfig.maxSlots);
+        ChatHelper.info(src, "  §eundo-depth §7= §f" + com.customblocks.CustomBlocksConfig.maxUndoDepth);
+        ChatHelper.info(src, "  §egif-limit §7= §f" + com.customblocks.CustomBlocksConfig.maxGifSizeMb + " MB");
+        ChatHelper.info(src, "  §etexture-size §7= §f" + com.customblocks.CustomBlocksConfig.defaultTextureSize);
+        ChatHelper.info(src, "  §einstant-click §7= §f" + com.customblocks.CustomBlocksConfig.instantClickAggressivenessMs + " ms");
+        ChatHelper.info(src, "  §ehologram §7= §f" + com.customblocks.CustomBlocksConfig.hologramEnabled);
+        ChatHelper.info(src, "  §ehologram-height §7= §f" + com.customblocks.CustomBlocksConfig.hologramHeight);
+        ChatHelper.info(src, "  §esounds §7= §f" + com.customblocks.CustomBlocksConfig.soundsEnabled);
+        ChatHelper.info(src, "  §eparticles §7= §f" + com.customblocks.CustomBlocksConfig.particlesEnabled);
+        ChatHelper.info(src, "  §emarketplace §7= §f" + com.customblocks.CustomBlocksConfig.marketplaceEnabled);
+        ChatHelper.info(src, "  §evoice §7= §f" + com.customblocks.CustomBlocksConfig.voiceMode);
+        ChatHelper.info(src, "  §ebackup-interval §7= §f" + com.customblocks.CustomBlocksConfig.autoSnapshotMinutes + " min");
+        ChatHelper.info(src, "  §eai-provider §7= §f" + (com.customblocks.CustomBlocksConfig.aiApiProvider.isEmpty() ? "off" : com.customblocks.CustomBlocksConfig.aiApiProvider));
+        ChatHelper.info(src, "  §eai-key §7= §f" + (com.customblocks.CustomBlocksConfig.aiApiKey.isEmpty() ? "[not set]" : "[hidden]"));
+        ChatHelper.info(src, "  §eai-variations §7= §f" + com.customblocks.CustomBlocksConfig.aiMaxVariations);
+        ChatHelper.info(src, "  §eai-style §7= §f" + com.customblocks.CustomBlocksConfig.aiTextureStyle);
+        return 1;
+    }
+
+    private static int cmdConfigGet(ServerCommandSource src, String key, String value) {
+        ChatHelper.info(src, "§e" + key + " §7= §f" + value);
+        return 1;
+    }
+
+    private static int cmdConfigSetInt(ServerCommandSource src, String key, int value) {
+        switch (key) {
+            case "max-slots" -> {
+                int highest = com.customblocks.core.SlotManager.highestUsedSlotIndex();
+                int needed  = highest + 1;
+                if (value < needed) {
+                    ChatHelper.error(src,
+                        "§cCannot reduce max-slots to §f" + value + "§c — you have blocks using slot indices up to §f"
+                        + highest + "§c. §7Keep max-slots at §f" + needed + "§7 or higher to avoid blocks vanishing from the world.");
+                    return 0;
+                }
+                com.customblocks.CustomBlocksConfig.maxSlots = value;
+            }
+            case "undo-depth"      -> com.customblocks.CustomBlocksConfig.maxUndoDepth = value;
+            case "gif-limit"       -> com.customblocks.CustomBlocksConfig.maxGifSizeMb = value;
+            case "texture-size"    -> com.customblocks.CustomBlocksConfig.defaultTextureSize = value;
+            case "instant-click"   -> com.customblocks.CustomBlocksConfig.instantClickAggressivenessMs = value;
+            case "backup-interval" -> com.customblocks.CustomBlocksConfig.autoSnapshotMinutes = value;
+            case "ai-variations"   -> com.customblocks.CustomBlocksConfig.aiMaxVariations = Math.max(1, Math.min(8, value));
+            default -> { ChatHelper.error(src, "Unknown integer config key: " + key); return 0; }
+        }
+        trySaveConfig(src, key, String.valueOf(value));
+        return 1;
+    }
+
+    private static int cmdConfigSetBool(ServerCommandSource src, String key, boolean value) {
+        switch (key) {
+            case "hologram"     -> com.customblocks.CustomBlocksConfig.hologramEnabled = value;
+            case "sounds"       -> com.customblocks.CustomBlocksConfig.soundsEnabled = value;
+            case "particles"    -> com.customblocks.CustomBlocksConfig.particlesEnabled = value;
+            case "marketplace"  -> com.customblocks.CustomBlocksConfig.marketplaceEnabled = value;
+            default -> { ChatHelper.error(src, "Unknown boolean config key: " + key); return 0; }
+        }
+        trySaveConfig(src, key, String.valueOf(value));
+        return 1;
+    }
+
+    private static int cmdConfigSetFloat(ServerCommandSource src, String key, float value) {
+        switch (key) {
+            case "hologram-height" -> com.customblocks.CustomBlocksConfig.hologramHeight = value;
+            default -> { ChatHelper.error(src, "Unknown float config key: " + key); return 0; }
+        }
+        trySaveConfig(src, key, String.valueOf(value));
+        return 1;
+    }
+
+    private static int cmdConfigSetVoice(ServerCommandSource src, String value) {
+        if (!value.equals("friendly") && !value.equals("professional") && !value.equals("minimal")) {
+            ChatHelper.error(src, "§fvoice §cmust be §ffriendly§c, §fprofessional§c, or §fminimal§c.");
+            return 0;
+        }
+        com.customblocks.CustomBlocksConfig.voiceMode = value;
+        trySaveConfig(src, "voice", value);
+        return 1;
+    }
+
+    private static int cmdConfigSetAiProvider(ServerCommandSource src, String value) {
+        String normalized = switch (value.toLowerCase(java.util.Locale.ROOT).trim()) {
+            case "openai"       -> "openai";
+            case "stability"    -> "stability";
+            case "off", ""      -> "";
+            default             -> null;
+        };
+        if (normalized == null) {
+            ChatHelper.error(src, "§fai-provider §cmust be §fopenai§c, §fstability§c, or §foff§c.");
+            return 0;
+        }
+        com.customblocks.CustomBlocksConfig.aiApiProvider = normalized;
+        String display = normalized.isEmpty() ? "off" : normalized;
+        trySaveConfig(src, "ai-provider", display);
+        return 1;
+    }
+
+    private static int cmdConfigSetAiKey(ServerCommandSource src, String value) {
+        if (value == null || value.isBlank()) {
+            com.customblocks.CustomBlocksConfig.aiApiKey = "";
+            try {
+                com.customblocks.CustomBlocksConfig.save();
+                ChatHelper.success(src, "§eai-key §acleared. AI generation will fall back to procedural.");
+            } catch (Exception e) {
+                ChatHelper.warn(src, "§eai-key §7cleared in memory but config save failed: §f" + e.getMessage());
+            }
+            return 1;
+        }
+        com.customblocks.CustomBlocksConfig.aiApiKey = value.trim();
+        try {
+            com.customblocks.CustomBlocksConfig.save();
+            ChatHelper.success(src, "§eai-key §aset. §7Key stored in config.json — never shown in chat.");
+        } catch (Exception e) {
+            ChatHelper.warn(src, "§eai-key §7set in memory but config save failed: §f" + e.getMessage());
+        }
+        return 1;
+    }
+
+    private static int cmdConfigSetAiStyle(ServerCommandSource src, String value) {
+        String normalized = switch (value.toLowerCase(java.util.Locale.ROOT).trim()) {
+            case "pixel_art", "pixel" -> "pixel_art";
+            case "natural"            -> "natural";
+            case "flat"               -> "flat";
+            default                   -> null;
+        };
+        if (normalized == null) {
+            ChatHelper.error(src, "§fai-style §cmust be §fpixel_art§c, §fnatural§c, or §fflat§c.");
+            return 0;
+        }
+        com.customblocks.CustomBlocksConfig.aiTextureStyle = normalized;
+        trySaveConfig(src, "ai-style", normalized);
+        return 1;
+    }
+
+    private static void trySaveConfig(ServerCommandSource src, String key, String value) {
+        try {
+            com.customblocks.CustomBlocksConfig.save();
+            ChatHelper.success(src, "§e" + key + " §aset to §f" + value + "§a.");
+        } catch (Exception e) {
+            ChatHelper.warn(src, "§e" + key + " §7changed in memory but config save failed: §f" + e.getMessage() +
+                "§7. Changes will not persist through restart.");
+        }
+    }
+
+    // ── Phase 10.5 — /cb screenshot ───────────────────────────────────────────
+
+    private static int cmdScreenshot(ServerCommandSource src, String id) {
+        com.customblocks.core.SlotData d = com.customblocks.core.SlotManager.getById(id);
+        if (d == null) {
+            ChatHelper.error(src, "Block §f" + id + " §cnot found.");
+            return 0;
+        }
+        if (d.texture == null || d.texture.length == 0) {
+            ChatHelper.error(src, "§f" + id + " §chas no texture. Upload one first with /cb retexture.");
+            return 0;
+        }
+        final byte[] textureBytes = d.texture;
+        EXECUTOR.submit(() -> {
+            try {
+                java.nio.file.Path exportDir = java.nio.file.Path.of("config/customblocks/exports");
+                java.nio.file.Files.createDirectories(exportDir);
+                String ts = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss").format(new java.util.Date());
+                String fileName = id + "_" + ts + ".png";
+                java.nio.file.Path out = exportDir.resolve(fileName);
+                java.nio.file.Files.write(out, textureBytes);
+
+                String packUrl = com.customblocks.network.ResourcePackServer.getPackUrl(src.getServer());
+                src.getServer().execute(() -> {
+                    ChatHelper.success(src, "§fScreenshot saved: §b" + fileName);
+                    if (packUrl != null && !packUrl.isBlank()) {
+                        // Build download URL by replacing pack.zip path with exports/<filename>
+                        String base = packUrl.replace("pack.zip", "exports/" + fileName);
+                        net.minecraft.text.Text link = net.minecraft.text.Text.literal("§a§n[Click to Download]")
+                            .styled(s -> s.withClickEvent(new net.minecraft.text.ClickEvent(
+                                net.minecraft.text.ClickEvent.Action.OPEN_URL, base)));
+                        ServerPlayerEntity p = src.getPlayer();
+                        if (p != null) p.sendMessage(link, false);
+                    } else {
+                        ChatHelper.info(src, "§7Saved to §fconfig/customblocks/exports/" + fileName +
+                            " §7(no link — HTTP server offline).");
+                    }
+                });
+            } catch (Exception e) {
+                src.getServer().execute(() -> ChatHelper.error(src, "Screenshot failed: " + e.getMessage()));
+            }
+        });
+        return 1;
     }
 }

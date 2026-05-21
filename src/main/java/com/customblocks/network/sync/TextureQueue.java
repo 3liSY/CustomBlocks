@@ -52,6 +52,14 @@ public final class TextureQueue {
     }
 
     /**
+     * Enqueue any raw CustomPayload without deduplication.
+     * Used for sentinel payloads like {@link com.customblocks.network.SyncCompletePayload}.
+     */
+    public void enqueueRaw(CustomPayload payload) {
+        queue.addLast(payload);
+    }
+
+    /**
      * Drain up to {@code maxCount} payloads from the queue.
      * Returns them in FIFO order.
      */
@@ -69,7 +77,7 @@ public final class TextureQueue {
             }
             result[i] = p;
             if (p instanceof SlotUpdatePayload sup) {
-                latest.remove(dedupeKey(sup));
+                latest.remove(dedupeKey(sup), sup); // 7.46 — atomic compare-and-remove
             }
         }
         return result;
