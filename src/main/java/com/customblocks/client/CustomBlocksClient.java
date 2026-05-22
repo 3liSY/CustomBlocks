@@ -285,6 +285,39 @@ public class CustomBlocksClient implements ClientModInitializer {
             "category.customblocks"
         ));
 
+        // Tint custom_square and custom_triangle icons with their NBT hex color.
+        // The texture PNGs are white so the tint becomes the full displayed color.
+        net.minecraft.item.Item customSquareItem = net.minecraft.registry.Registries.ITEM.get(
+            net.minecraft.util.Identifier.of(com.customblocks.CustomBlocksMod.MOD_ID,
+                com.customblocks.item.ColorSquareItem.CUSTOM_SQUARE_REGISTRY_ID));
+        if (customSquareItem != null && customSquareItem != net.minecraft.item.Items.AIR) {
+            net.fabricmc.fabric.api.client.rendering.v1.ColorProviderRegistry.ITEM.register(
+                (stack, tintIndex) -> {
+                    if (tintIndex != 0) return -1;
+                    net.minecraft.component.type.NbtComponent nbt = stack.get(net.minecraft.component.DataComponentTypes.CUSTOM_DATA);
+                    if (nbt == null) return 0x55CCFF | 0xFF000000;
+                    net.minecraft.nbt.NbtCompound compound = nbt.copyNbt();
+                    if (!compound.contains("cb_square_rgb")) return 0x55CCFF | 0xFF000000;
+                    return compound.getInt("cb_square_rgb") | 0xFF000000;
+                },
+                customSquareItem);
+        }
+        net.minecraft.item.Item customTriangleItem = net.minecraft.registry.Registries.ITEM.get(
+            net.minecraft.util.Identifier.of(com.customblocks.CustomBlocksMod.MOD_ID,
+                com.customblocks.item.ColorTriangleItem.CUSTOM_TRIANGLE_REGISTRY_ID));
+        if (customTriangleItem != null && customTriangleItem != net.minecraft.item.Items.AIR) {
+            net.fabricmc.fabric.api.client.rendering.v1.ColorProviderRegistry.ITEM.register(
+                (stack, tintIndex) -> {
+                    if (tintIndex != 0) return -1;
+                    net.minecraft.component.type.NbtComponent nbt = stack.get(net.minecraft.component.DataComponentTypes.CUSTOM_DATA);
+                    if (nbt == null) return 0x55CCFF | 0xFF000000;
+                    net.minecraft.nbt.NbtCompound compound = nbt.copyNbt();
+                    if (!compound.contains("cb_triangle_rgb")) return 0x55CCFF | 0xFF000000;
+                    return compound.getInt("cb_triangle_rgb") | 0xFF000000;
+                },
+                customTriangleItem);
+        }
+
         ClientLifecycleEvents.CLIENT_STARTED.register(client -> {
 
             SlotManager.loadFromClientDir(client.runDirectory);

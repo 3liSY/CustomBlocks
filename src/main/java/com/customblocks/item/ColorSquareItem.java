@@ -160,9 +160,16 @@ public class ColorSquareItem extends Item {
             SlotData baseBlock = baseId != null ? SlotManager.getById(baseId) : null;
             if (baseBlock == null) {
                 if (player != null) {
-                    player.sendMessage(Text.literal(
-                        "§c[CB] §fNo block found for '§c" + targetId + "§f'" +
-                        (baseId != null ? " and base '§c" + baseId + "§f'" : "") + "§f. Try a different color."), true);
+                    boolean isHexBlock = current.customId.matches("(?i).*_hex_[0-9a-f]{6}$");
+                    if (isHexBlock && !color.key().startsWith("hex_")) {
+                        player.sendMessage(Text.literal(
+                            "§c[CB] §fNo §c" + color.label() + "§f variant exists for this hex block. " +
+                            "Use §e/cb customcolor square <hex>§f to get a matching color square."), true);
+                    } else {
+                        player.sendMessage(Text.literal(
+                            "§c[CB] §fNo block found for '§c" + targetId + "§f'" +
+                            (baseId != null ? " and base '§c" + baseId + "§f'" : "") + "§f. Try a different color."), true);
+                    }
                     if (world instanceof ServerWorld sw) {
                         sw.playSound(null, player.getBlockPos(),
                             net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),

@@ -681,11 +681,11 @@ public class ResourcePackGenerator {
             writeJson(rectModel, new File(assets, "models/item/rainbow_rectangle.json"));
 
             File customSquareTex = new File(assets, "textures/item/custom_square.png");
-            Files.write(customSquareTex.toPath(), makeSquarePng(85, 204, 255));
+            Files.write(customSquareTex.toPath(), makeSquarePng(255, 255, 255));
             writeGeneratedItemModel(assets, "custom_square", MOD_ID + ":item/custom_square");
 
             File customTriangleTex = new File(assets, "textures/item/custom_triangle.png");
-            Files.write(customTriangleTex.toPath(), makeTrianglePng(85, 204, 255));
+            Files.write(customTriangleTex.toPath(), makeTrianglePng(255, 255, 255));
             writeGeneratedItemModel(assets, "custom_triangle", MOD_ID + ":item/custom_triangle");
             writeGeneratedItemModel(assets, "golden_hexagon", "minecraft:item/golden_apple");
             writeGeneratedItemModel(assets, "lumina_brush", "minecraft:item/blaze_rod");
