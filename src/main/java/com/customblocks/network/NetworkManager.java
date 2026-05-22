@@ -49,6 +49,9 @@ public final class NetworkManager {
      *  when a broadcastFullSync fires shortly after a join sync. */
     private static final long FULL_SYNC_COOLDOWN_MS = 30_000;
 
+    /** Set by finalizeStartupLoad() to re-sync players who joined before async load finished. */
+    private static volatile boolean pendingPostStartupSync = false;
+
     // ── AnimSettings per-player rate-limiting (DoS protection, item 1.26) ───
     /** Tracks the last time each player sent an AnimSettingsPayload. */
     private static final ConcurrentHashMap<UUID, Long> ANIM_SETTINGS_COOLDOWN = new ConcurrentHashMap<>();
@@ -187,6 +190,11 @@ public final class NetworkManager {
         queue.enqueueRaw(new SyncCompletePayload(texCount, manifest, serverHash));
     }
 
+    /** Called from finalizeStartupLoad() (IO thread) — schedules a one-time re-sync on next tick. */
+    public static void schedulePostStartupSync() {
+        pendingPostStartupSync = true;
+    }
+
     /**
      * Broadcast full sync to ALL online players (used for /cb reload).
      */
@@ -210,6 +218,19 @@ public final class NetworkManager {
      * large textures don't flood the connection.
      */
     public static void onServerTick(MinecraftServer server) {
+        // ── Post-startup re-sync for players who joined during async load ─
+        if (pendingPostStartupSync) {
+            pendingPostStartupSync = false;
+            List<ServerPlayerEntity> online = server.getPlayerManager().getPlayerList();
+            if (!online.isEmpty()) {
+                LOGGER.info("[CustomBlocks] Post-startup re-sync: {} online player(s) who joined during load.", online.size());
+                for (ServerPlayerEntity p : online) {
+                    LAST_FULL_SYNC.remove(p.getUuid()); // bypass 30s cooldown — join sync was partial
+                    sendFullSync(p);
+                }
+            }
+        }
+
         // ── Drip-feed texture payloads ───────────────────────────────────
         int perTick = CustomBlocksConfig.texturePayloadsPerTick;
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {

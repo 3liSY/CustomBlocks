@@ -89,8 +89,8 @@ public record SlotUpdatePayload(
                 buf.writeString(value.face()          != null ? value.face()          : "");
                 buf.writeString(value.shapeData()     != null ? value.shapeData()     : "");
                 buf.writeString(value.animMeta()      != null ? value.animMeta()      : "");
-                buf.writeString(value.facesJson()     != null ? value.facesJson()     : "");
-                buf.writeString(value.variantsJson()  != null ? value.variantsJson()  : "");
+                buf.writeByteArray((value.facesJson()    != null ? value.facesJson()    : "").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                buf.writeByteArray((value.variantsJson() != null ? value.variantsJson() : "").getBytes(java.nio.charset.StandardCharsets.UTF_8));
             },
             buf -> {
                 String action       = buf.readString();
@@ -104,8 +104,8 @@ public record SlotUpdatePayload(
                 String face         = buf.readableBytes() > 0 ? buf.readString() : "";
                 String shapeData    = buf.readableBytes() > 0 ? buf.readString() : "";
                 String animMeta     = buf.readableBytes() > 0 ? buf.readString() : "";
-                String facesJson    = buf.readableBytes() > 0 ? buf.readString() : "";
-                String variantsJson = buf.readableBytes() > 0 ? buf.readString() : "";
+                String facesJson    = buf.readableBytes() > 0 ? new String(buf.readByteArray(10_485_760), java.nio.charset.StandardCharsets.UTF_8) : "";
+                String variantsJson = buf.readableBytes() > 0 ? new String(buf.readByteArray(10_485_760), java.nio.charset.StandardCharsets.UTF_8) : "";
                 return new SlotUpdatePayload(
                         action, index,
                         id.isEmpty()           ? null : id,

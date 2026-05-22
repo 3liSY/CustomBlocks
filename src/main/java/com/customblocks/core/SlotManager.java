@@ -1161,10 +1161,34 @@ public final class SlotManager {
                 LOGGER.warn("[CustomBlocks] 1.9 Auto-fixed {} texture(s) with non-power-of-2 dimensions.", fixed);
                 saveAll();
             }
+            // Fix face textures — ServerPackGenerator resizes on every pack build but never writes back.
+            int faceFixCount = 0;
+            for (SlotData d : new ArrayList<>(byId.values())) {
+                boolean faceFixed = false;
+                for (Map.Entry<String, byte[]> faceEntry : d.faceTextures.entrySet()) {
+                    String face = faceEntry.getKey();
+                    byte[] faceBytes = faceEntry.getValue();
+                    int faceFrames = com.customblocks.ImageProcessor.getVerticalFrames(faceBytes);
+                    if (faceFrames > 1) continue;
+                    byte[] fixedFace = com.customblocks.ImageProcessor.ensurePowerOf2(faceBytes);
+                    if (fixedFace != faceBytes) {
+                        d = d.withFaceTexture(face, fixedFace);
+                        writeFaceTextureFile(d.index, face, fixedFace);
+                        faceFixCount++;
+                        faceFixed = true;
+                    }
+                }
+                if (faceFixed) put(d);
+            }
+            if (faceFixCount > 0) {
+                LOGGER.warn("[CustomBlocks] 1.9 Auto-fixed {} face texture(s) with non-power-of-2 dimensions.", faceFixCount);
+                saveAll();
+            }
         }
         startupLoadComplete = true;
         LOGGER.info("[CustomBlocks] Startup load complete — triggering resource pack build.");
         com.customblocks.network.ServerPackGenerator.flushPendingBuildIfNeeded();
+        com.customblocks.network.NetworkManager.schedulePostStartupSync();
     }
 
     private static void postProcessLoadedSlots() throws IOException {

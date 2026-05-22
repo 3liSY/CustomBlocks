@@ -570,6 +570,10 @@ public class GuiManager {
 
     public static void openBrokenBlocks(ServerPlayerEntity player) { openBrokenBlocks(player, 0); }
     public static void openBrokenBlocks(ServerPlayerEntity player, int page) {
+        if (!com.customblocks.core.SlotManager.isStartupLoadComplete()) {
+            send(player, "§eStill loading textures from disk — please wait a moment and try again.");
+            return;
+        }
         int total = brokenBlocks().size();
         int max   = total == 0 ? 0 : Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
         page = Math.max(0, Math.min(page, max));
