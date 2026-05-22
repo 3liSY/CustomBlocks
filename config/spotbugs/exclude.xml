@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SpotBugs exclusion filter — 8.3
+  Excludes generated code and Mixin classes that SpotBugs cannot analyse meaningfully.
+  Add per-class/per-bug suppressions here rather than using @SuppressFBWarnings
+  for cases that are genuinely intentional (e.g. magic sleep in test helpers).
+-->
+<FindBugsFilter>
+
+    <!-- Mixin classes: bytecode is injected at runtime, static analysis is misleading -->
+    <Match>
+        <Package name="~com\.customblocks\.mixin.*" />
+    </Match>
+
+    <!-- Minecraft/Fabric accessor interfaces — all fields accessed via injection -->
+    <Match>
+        <Package name="~com\.customblocks\.accessor.*" />
+    </Match>
+
+    <!-- Gradle-generated accessor stubs in the build output -->
+    <Match>
+        <Class name="~.*\$\$.*" />
+    </Match>
+
+</FindBugsFilter>
