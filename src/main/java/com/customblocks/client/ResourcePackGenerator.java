@@ -135,14 +135,17 @@ public class ResourcePackGenerator {
                 // never logs "missing model" errors for slot_N blocks that exist in the world.
                 if (data == null) {
                     if (!emptySlotSharedWritten) {
-                        // Shared invisible block model — empty elements[], no geometry
+                        // Shared placeholder model — cube with purple/black checkerboard texture
                         JsonObject emptyModel = new JsonObject();
-                        emptyModel.add("elements", new com.google.gson.JsonArray());
+                        emptyModel.addProperty("parent", "minecraft:block/cube_all");
+                        JsonObject emptyTextures = new JsonObject();
+                        emptyTextures.addProperty("all", MOD_ID + ":block/empty_slot_tex");
+                        emptyModel.add("textures", emptyTextures);
                         writeJson(emptyModel, new File(assets, "models/block/empty_slot.json"));
-                        // Shared transparent placeholder texture
+                        // Shared purple/black checkerboard texture (16×16, 8px squares)
                         Files.write(
                             new File(assets, "textures/block/empty_slot_tex.png").toPath(),
-                            PLACEHOLDER_PNG);
+                            generateCheckerboardPng());
                         emptySlotSharedWritten = true;
                     }
                     // Per-slot blockstate — points to shared empty model (invisible)
@@ -1665,7 +1668,25 @@ public class ResourcePackGenerator {
 
 
 
-    // 1×1 opaque pink placeholder PNG
+    private static byte[] generateCheckerboardPng() {
+        try {
+            java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(16, 16, java.awt.image.BufferedImage.TYPE_INT_RGB);
+            int purple = 0xFF00FF;
+            int black  = 0x000000;
+            for (int y = 0; y < 16; y++) {
+                for (int x = 0; x < 16; x++) {
+                    img.setRGB(x, y, ((x / 8 + y / 8) % 2 == 0) ? purple : black);
+                }
+            }
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            javax.imageio.ImageIO.write(img, "PNG", baos);
+            return baos.toByteArray();
+        } catch (java.io.IOException e) {
+            return PLACEHOLDER_PNG;
+        }
+    }
+
+    // 1×1 opaque pink placeholder PNG (fallback if ImageIO fails)
 
     private static final byte[] PLACEHOLDER_PNG = {
 

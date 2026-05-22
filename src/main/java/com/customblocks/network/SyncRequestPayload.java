@@ -28,11 +28,11 @@ public record SyncRequestPayload(String textureHash, String slotHashesJson) impl
     public static final PacketCodec<PacketByteBuf, SyncRequestPayload> CODEC = PacketCodec.of(
             (value, buf) -> {
                 buf.writeString(value.textureHash() != null ? value.textureHash() : "");
-                buf.writeString(value.slotHashesJson() != null ? value.slotHashesJson() : "");
+                buf.writeByteArray((value.slotHashesJson() != null ? value.slotHashesJson() : "").getBytes(java.nio.charset.StandardCharsets.UTF_8));
             },
             buf -> {
                 String hash  = buf.readableBytes() > 0 ? buf.readString() : "";
-                String slots = buf.readableBytes() > 0 ? buf.readString() : "";
+                String slots = buf.readableBytes() > 0 ? new String(buf.readByteArray(10_485_760), java.nio.charset.StandardCharsets.UTF_8) : "";
                 return new SyncRequestPayload(hash, slots);
             }
     );

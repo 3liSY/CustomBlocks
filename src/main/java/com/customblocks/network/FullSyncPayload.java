@@ -55,7 +55,7 @@ public record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture, in
                     buf.writeVarInt(e.lightLevel());
                     buf.writeFloat(e.hardness());
                     buf.writeString(e.soundType() != null ? e.soundType() : "stone");
-                    buf.writeString(e.animMeta()  != null ? e.animMeta()  : "");
+                    buf.writeByteArray((e.animMeta() != null ? e.animMeta() : "").getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 }
                 buf.writeByteArray(value.tabIconTexture() != null ? value.tabIconTexture() : new byte[0]);
                 buf.writeVarInt(value.maxSlots());
@@ -71,7 +71,7 @@ public record FullSyncPayload(List<SlotEntry> entries, byte[] tabIconTexture, in
                     int    lightLevel  = buf.readVarInt();
                     float  hardness    = buf.readFloat();
                     String soundType   = buf.readString();
-                    String animMeta    = buf.readableBytes() > 0 ? buf.readString() : "";
+                    String animMeta    = buf.readableBytes() > 0 ? new String(buf.readByteArray(10_485_760), java.nio.charset.StandardCharsets.UTF_8) : "";
                     entries.add(new SlotEntry(index, id, name,
                             tex.length > 0 ? tex : null, lightLevel, hardness, soundType,
                             animMeta.isEmpty() ? null : animMeta));

@@ -280,10 +280,16 @@ public final class NetworkManager {
                 }
             }
 
-            // Log when drip-feed completes for a player
+            // Log when drip-feed completes for a player — only when textures were actually sent
             if (queue.isEmpty()) {
                 COOLDOWN_TICKS.remove(uid);
-                LOGGER.info("[CustomBlocks] Drip-feed complete for {}", player.getName().getString());
+                for (net.minecraft.network.packet.CustomPayload p : batch) {
+                    if (p instanceof SyncCompletePayload scp && scp.payloadCount() > 0) {
+                        LOGGER.info("[CustomBlocks] Drip-feed complete for {}: {} textures sent",
+                                player.getName().getString(), scp.payloadCount());
+                        break;
+                    }
+                }
             }
         }
     }

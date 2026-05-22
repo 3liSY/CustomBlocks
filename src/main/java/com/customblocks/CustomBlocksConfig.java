@@ -101,14 +101,6 @@ public final class CustomBlocksConfig {
     public static volatile String triangleGreenHex = "#1E8C1E";
     /** Editable built-in shade for yellow recolor tools. */
     public static volatile String triangleYellowHex = "#F0C814";
-    /**
-     * 1.28 — What to do when a color square/triangle targets a variant that doesn't exist yet.
-     * "use_base" (default): silently use the base block texture and create the variant automatically.
-     * "auto_create": same as use_base but shows a brief action bar note to the player.
-     * "error": show error and stop (old behavior).
-     */
-    public static volatile String colorSquareFallbackMode = "use_base";
-
     // ── Network ──────────────────────────────────────────────────────────────
     /** Number of texture payloads to drip-feed per server tick. */
     public static volatile int texturePayloadsPerTick = 8;
@@ -359,8 +351,6 @@ public final class CustomBlocksConfig {
             colorToolBackgroundMode = getString(root, "colorToolBackgroundMode", colorToolBackgroundMode);
             triangleGreenHex      = normalizeHexColor(getString(root, "triangleGreenHex", triangleGreenHex), triangleGreenHex);
             triangleYellowHex     = normalizeHexColor(getString(root, "triangleYellowHex", triangleYellowHex), triangleYellowHex);
-            colorSquareFallbackMode = getString(root, "colorSquareFallbackMode", colorSquareFallbackMode);
-
             // Clamp values
             int clampedMaxSlots = Math.max(1, Math.min(8192, maxSlots));
             int clampedDefaultTextureSize = Math.max(16, Math.min(256, defaultTextureSize));
@@ -521,7 +511,6 @@ public final class CustomBlocksConfig {
             root.addProperty("colorToolBackgroundMode", colorToolBackgroundMode);
             root.addProperty("triangleGreenHex", normalizeHexColor(triangleGreenHex, "#1E8C1E"));
             root.addProperty("triangleYellowHex", normalizeHexColor(triangleYellowHex, "#F0C814"));
-            root.addProperty("colorSquareFallbackMode", colorSquareFallbackMode);
             root.addProperty("autoSnapshotMinutes", autoSnapshotMinutes);
             root.addProperty("instantClickAggressivenessMs", instantClickAggressivenessMs);
             root.addProperty("soundsEnabled", soundsEnabled);

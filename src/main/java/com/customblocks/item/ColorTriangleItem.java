@@ -118,8 +118,10 @@ public class ColorTriangleItem extends Item {
         nbt.putString(NBT_LABEL, label);
         nbt.putString(NBT_KEY, key);
         stack.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(nbt));
+        final int colorRgb = rgb;
         stack.set(DataComponentTypes.CUSTOM_NAME,
-            Text.literal("§b§l" + label + " §r§fTriangle").styled(s -> s.withItalic(false)));
+            Text.literal(label).styled(s -> s.withColor(colorRgb).withBold(true).withItalic(false))
+                .append(Text.literal(" Triangle").styled(s -> s.withColor(0xFFFFFF).withBold(false).withItalic(false))));
         stack.set(DataComponentTypes.LORE, new LoreComponent(List.of(
             Text.literal("§7Recolours connected background pixels").styled(s -> s.withItalic(false)),
             Text.literal("§7Target colour: §f#" + hexForRgb(rgb)).styled(s -> s.withItalic(false)),

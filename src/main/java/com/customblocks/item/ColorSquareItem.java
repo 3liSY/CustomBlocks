@@ -87,8 +87,10 @@ public class ColorSquareItem extends Item {
         nbt.putString(NBT_LABEL, label);
         nbt.putString(NBT_KEY, key);
         stack.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(nbt));
+        final int colorRgb = rgb;
         stack.set(DataComponentTypes.CUSTOM_NAME,
-            Text.literal("§b§l" + label + " §r§fSquare").styled(s -> s.withItalic(false)));
+            Text.literal(label).styled(s -> s.withColor(colorRgb).withBold(true).withItalic(false))
+                .append(Text.literal(" Square").styled(s -> s.withColor(0xFFFFFF).withBold(false).withItalic(false))));
         stack.set(DataComponentTypes.LORE, new LoreComponent(List.of(
             Text.literal("§7Swaps instantly to a matching color variant").styled(s -> s.withItalic(false)),
             Text.literal("§7Target color: §f#" + hexForRgb(rgb)).styled(s -> s.withItalic(false)),
@@ -153,51 +155,23 @@ public class ColorSquareItem extends Item {
 
         SlotData target = SlotManager.getById(targetId);
         if (target == null) {
-            // 1.28 — colorSquareFallbackMode: use_base / auto_create / error
-            String fallback = CustomBlocksConfig.colorSquareFallbackMode;
-            if ("error".equals(fallback)) {
-                if (player != null) {
-                    player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_square_variant_missing", targetId)), true);
-                }
-                return ActionResult.FAIL;
-            }
-            // use_base or auto_create: find the base block and create a recolored variant
+            // No variant found — fall back to the base block directly, never auto-create
             String baseId = findBaseId(targetId, color.key());
             SlotData baseBlock = baseId != null ? SlotManager.getById(baseId) : null;
             if (baseBlock == null) {
                 if (player != null) {
-                    player.sendMessage(Text.literal("§c[CB] §fVariant '§c" + targetId + "§f' not found and no base block '§c"
-                            + (baseId != null ? baseId : "?") + "§f' exists to create it from."), true);
+                    player.sendMessage(Text.literal(
+                        "§c[CB] §fNo block found for '§c" + targetId + "§f'" +
+                        (baseId != null ? " and base '§c" + baseId + "§f'" : "") + "§f. Try a different color."), true);
+                    if (world instanceof ServerWorld sw) {
+                        sw.playSound(null, player.getBlockPos(),
+                            net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),
+                            net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
+                    }
                 }
                 return ActionResult.FAIL;
             }
-            // 1.31 — if this is a hex color key (hex_RRGGBB), recolor the base texture
-            // instead of copying it as-is. This ensures the variant actually looks like the
-            // target hex color instead of being an identical copy of the base block.
-            byte[] variantTexture = baseBlock.texture;
-            if (baseBlock.texture != null && color.key().startsWith("hex_") && color.key().length() == 10) {
-                try {
-                    String hexPart = color.key().substring(4); // strip "hex_"
-                    int rgb = Integer.parseInt(hexPart, 16);
-                    int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
-                    variantTexture = ColorTriangleItem.recolourTexture(baseBlock.texture, r, g, b,
-                        com.customblocks.CustomBlocksConfig.useTrappedHoleFill());
-                } catch (Exception recolorEx) {
-                    CustomBlocksMod.LOGGER.debug("[CB] Hex recolor failed, using base copy: {}", recolorEx.getMessage());
-                }
-            }
-            SlotData created = SlotManager.assign(targetId, baseBlock.displayName + " (" + color.label() + ")", variantTexture);
-            if (created == null) {
-                if (player != null) {
-                    player.sendMessage(Text.literal("§c[CB] §fCould not create variant '§c" + targetId + "§f' — no free slots."), true);
-                }
-                return ActionResult.FAIL;
-            }
-            SlotManager.saveAll();
-            target = created;
-            if ("auto_create".equals(fallback) && player != null) {
-                player.sendMessage(Text.literal("§7[CB] §fCreated §b" + targetId + "§7 from base block §f" + baseId + "§7."), true);
-            }
+            target = baseBlock;
         }
 
         // Client notify + forced redraw without neighbor churn keeps the swap snappy for recording.

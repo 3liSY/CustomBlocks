@@ -20,10 +20,16 @@ public record OpenAnimGuiPayload(
             (value, buf) -> {
                 buf.writeString(value.customId()    != null ? value.customId()    : "");
                 buf.writeString(value.displayName() != null ? value.displayName() : "");
-                buf.writeString(value.animMeta()    != null ? value.animMeta()    : "");
+                buf.writeByteArray((value.animMeta() != null ? value.animMeta() : "").getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 buf.writeVarInt(value.frameCount());
             },
-            buf -> new OpenAnimGuiPayload(buf.readString(), buf.readString(), buf.readString(), buf.readVarInt())
+            buf -> {
+                String customId    = buf.readString();
+                String displayName = buf.readString();
+                String animMeta    = new String(buf.readByteArray(10_485_760), java.nio.charset.StandardCharsets.UTF_8);
+                int    frameCount  = buf.readVarInt();
+                return new OpenAnimGuiPayload(customId, displayName, animMeta, frameCount);
+            }
     );
 
     @Override
