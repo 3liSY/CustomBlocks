@@ -22,13 +22,13 @@ public record SyncCompletePayload(int payloadCount, String manifestJson, String 
     public static final PacketCodec<PacketByteBuf, SyncCompletePayload> CODEC = PacketCodec.of(
             (value, buf) -> {
                 buf.writeVarInt(value.payloadCount());
-                buf.writeString(value.manifestJson() != null ? value.manifestJson() : "{}");
-                buf.writeString(value.serverHash() != null ? value.serverHash() : "");
+                buf.writeByteArray((value.manifestJson() != null ? value.manifestJson() : "{}").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                buf.writeByteArray((value.serverHash()   != null ? value.serverHash()   : "").getBytes(java.nio.charset.StandardCharsets.UTF_8));
             },
             buf -> {
-                int count    = buf.readVarInt();
-                String mani  = buf.readString();
-                String hash  = buf.readableBytes() > 0 ? buf.readString() : "";
+                int count   = buf.readVarInt();
+                String mani = new String(buf.readByteArray(10_485_760), java.nio.charset.StandardCharsets.UTF_8);
+                String hash = buf.readableBytes() > 0 ? new String(buf.readByteArray(65_536), java.nio.charset.StandardCharsets.UTF_8) : "";
                 return new SyncCompletePayload(count, mani, hash);
             }
     );
