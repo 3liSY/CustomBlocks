@@ -22,6 +22,8 @@ public final class HelpRegistry {
         add("Blocks", "/cb resize <id> <16-256>", "Rescale stored texture", "customblocks.edit");
         add("Blocks", "/cb rename <id> <name>", "Rename display name", "customblocks.edit");
         add("Blocks", "/cb reid <id> <newid>", "Change a block's unique ID", "customblocks.edit");
+        add("Blocks", "/cb swapid <id1> <id2>", "Swap the internal IDs of two blocks", "customblocks.edit");
+        add("Blocks", "/cb swapname <id1> <id2>", "Swap the display names of two blocks", "customblocks.edit");
         add("Blocks", "/cb dupe|duplicate <sourceId>", "Clone block; auto id (e.g. id_dupe); copies categories", "customblocks.edit");
         add("Blocks", "/cb dress <id> <overlay>", "Create a dressed texture variant (cracked, mossy, weathered, glowing, frosted)", "customblocks.edit");
         add("Blocks", "/cb gradient <fromId> <toId> <steps> [--preview|--apply]", "Generate intermediate recolored variants between two blocks", "customblocks.edit");
@@ -50,7 +52,7 @@ public final class HelpRegistry {
         add("Tools", "/cb rectangle", "Rainbow Rectangle wand", "customblocks.use");
         add("Tools", "/cb square <black|yellow|green>", "Color square tool", "customblocks.use");
         add("Tools", "/cb triangle <black|yellow|green>", "Color triangle tool", "customblocks.use");
-        add("Tools", "/cb hexagon|brush|chisel|diamondtriangle|customtriangle", "Advanced sculpt/color tools", "customblocks.use");
+        add("Tools", "/cb hexagon|brush|chisel|customtriangle", "Advanced sculpt/color tools", "customblocks.use");
         sec("Categories & Bulk");
         add("Categories & Bulk", "/cb blocks | blockscat", "Category browsers", "customblocks.use");
         add("Categories & Bulk", "/cb blockadd <id> <cat>", "Assign block to category", "customblocks.bulk");
@@ -70,6 +72,7 @@ public final class HelpRegistry {
         add("Utilities", "/cb resume", "Resume last ESC-saved GUI (bulk assign/recolor/delete, search, editors, category assign/merge/delete, import conflicts, recover, undo picker, etc.); permission matches that flow", "customblocks.use (+ per-draft)");
         add("Utilities", "/cb showbrokenblocks", "Open broken-slots repair GUI", "customblocks.use");
         add("Utilities", "/cb undo [count] | redo [count]", "Undo / redo stack", "customblocks.edit");
+        add("Utilities", "/cb history | historygui | undogui | redogui", "Undo/redo history GUIs", "customblocks.edit");
         add("Utilities", "/cb settabicon [url]", "Creative tab icon", "customblocks.edit");
         add("Utilities", "/cb favorite [id]", "Star block for bulk scope; omit id to list", "customblocks.favorites");
         add("Utilities", "/cb welcome", "Open the welcome and voice-setup screen", "customblocks.use");
@@ -81,7 +84,7 @@ public final class HelpRegistry {
         add("Utilities", "/cb resourcepack | rp", "Resource-pack HUD", "customblocks.use");
         add("Utilities", "/cb rp pause | rp resume", "Pause/resume RP delivery", "customblocks.admin");
         add("Utilities", "/cb config", "In-game config", "customblocks.config");
-        add("Utilities", "/cb help [page] | helpgui", "Paginated command list from registry / book UI", "customblocks.use");
+        add("Utilities", "/cb help | helpgui", "Open the help GUI", "customblocks.use");
         add("Utilities", "(server config)", "didYouMeanMode: off | strict | smart | genius — typo hints for unknown /cb words", "customblocks.use");
         sec("Admin");
         add("Admin", "/cb history", "View recent block mutations (last 20)", "customblocks.admin");

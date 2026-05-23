@@ -324,7 +324,7 @@ public class AnimBlockScreen extends Screen {
         if (btnInterpolate != null && btnInterpolate.isHovered())
             ctx.drawTooltip(textRenderer, Text.literal("Smooth transition between frames"), mx, my);
         if (btnPingPong != null && btnPingPong.isHovered())
-            ctx.drawTooltip(textRenderer, Text.literal("Play forward then backward (future feature)"), mx, my);
+            ctx.drawTooltip(textRenderer, Text.literal("Play forward then backward (ping-pong loop)"), mx, my);
     }
 
     /** Draw a 2-tone border (inner + outer line for depth). */

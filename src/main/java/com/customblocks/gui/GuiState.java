@@ -340,6 +340,25 @@ public record GuiState(
         return new GuiState(GuiMode.ACHIEVEMENTS_GUI, null, page, false, 0, false);
     }
 
+    /** V4-43 — Snapshots GUI. page = current page index. */
+    public static GuiState snapshotsGui(int page) {
+        return new GuiState(GuiMode.SNAPSHOTS_GUI, null, page, false, 0, false);
+    }
+
+    /** V4-18 — Deleted Blocks GUI. page = current page index. */
+    public static GuiState deletedBlocksGui(int page) {
+        return new GuiState(GuiMode.DELETED_BLOCKS_GUI, null, page, false, 0, false);
+    }
+
+    /**
+     * V4-13 — Box Nudge Editor.
+     * editingId = block customId, page = shape editor returnPage,
+     * shapeBoxPage = index of the box being nudged.
+     */
+    public static GuiState boxNudgeEditor(String blockId, int boxIdx, int returnPage) {
+        return new GuiState(GuiMode.BOX_NUDGE_EDITOR, blockId, returnPage, false, boxIdx, false);
+    }
+
     // DROP_CONFIG (Phase 12.2) — factory removed; mode reserved but not reachable yet.
 
     // Mutation (returns new instance)

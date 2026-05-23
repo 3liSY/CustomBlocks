@@ -36,21 +36,46 @@ public final class SlotData {
     public final String importFringe;
     /** Phase 4A.7 — target import size in pixels (64, 128, 256). 0 = use server default. */
     public final int importSize;
+
+    /** V4-00 — four-state texture health. Replaces the old boolean isBroken. */
+    public final BlockHealth blockHealth;
+    /** Backwards-compat shortcut: true when blockHealth == CORRUPT. */
     public final transient boolean isBroken;
     public final transient String displayNameLower;
 
-    // ── 1.23 Texture reason enum ─────────────────────────────────────────────
-    /** Describes why a block's texture is unavailable, for the admin broken-blocks view. */
-    public enum TextureReason {
-        /** No texture has ever been uploaded for this slot. */
-        NEVER_UPLOADED("No texture has been uploaded for this block yet."),
-        /** A texture was previously saved to disk but the file is now missing. */
-        FILE_MISSING("Texture file was lost — please re-upload."),
-        /** The texture file exists but the PNG data is corrupted or too small to use. */
-        CORRUPTED("Texture file is corrupted — please re-upload.");
+    // ── V4-00: Four block health states ─────────────────────────────────────
+    /**
+     * Describes the texture health of a slot.
+     *
+     * <ul>
+     *   <li>{@link #HEALTHY} — texture loaded and valid. Does not appear in broken-blocks view.</li>
+     *   <li>{@link #LOAD_FAILURE} — .dat file exists on disk but failed to read this session.
+     *       Counted in the save-guard total; shown in /cb showbrokenblocks with a Retry button.</li>
+     *   <li>{@link #PLACEHOLDER} — no texture at all (never uploaded or pre-async-load state).
+     *       Excluded from the save-guard total. Not shown in broken-blocks view.</li>
+     *   <li>{@link #CORRUPT} — texture bytes are present but isBrokenTexture() returns true.
+     *       Counted in the save-guard total; shown prominently in /cb showbrokenblocks.</li>
+     * </ul>
+     */
+    public enum BlockHealth {
+        /** Texture loaded and valid — slot is fully operational. */
+        HEALTHY("Texture is healthy."),
+        /** .dat file exists on disk but could not be read this session — retry may fix it. */
+        LOAD_FAILURE("Texture file could not be loaded this session — click Retry to reload."),
+        /** No texture has been uploaded for this slot (or pre-load placeholder state). */
+        PLACEHOLDER("No texture has been uploaded for this block yet."),
+        /** Texture bytes are present but permanently unreadable — re-upload required. */
+        CORRUPT("Texture file is corrupted — please re-upload.");
 
         public final String tooltip;
-        TextureReason(String tooltip) { this.tooltip = tooltip; }
+        BlockHealth(String tooltip) { this.tooltip = tooltip; }
+    }
+
+    /** Compute BlockHealth from (precomputedBroken flag, texture bytes). */
+    static BlockHealth computeHealth(boolean precomputedBroken, byte[] texture) {
+        if (precomputedBroken) return BlockHealth.CORRUPT;
+        if (texture != null && texture.length > 4) return BlockHealth.HEALTHY;
+        return BlockHealth.PLACEHOLDER;
     }
 
     // ── Shape box record ─────────────────────────────────────────────────────
@@ -91,17 +116,18 @@ public final class SlotData {
                     List<ShapeBox> shapeBoxes, boolean noCollision) {
         this(index, customId, displayName, texture, lightLevel, hardness, soundType,
                 faceTextures, animMeta, shapeBoxes, noCollision,
-                texture != null && com.customblocks.ImageProcessor.isBrokenTexture(texture), null, null, 0L);
+                computeHealth(texture != null && com.customblocks.ImageProcessor.isBrokenTexture(texture), texture),
+                null, null, 0L);
     }
 
-    /** Internal constructor — accepts precomputed isBroken, optional variantTextures, hologramText, and lastEditedAt. */
+    /** Internal constructor — accepts BlockHealth directly. */
     SlotData(int index, String customId, String displayName, byte[] texture,
              int lightLevel, float hardness, String soundType,
              Map<String, byte[]> faceTextures, String animMeta,
-             List<ShapeBox> shapeBoxes, boolean noCollision, boolean precomputedBroken,
+             List<ShapeBox> shapeBoxes, boolean noCollision, BlockHealth blockHealth,
              List<byte[]> variantTextures, String hologramText, long lastEditedAt) {
         this(index, customId, displayName, texture, lightLevel, hardness, soundType,
-             faceTextures, animMeta, shapeBoxes, noCollision, precomputedBroken,
+             faceTextures, animMeta, shapeBoxes, noCollision, blockHealth,
              variantTextures, hologramText, lastEditedAt, "keep_transparent", "normal", 0);
     }
 
@@ -109,7 +135,7 @@ public final class SlotData {
     SlotData(int index, String customId, String displayName, byte[] texture,
              int lightLevel, float hardness, String soundType,
              Map<String, byte[]> faceTextures, String animMeta,
-             List<ShapeBox> shapeBoxes, boolean noCollision, boolean precomputedBroken,
+             List<ShapeBox> shapeBoxes, boolean noCollision, BlockHealth blockHealth,
              List<byte[]> variantTextures, String hologramText, long lastEditedAt,
              String importBgMode, String importFringe, int importSize) {
         this.index        = index;
@@ -148,7 +174,8 @@ public final class SlotData {
             this.variantTextures = List.of();
         }
 
-        this.isBroken = precomputedBroken;
+        this.blockHealth = blockHealth != null ? blockHealth : BlockHealth.PLACEHOLDER;
+        this.isBroken = (this.blockHealth == BlockHealth.CORRUPT);
         this.displayNameLower = this.displayName != null ? this.displayName.toLowerCase() : "";
     }
 
@@ -162,7 +189,7 @@ public final class SlotData {
      *  where texture bytes come from trusted storage, not user upload. */
     static SlotData createTrusted(int index, String customId, String displayName, byte[] texture) {
         return new SlotData(index, customId, displayName, texture, 0, 1.5f, "stone",
-                null, null, null, false, false, null, null, 0L);
+                null, null, null, false, computeHealth(false, texture), null, null, 0L);
     }
 
     /** Trusted factory — full fields, skips isBrokenTexture(). For deserialization from JSON. */
@@ -171,7 +198,7 @@ public final class SlotData {
                                       Map<String, byte[]> faceTextures, String animMeta,
                                       List<ShapeBox> shapeBoxes, boolean noCollision) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness, soundType,
-                faceTextures, animMeta, shapeBoxes, noCollision, false, null, null, 0L);
+                faceTextures, animMeta, shapeBoxes, noCollision, computeHealth(false, texture), null, null, 0L);
     }
 
     /** Trusted factory — full fields + variant textures, skips isBrokenTexture(). */
@@ -181,7 +208,7 @@ public final class SlotData {
                                       List<ShapeBox> shapeBoxes, boolean noCollision,
                                       List<byte[]> variantTextures) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness, soundType,
-                faceTextures, animMeta, shapeBoxes, noCollision, false, variantTextures, null, 0L);
+                faceTextures, animMeta, shapeBoxes, noCollision, computeHealth(false, texture), variantTextures, null, 0L);
     }
 
     /** Trusted factory — full fields + variant textures + hologramText. */
@@ -191,7 +218,7 @@ public final class SlotData {
                                       List<ShapeBox> shapeBoxes, boolean noCollision,
                                       List<byte[]> variantTextures, String hologramText) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness, soundType,
-                faceTextures, animMeta, shapeBoxes, noCollision, false, variantTextures, hologramText, 0L);
+                faceTextures, animMeta, shapeBoxes, noCollision, computeHealth(false, texture), variantTextures, hologramText, 0L);
     }
 
     /** Trusted factory — full fields + variant textures + hologramText + lastEditedAt. For deserialization. */
@@ -201,7 +228,7 @@ public final class SlotData {
                                       List<ShapeBox> shapeBoxes, boolean noCollision,
                                       List<byte[]> variantTextures, String hologramText, long lastEditedAt) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness, soundType,
-                faceTextures, animMeta, shapeBoxes, noCollision, false, variantTextures, hologramText, lastEditedAt);
+                faceTextures, animMeta, shapeBoxes, noCollision, computeHealth(false, texture), variantTextures, hologramText, lastEditedAt);
     }
 
     // ── Query helpers ────────────────────────────────────────────────────────
@@ -227,64 +254,72 @@ public final class SlotData {
 
     public SlotData withDisplayName(String name) {
         return new SlotData(index, customId, name, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken,
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize);
     }
 
     public SlotData withCustomId(String newId) {
         return new SlotData(index, newId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken,
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize);
     }
 
     public SlotData withTexture(byte[] tex) {
-        boolean broken = tex != null && com.customblocks.ImageProcessor.isBrokenTexture(tex);
+        BlockHealth health = computeHealth(tex != null && com.customblocks.ImageProcessor.isBrokenTexture(tex), tex);
         return new SlotData(index, customId, displayName, tex, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision, broken,
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, health,
+                this.variantTextures, this.hologramText, this.lastEditedAt,
+                this.importBgMode, this.importFringe, this.importSize);
+    }
+
+    /** V4-00 — explicitly set the block health state (used by loadTexturesAsync for LOAD_FAILURE). */
+    public SlotData withBlockHealth(BlockHealth health) {
+        return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, health,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize);
     }
 
     public SlotData withLightLevel(int level) {
         return new SlotData(index, customId, displayName, texture, level, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken,
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize);
     }
 
     public SlotData withHardness(float h) {
         return new SlotData(index, customId, displayName, texture, lightLevel, h,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken,
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize);
     }
 
     public SlotData withSoundType(String sound) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                sound, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken,
+                sound, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize);
     }
 
     public SlotData withAnimMeta(String meta) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, meta, shapeBoxes, noCollision, this.isBroken,
+                soundType, faceTextures, meta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize);
     }
 
     public SlotData withShapeBoxes(List<ShapeBox> boxes) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, boxes, noCollision, this.isBroken,
+                soundType, faceTextures, animMeta, boxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize);
     }
 
     public SlotData withNoCollision(boolean nc) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, nc, this.isBroken,
+                soundType, faceTextures, animMeta, shapeBoxes, nc, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize);
     }
@@ -296,7 +331,7 @@ public final class SlotData {
         Map<String, byte[]> newFaces = new ConcurrentHashMap<>(faceTextures);
         newFaces.put(face, tex.clone());
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, newFaces, animMeta, shapeBoxes, noCollision, this.isBroken,
+                soundType, newFaces, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize);
     }
@@ -305,28 +340,28 @@ public final class SlotData {
         Map<String, byte[]> newFaces = new ConcurrentHashMap<>(faceTextures);
         newFaces.remove(face);
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, newFaces, animMeta, shapeBoxes, noCollision, this.isBroken,
+                soundType, newFaces, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize);
     }
 
     public SlotData withClearedFaces() {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, Collections.emptyMap(), animMeta, shapeBoxes, noCollision, this.isBroken,
+                soundType, Collections.emptyMap(), animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize);
     }
 
     public SlotData withIndex(int newIndex) {
         return new SlotData(newIndex, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken,
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize);
     }
 
     public SlotData withProperties(int light, float hard, String sound) {
         return new SlotData(index, customId, displayName, texture, light, hard,
-                sound, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken,
+                sound, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize);
     }
@@ -334,7 +369,7 @@ public final class SlotData {
     /** H4 — replace the variant texture list (0–7 extra variants). */
     public SlotData withVariantTextures(List<byte[]> variants) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken,
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 variants == null ? List.of() : variants, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize);
     }
@@ -342,7 +377,7 @@ public final class SlotData {
     /** I2 — set or clear the per-block hologram text override. null/blank = use displayName. */
     public SlotData withHologramText(String text) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken,
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, (text != null && !text.isBlank()) ? text : null, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize);
     }
@@ -350,7 +385,7 @@ public final class SlotData {
     /** 1.27 — set the lastEditedAt timestamp (used by SlotManager.put() on every mutation). */
     public SlotData withLastEditedAt(long ts) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken,
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, ts,
                 this.importBgMode, this.importFringe, this.importSize);
     }
@@ -358,7 +393,7 @@ public final class SlotData {
     /** Phase 4A.1 — set the background removal mode for this block's import settings. */
     public SlotData withImportBgMode(String mode) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken,
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 mode, this.importFringe, this.importSize);
     }
@@ -366,7 +401,7 @@ public final class SlotData {
     /** Phase 4A.1 — set the fringe removal aggressiveness ("off", "light", "normal", "aggressive"). */
     public SlotData withImportFringe(String fringe) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken,
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, fringe, this.importSize);
     }
@@ -374,7 +409,7 @@ public final class SlotData {
     /** Phase 4A.7 — set the target import size in pixels (64, 128, 256; 0 = server default). */
     public SlotData withImportSize(int size) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken,
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, size);
     }
@@ -382,7 +417,7 @@ public final class SlotData {
     /** Full deep copy — same as constructing from all fields. */
     public SlotData deepCopy() {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
-                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.isBroken,
+                soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize);
     }

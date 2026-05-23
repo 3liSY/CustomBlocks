@@ -179,6 +179,19 @@ public class ColorSquareItem extends Item {
                 return ActionResult.FAIL;
             }
             target = baseBlock;
+            // Self-same check: fallback resolved to the same block — no variant exists
+            if (target.customId.equals(current.customId)) {
+                if (player != null) {
+                    player.sendMessage(Text.literal(
+                        "§c[CB] §fNo §c" + color.label() + "§f variant found for '§f" + current.displayName + "§f'."), true);
+                    if (world instanceof ServerWorld sw) {
+                        sw.playSound(null, player.getBlockPos(),
+                            net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),
+                            net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
+                    }
+                }
+                return ActionResult.FAIL;
+            }
         }
 
         // Client notify + forced redraw without neighbor churn keeps the swap snappy for recording.

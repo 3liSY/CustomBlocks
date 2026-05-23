@@ -48,7 +48,7 @@ public final class ColorNames {
             m.put(a, "white");
 
         // ── red ──────────────────────────────────────────────────────────────
-        for (String a : new String[]{"crimson","scarlet","ruby","blood","cherry","carmine","garnet","vermilion"})
+        for (String a : new String[]{"crimson","scarlet","ruby","blood","cherry","carmine","garnet","vermilion","maroon","wine","burgundy","dark_red"})
             m.put(a, "red");
 
         // ── orange ───────────────────────────────────────────────────────────

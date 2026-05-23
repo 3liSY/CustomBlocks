@@ -967,7 +967,7 @@ public class CustomBlocksClient implements ClientModInitializer {
             }
         });
 
-        // ── HUD overlay ───────────────────────────────────────────────────────
+        // ── V4-47 Enhanced HUD overlay ────────────────────────────────────────
 
         HudRenderCallback.EVENT.register((ctx, tickCounter) -> {
 
@@ -985,15 +985,38 @@ public class CustomBlocksClient implements ClientModInitializer {
 
             if (data == null) return;
 
-            String name = data.displayName;
+            // Build HUD lines
+            String nameLine = "§f✦ " + data.displayName + " §8[" + data.customId + "]";
+            String detailLine = "§7Light: §f" + data.lightLevel
+                + "  §7Hard: §f" + data.hardness
+                + "  §7🔊 §f" + data.soundType;
+            String faceName = bhr.getSide().getName();
+            String statusLine = "§7Collision: " + (data.noCollision ? "§cOFF" : "§aON")
+                + "  §7Face: §f" + faceName;
 
+            // Health warning
+            boolean broken = data.blockHealth == com.customblocks.core.SlotData.BlockHealth.CORRUPT
+                          || data.blockHealth == com.customblocks.core.SlotData.BlockHealth.LOAD_FAILURE;
+            String healthLine = broken ? "§c⚠ " + data.blockHealth.name() : null;
+
+            java.util.List<String> lines = new java.util.ArrayList<>();
+            lines.add(nameLine);
+            lines.add(detailLine);
+            lines.add(statusLine);
+            if (healthLine != null) lines.add(healthLine);
+
+            int lineH = client.textRenderer.fontHeight + 2;
+            int totalH = lines.size() * lineH + 4;
             int cx = ctx.getScaledWindowWidth() / 2;
-
-            int w  = client.textRenderer.getWidth(name);
-
-            ctx.fill(cx - w / 2 - 5, 38, cx + w / 2 + 5, 52, 0x88000000);
-
-            ctx.drawCenteredTextWithShadow(client.textRenderer, name, cx, 42, 0xFFFFFFFF);
+            int maxW = 0;
+            for (String l : lines) maxW = Math.max(maxW, client.textRenderer.getWidth(net.minecraft.text.Text.literal(l)));
+            int boxTop = 34;
+            ctx.fill(cx - maxW / 2 - 5, boxTop, cx + maxW / 2 + 5, boxTop + totalH, 0x99000000);
+            for (int i = 0; i < lines.size(); i++) {
+                ctx.drawCenteredTextWithShadow(client.textRenderer,
+                    net.minecraft.text.Text.literal(lines.get(i)),
+                    cx, boxTop + 2 + i * lineH, 0xFFFFFFFF);
+            }
 
         });
 

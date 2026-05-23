@@ -51,6 +51,7 @@ public final class ColorLibrary {
             new LibColor("Black",      "#111111"),
             new LibColor("Brown",      "#8B4513"),
             new LibColor("Crimson",    "#CC1133"),
+            new LibColor("Maroon",     "#800000"),
             new LibColor("Gold",       "#FFD700")
     );
 
@@ -95,6 +96,7 @@ public final class ColorLibrary {
         alias(map, "black",  "obsidian", "noir");
         alias(map, "white",  "snow", "ivory");
         alias(map, "red",    "scarlet", "ruby");
+        alias(map, "maroon", "dark red", "darkred", "wine", "burgundy");
         alias(map, "green",  "emerald", "olive");
         alias(map, "blue",   "sapphire", "cobalt");
         alias(map, "purple", "violet", "amethyst");

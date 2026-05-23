@@ -185,6 +185,10 @@ public final class CustomBlocksConfig {
     /** MC formatting-code prefix applied to all hologram labels (e.g. "§e§l"). */
     public static volatile String hologramColor = "§e§l";
 
+    // ── Trash (V4-18) ────────────────────────────────────────────────────────
+    /** Days to keep deleted blocks in trash before auto-purging. 0 = keep forever. */
+    public static volatile int trashRetentionDays = 30;
+
     // ── Notifications (Phase M) ──────────────────────────────────────────────
     /** Discord webhook URL for block create/delete/panic events. Empty = disabled. */
     public static volatile String discordWebhookUrl = "";

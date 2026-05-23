@@ -296,7 +296,7 @@ public final class SlotManager {
             case ANIMATED_FIRST  -> Comparator.comparingInt((SlotData d) -> d.isAnimated() ? 0 : 1)
                                               .thenComparing(d -> d.displayNameLower);
             case BROKEN_FIRST    -> Comparator.comparingInt((SlotData d) ->
-                                              (d.isBroken || d.texture == null || d.texture.length <= 4) ? 0 : 1)
+                                              (d.blockHealth == SlotData.BlockHealth.LOAD_FAILURE || d.blockHealth == SlotData.BlockHealth.CORRUPT) ? 0 : 1)
                                               .thenComparing(d -> d.displayNameLower);
             case BY_CATEGORY     -> Comparator.comparing((SlotData d) -> {
                                               java.util.Set<String> cats = com.customblocks.core.CategoryManager.getCategoriesForBlock(d.customId);
@@ -317,44 +317,28 @@ public final class SlotManager {
         return base.sorted(cmp).collect(Collectors.toList());
     }
 
-    /** @return All slots that are currently considered broken. */
-
+    /** V4-00 — Returns slots with LOAD_FAILURE or CORRUPT health (truly broken, not just missing). */
     public static java.util.List<SlotData> brokenBlocks() {
-
         return byId.values().stream()
-
                 .filter(d -> !"tab_icon".equals(d.customId))
-
-                .filter(d -> d.isBroken || d.texture == null || d.texture.length <= 4)
-
+                .filter(d -> d.blockHealth == SlotData.BlockHealth.LOAD_FAILURE
+                          || d.blockHealth == SlotData.BlockHealth.CORRUPT)
                 .collect(Collectors.toList());
-
     }
 
     /**
-     * 1.23 — Returns broken slots with a per-slot reason enum so the GUI can
-     * show the admin an actionable tooltip for each broken block.
+     * V4-00 — Returns broken slots with their BlockHealth state so the GUI can show
+     * an actionable tooltip and retry button for each broken block.
      */
-    public static java.util.Map<SlotData, SlotData.TextureReason> brokenBlocksWithReasons() {
-        java.util.Map<SlotData, SlotData.TextureReason> result = new java.util.LinkedHashMap<>();
-        Path texDir = Path.of(TEXTURES_DIR);
+    public static java.util.Map<SlotData, SlotData.BlockHealth> brokenBlocksWithReasons() {
+        java.util.Map<SlotData, SlotData.BlockHealth> result = new java.util.LinkedHashMap<>();
         for (SlotData d : byId.values()) {
             if ("tab_icon".equals(d.customId)) continue;
-            if (SUPPRESSED_IDS.contains(d.customId)) continue; // 1.23 — admin suppressed
-            boolean noTexture = d.texture == null || d.texture.length <= 4;
-            if (!noTexture && !d.isBroken) continue; // slot is fine
-
-            SlotData.TextureReason reason;
-            if (d.isBroken) {
-                reason = SlotData.TextureReason.CORRUPTED;
-            } else {
-                // texture == null: distinguish NEVER_UPLOADED vs FILE_MISSING
-                Path datFile = texDir.resolve("slot_" + d.index + ".dat");
-                reason = java.nio.file.Files.exists(datFile)
-                        ? SlotData.TextureReason.FILE_MISSING
-                        : SlotData.TextureReason.NEVER_UPLOADED;
+            if (SUPPRESSED_IDS.contains(d.customId)) continue;
+            if (d.blockHealth == SlotData.BlockHealth.LOAD_FAILURE
+                    || d.blockHealth == SlotData.BlockHealth.CORRUPT) {
+                result.put(d, d.blockHealth);
             }
-            result.put(d, reason);
         }
         return result;
     }
@@ -1078,8 +1062,10 @@ public final class SlotManager {
         for (SlotData d : toProcess) {
             IO_EXECUTOR.submit(() -> {
                 try {
-                    // Main texture
+                    // Main texture — V4-00: mark LOAD_FAILURE if .dat exists but read fails
                     if (d.texture == null || d.texture.length == 0) {
+                        Path datFile = Path.of(TEXTURES_DIR, "slot_" + d.index + ".dat");
+                        boolean datExists = Files.exists(datFile);
                         byte[] tex = readTextureFile(d.index);
                         if (tex != null && tex.length > 0) {
                             synchronized (SlotManager.class) {
@@ -1089,6 +1075,16 @@ public final class SlotManager {
                                 }
                             }
                             texLoaded.incrementAndGet();
+                        } else if (datExists) {
+                            // .dat file is present but could not be read — mark as LOAD_FAILURE
+                            // so the save guard counts this slot and doesn't abort the save
+                            synchronized (SlotManager.class) {
+                                SlotData cur = byId.get(d.customId);
+                                if (cur != null && cur.blockHealth == SlotData.BlockHealth.PLACEHOLDER) {
+                                    put(cur.withBlockHealth(SlotData.BlockHealth.LOAD_FAILURE));
+                                }
+                            }
+                            LOGGER.warn("[CustomBlocks] slot_{}: .dat exists but could not be read — marked LOAD_FAILURE", d.index);
                         }
                     }
                     // Face textures
@@ -1323,38 +1319,49 @@ public final class SlotManager {
 
 
 
-                // ── Safety check: prevent catastrophic texture loss ──────────
-                // Fix 3: Uses a lightweight textured_count.txt instead of parsing
-                // the entire 50MB slots.json. Zero memory allocation.
-                int newTextured = 0;
-                for (SlotData d : snapshot.slots) {
-                    if (!"tab_icon".equals(d.customId) && d.texture != null && d.texture.length > 0)
-                        newTextured++;
-                }
-
-                Path countFile = dir.resolve("textured_count.txt");
-                int diskTextured = -1;
-                if (Files.exists(countFile)) {
-                    try {
-                        diskTextured = Integer.parseInt(Files.readString(countFile, StandardCharsets.UTF_8).trim());
-                    } catch (Exception ignored) { /* will fallback to skip check */ }
-                }
-
-                if (diskTextured >= 0) {
-                    int lost = diskTextured - newTextured;
-                    if (lost > 10) {
-                        // Create a backup and REFUSE to overwrite
-                        Path bakFile = dir.resolve(DATA_FILE + ".bak");
-                        if (!Files.exists(bakFile)) {
-                            try { Files.copy(file, bakFile); } catch (Exception e) { LOGGER.warn("[CustomBlocks] Could not write backup file {}: {}", bakFile, e.getMessage()); }
-                            LOGGER.warn("[CustomBlocks] Created backup at {} (disk had {} textured, memory has {})",
-                                    bakFile, diskTextured, newTextured);
-                        }
-                        LOGGER.error("[CustomBlocks] SAVE ABORTED: {} slots would lose textures ({} on disk → {} in memory). " +
-                                "This is a safety check to prevent data loss. A .bak file has been preserved.",
-                                lost, diskTextured, newTextured);
-                        return;
+                // ── V4-00: Safety check — prevent catastrophic texture loss ──
+                // Count = HEALTHY + LOAD_FAILURE + CORRUPT (anything that has data on disk).
+                // PLACEHOLDER slots are excluded (no data on disk for them).
+                // Skip the check entirely if startup async-texture load is still running —
+                // during that window, slots are temporarily PLACEHOLDER before being promoted.
+                if (startupLoadComplete) {
+                    int newTextured = 0;
+                    for (SlotData d : snapshot.slots) {
+                        if (!"tab_icon".equals(d.customId)
+                                && d.blockHealth != SlotData.BlockHealth.PLACEHOLDER)
+                            newTextured++;
                     }
+
+                    Path countFile = dir.resolve("textured_count.txt");
+                    int diskTextured = -1;
+                    if (Files.exists(countFile)) {
+                        try {
+                            diskTextured = Integer.parseInt(Files.readString(countFile, StandardCharsets.UTF_8).trim());
+                        } catch (Exception ignored) { /* will fallback to skip check */ }
+                    }
+
+                    if (diskTextured >= 0) {
+                        int lost = diskTextured - newTextured;
+                        if (lost > 10) {
+                            Path bakFile = dir.resolve(DATA_FILE + ".bak");
+                            if (!Files.exists(bakFile)) {
+                                try { Files.copy(file, bakFile); } catch (Exception e) { LOGGER.warn("[CustomBlocks] Could not write backup file {}: {}", bakFile, e.getMessage()); }
+                                LOGGER.warn("[CustomBlocks] Created backup at {} (disk had {} textured, memory has {})",
+                                        bakFile, diskTextured, newTextured);
+                            }
+                            LOGGER.error("[CustomBlocks] SAVE ABORTED: {} slots would lose textures ({} on disk → {} in memory). " +
+                                    "This is a safety check to prevent data loss. A .bak file has been preserved.",
+                                    lost, diskTextured, newTextured);
+                            return;
+                        }
+                    }
+
+                    // Update count file using new inclusive definition
+                    try {
+                        Path countTmp = countFile.resolveSibling(countFile.getFileName() + ".tmp");
+                        Files.writeString(countTmp, String.valueOf(newTextured), StandardCharsets.UTF_8);
+                        Files.move(countTmp, countFile, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    } catch (Exception ignored) { /* non-critical */ }
                 }
 
 
@@ -1389,13 +1396,6 @@ public final class SlotManager {
                 }
 
                 Files.move(tempFile, file, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-
-                // Fix 3: Update textured_count.txt for next save's safety check — 1.15: atomic
-                try {
-                    Path countTmp = countFile.resolveSibling(countFile.getFileName() + ".tmp");
-                    Files.writeString(countTmp, String.valueOf(newTextured), StandardCharsets.UTF_8);
-                    Files.move(countTmp, countFile, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                } catch (Exception ignored) { /* non-critical */ }
 
                 // 1.11 — only rebuild the pack if pack-relevant data (textures, models,
                 // animation metadata) changed. Metadata-only saves (rename, category, lock)

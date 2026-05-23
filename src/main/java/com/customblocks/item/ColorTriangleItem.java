@@ -87,6 +87,15 @@ public class ColorTriangleItem extends Item {
     /** Mode B safety: skip trapped regions larger than this fraction of texture pixels. */
     private static final double MAX_TRAPPED_HOLE_FRACTION = 0.28d;
 
+    // ── V4-29 Per-player fill mode ────────────────────────────────────────────
+    /** "edge" = smart perimeter seeding (default); "full" = replace matching pixels everywhere. */
+    public static final Map<UUID, String> PLAYER_MODE = new ConcurrentHashMap<>();
+
+    /** Returns "edge" or "full" for the given player; defaults to "edge". */
+    public static String effectiveMode(UUID playerUuid) {
+        return PLAYER_MODE.getOrDefault(playerUuid, "edge");
+    }
+
     public ColorTriangleItem(int r, int g, int b, String colorName, Settings settings) {
         super(settings);
         this.targetR   = r;
@@ -235,14 +244,15 @@ public class ColorTriangleItem extends Item {
         SlotData finalSrc = source;
         PlayerEntity         fp      = player;
         int fR = color.r(), fG = color.g(), fB = color.b();
-        // 3.6 — capture per-player tolerance before entering the background thread
+        // V4-29: capture per-player tolerance and fill mode before background thread
         int fTolerance = (fp != null) ? effectiveTolerance(fp.getUuid())
                                       : (CustomBlocksConfig.bgRemovalTolerance > 0 ? CustomBlocksConfig.bgRemovalTolerance : DEFAULT_TOLERANCE);
+        String fMode = (fp != null) ? effectiveMode(fp.getUuid()) : "edge";
 
         Thread t = new Thread(() -> {
             try {
                 System.setProperty("java.awt.headless", "true");
-                byte[] newTexture = recolourBackground(finalTex, fR, fG, fB, CustomBlocksConfig.useTrappedHoleFill(), fTolerance);
+                byte[] newTexture = recolourBackground(finalTex, fR, fG, fB, CustomBlocksConfig.useTrappedHoleFill(), fTolerance, fMode);
 
                 server.execute(() -> {
                     if (SlotManager.freeSlots() == 0) {
@@ -295,57 +305,91 @@ public class ColorTriangleItem extends Item {
     // ── Texture processing ────────────────────────────────────────────────────
 
     /**
-     * Flood-fills the background of the image (seeded from all 4 corners) and
-     * replaces matching pixels with the new colour.  Only connected background
-     * regions reachable from the image border are changed — interior details
-     * with a similar colour are never touched.
+     * V4-29: Recolours background using the player's chosen mode.
+     * Mode "edge"  — seeds from entire image perimeter (better than 4 corners).
+     * Mode "full"  — replaces every pixel matching the background colour anywhere.
+     * Background colour sampled as 3×3 median in each corner for anti-aliasing.
+     * Colour distance uses CIE-Lab delta-E (perceptual) instead of per-channel abs.
      */
-    private static byte[] recolourBackground(byte[] src, int newR, int newG, int newB, boolean fillTrapped, int tolerance)
+    private static byte[] recolourBackground(byte[] src, int newR, int newG, int newB,
+                                              boolean fillTrapped, int tolerance)
+            throws Exception {
+        return recolourBackground(src, newR, newG, newB, fillTrapped, tolerance, "edge");
+    }
+
+    private static byte[] recolourBackground(byte[] src, int newR, int newG, int newB,
+                                              boolean fillTrapped, int tolerance, String mode)
             throws Exception {
         BufferedImage img = ImageIO.read(new ByteArrayInputStream(src));
         if (img == null) throw new Exception("Could not decode image");
 
         int w = img.getWidth(), h = img.getHeight();
 
-        // Sample background colour from the top-left pixel
-        int bgArgb = img.getRGB(0, 0);
-        int bgA    = (bgArgb >> 24) & 0xFF;
-        int bgR    = (bgArgb >> 16) & 0xFF;
-        int bgG    = (bgArgb >> 8)  & 0xFF;
-        int bgB    =  bgArgb        & 0xFF;
+        // Sample background colour from 3×3 median in each corner
+        int bgArgb = sampleCornerBackground(img, w, h);
+        int bgA = (bgArgb >> 24) & 0xFF;
+        int bgR = (bgArgb >> 16) & 0xFF;
+        int bgG = (bgArgb >> 8)  & 0xFF;
+        int bgB =  bgArgb        & 0xFF;
+        double[] bgLab = rgbToLab(bgR, bgG, bgB);
+
+        // Convert tolerance (per-channel 10–80) to a CIE-Lab delta-E threshold.
+        // Old per-channel 35 ≈ delta-E 18; scale linearly.
+        double labThreshold = tolerance * (18.0 / 35.0);
 
         int newArgb = (0xFF << 24) | (newR << 16) | (newG << 8) | newB;
-
         boolean[][] visited = new boolean[w][h];
-        Queue<int[]> queue  = new ArrayDeque<>();
+        Queue<int[]> queue = new ArrayDeque<>();
 
-        // Seed from all 4 corners
-        int[][] corners = { {0,0}, {w-1,0}, {0,h-1}, {w-1,h-1} };
-        for (int[] c : corners) {
-            if (!visited[c[0]][c[1]] && isBackground(img, c[0], c[1], bgA, bgR, bgG, bgB, tolerance)) {
-                visited[c[0]][c[1]] = true;
-                queue.add(c);
-            }
-        }
-
-        // BFS flood fill
-        int[][] dirs = { {1,0},{-1,0},{0,1},{0,-1} };
-        while (!queue.isEmpty()) {
-            int[] px = queue.poll();
-            int x = px[0], y = px[1];
-            img.setRGB(x, y, newArgb);
-            for (int[] d : dirs) {
-                int nx = x + d[0], ny = y + d[1];
-                if (nx >= 0 && nx < w && ny >= 0 && ny < h
-                        && !visited[nx][ny]
-                        && isBackground(img, nx, ny, bgA, bgR, bgG, bgB, tolerance)) {
-                    visited[nx][ny] = true;
-                    queue.add(new int[]{nx, ny});
+        if ("full".equals(mode)) {
+            // Full mode: replace every matching pixel regardless of connectivity
+            for (int x = 0; x < w; x++) {
+                for (int y = 0; y < h; y++) {
+                    if (isBackgroundLab(img, x, y, bgA, bgLab, labThreshold)) {
+                        visited[x][y] = true;
+                        img.setRGB(x, y, newArgb);
+                    }
                 }
             }
-        }
-        if (fillTrapped) {
-            fillTrappedBackgroundRegions(img, visited, newArgb);
+        } else {
+            // Edge mode: BFS seeded from entire perimeter (all edge pixels)
+            int[][] dirs = {{1,0},{-1,0},{0,1},{0,-1}};
+            // Seed top and bottom rows
+            for (int x = 0; x < w; x++) {
+                for (int y : new int[]{0, h-1}) {
+                    if (!visited[x][y] && isBackgroundLab(img, x, y, bgA, bgLab, labThreshold)) {
+                        visited[x][y] = true;
+                        queue.add(new int[]{x, y});
+                    }
+                }
+            }
+            // Seed left and right columns
+            for (int y = 0; y < h; y++) {
+                for (int x : new int[]{0, w-1}) {
+                    if (!visited[x][y] && isBackgroundLab(img, x, y, bgA, bgLab, labThreshold)) {
+                        visited[x][y] = true;
+                        queue.add(new int[]{x, y});
+                    }
+                }
+            }
+            // BFS flood fill
+            while (!queue.isEmpty()) {
+                int[] px = queue.poll();
+                int x = px[0], y = px[1];
+                img.setRGB(x, y, newArgb);
+                for (int[] d : dirs) {
+                    int nx = x + d[0], ny = y + d[1];
+                    if (nx >= 0 && nx < w && ny >= 0 && ny < h
+                            && !visited[nx][ny]
+                            && isBackgroundLab(img, nx, ny, bgA, bgLab, labThreshold)) {
+                        visited[nx][ny] = true;
+                        queue.add(new int[]{nx, ny});
+                    }
+                }
+            }
+            if (fillTrapped) {
+                fillTrappedBackgroundRegions(img, visited, newArgb);
+            }
         }
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -353,15 +397,75 @@ public class ColorTriangleItem extends Item {
         return baos.toByteArray();
     }
 
-    /** Recolour with a specific tolerance value (3.6 per-player tolerance support). */
+    /** Samples 3×3 regions in all 4 corners, returns median ARGB. */
+    private static int sampleCornerBackground(BufferedImage img, int w, int h) {
+        java.util.List<Integer> samples = new ArrayList<>();
+        int[][] corners = {{0,0},{Math.max(0,w-3),0},{0,Math.max(0,h-3)},{Math.max(0,w-3),Math.max(0,h-3)}};
+        for (int[] c : corners) {
+            for (int dx = 0; dx < 3 && c[0]+dx < w; dx++) {
+                for (int dy = 0; dy < 3 && c[1]+dy < h; dy++) {
+                    samples.add(img.getRGB(c[0]+dx, c[1]+dy));
+                }
+            }
+        }
+        samples.sort(java.util.Comparator.naturalOrder());
+        return samples.get(samples.size() / 2);
+    }
+
+    /** Checks if a pixel is background using CIE-Lab delta-E distance. */
+    private static boolean isBackgroundLab(BufferedImage img, int x, int y,
+                                            int bgA, double[] bgLab, double threshold) {
+        int px = img.getRGB(x, y);
+        int a = (px >> 24) & 0xFF;
+        if (a < 50) return true;
+        if (bgA < 50) return a < 50;
+        int r = (px >> 16) & 0xFF;
+        int g = (px >> 8)  & 0xFF;
+        int b =  px        & 0xFF;
+        double[] lab = rgbToLab(r, g, b);
+        double dE = Math.sqrt(
+            (lab[0]-bgLab[0])*(lab[0]-bgLab[0]) +
+            (lab[1]-bgLab[1])*(lab[1]-bgLab[1]) +
+            (lab[2]-bgLab[2])*(lab[2]-bgLab[2]));
+        return dE <= threshold;
+    }
+
+    /** sRGB → CIE L*a*b* (D65 illuminant). */
+    private static double[] rgbToLab(int r, int g, int b) {
+        double rd = r / 255.0, gd = g / 255.0, bd = b / 255.0;
+        rd = rd > 0.04045 ? Math.pow((rd+0.055)/1.055, 2.4) : rd/12.92;
+        gd = gd > 0.04045 ? Math.pow((gd+0.055)/1.055, 2.4) : gd/12.92;
+        bd = bd > 0.04045 ? Math.pow((bd+0.055)/1.055, 2.4) : bd/12.92;
+        double X = (rd*0.4124564 + gd*0.3575761 + bd*0.1804375) / 0.95047;
+        double Y = (rd*0.2126729 + gd*0.7151522 + bd*0.0721750);
+        double Z = (rd*0.0193339 + gd*0.1191920 + bd*0.9503041) / 1.08883;
+        X = X > 0.008856 ? Math.cbrt(X) : 7.787*X + 16.0/116.0;
+        Y = Y > 0.008856 ? Math.cbrt(Y) : 7.787*Y + 16.0/116.0;
+        Z = Z > 0.008856 ? Math.cbrt(Z) : 7.787*Z + 16.0/116.0;
+        return new double[]{116.0*Y - 16.0, 500.0*(X-Y), 200.0*(Y-Z)};
+    }
+
+    /** Recolour with specific tolerance and mode (V4-29: mode = "edge" or "full"). */
+    public static byte[] recolourTexture(byte[] src, int newR, int newG, int newB, boolean fillTrapped, int tolerance, String mode) throws Exception {
+        return recolourBackground(src, newR, newG, newB, fillTrapped, tolerance, mode);
+    }
+
+    /** Recolour with specific tolerance; uses default "edge" mode. */
     public static byte[] recolourTexture(byte[] src, int newR, int newG, int newB, boolean fillTrapped, int tolerance) throws Exception {
-        return recolourBackground(src, newR, newG, newB, fillTrapped, tolerance);
+        return recolourBackground(src, newR, newG, newB, fillTrapped, tolerance, "edge");
     }
 
     /** Recolour using the default/config tolerance (backwards-compatible overload). */
     public static byte[] recolourTexture(byte[] src, int newR, int newG, int newB, boolean fillTrapped) throws Exception {
         int tol = CustomBlocksConfig.bgRemovalTolerance > 0 ? CustomBlocksConfig.bgRemovalTolerance : DEFAULT_TOLERANCE;
-        return recolourBackground(src, newR, newG, newB, fillTrapped, tol);
+        return recolourBackground(src, newR, newG, newB, fillTrapped, tol, "edge");
+    }
+
+    /** Recolour using per-player tolerance AND per-player mode (V4-29 entry point). */
+    public static byte[] recolourTextureForPlayer(byte[] src, int newR, int newG, int newB, boolean fillTrapped, UUID playerUuid) throws Exception {
+        int tol = effectiveTolerance(playerUuid);
+        String mode = effectiveMode(playerUuid);
+        return recolourBackground(src, newR, newG, newB, fillTrapped, tol, mode);
     }
 
     private static void fillTrappedBackgroundRegions(BufferedImage img, boolean[][] visited, int newArgb) {

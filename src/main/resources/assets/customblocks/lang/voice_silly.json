@@ -351,7 +351,7 @@
     "cmd.give_category_empty":  "Category \u0027{0}\u0027 is empty.",
     "cmd.give_category_done":  "Given §f{0}§a blocks from §f{1}§a!",
     "cmd.help_overlay_hint":  "  §8Press §7B §8to open the overlay HUD · No restart needed!",
-    "cmd.gui_open_failed":  "Error: {0}",
+    "cmd.gui_open_failed":  "WHOOPS the screen went KABOOM: {0}. Try /cb reload?",
     "cmd.give_color_bad_bwy":  "\u0027{0}\u0027 is not a valid color. Choose: §fblack §7| §fyellow §7| §fgreen",
     "cmd.give_square_not_found":  "Square item not found.",
     "cmd.give_triangle_not_found":  "Triangle not found.",

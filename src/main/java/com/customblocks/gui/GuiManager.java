@@ -9,6 +9,7 @@ import com.customblocks.command.PermissionHelper;
 import com.customblocks.core.SlotData;
 import com.customblocks.core.SlotManager;
 import com.customblocks.core.UndoManager;
+import com.customblocks.core.FirstUseHints;
 import com.customblocks.network.NetworkManager;
 import com.customblocks.network.SlotUpdatePayload;
 import com.google.gson.JsonArray;
@@ -88,7 +89,8 @@ public class GuiManager {
         "MARKET_GUI", "BULK_HUB", "BULK_OP_PICKER", "COLOR_PICKER",
         "VOICE_PICKER", "FAVORITES_GUI", "RECENT_GUI", "SAFETY_CENTER",
         "HISTORY_GUI", "SCRIPT_GUI", "SCRIPT_SUMMARY", "CACHE_DASHBOARD",
-        "AUDIT_GUI", "AI_GEN", "CUSTOM_COLOR_STUDIO", "ACHIEVEMENTS_GUI"
+        "AUDIT_GUI", "AI_GEN", "CUSTOM_COLOR_STUDIO", "ACHIEVEMENTS_GUI",
+        "SNAPSHOTS_GUI", "DELETED_BLOCKS_GUI", "BOX_NUDGE_EDITOR"
     );
 
     /** GuiMode names that are reserved for a planned phase but have no content yet. */
@@ -107,6 +109,8 @@ public class GuiManager {
 
     private static final Map<UUID, Long> SHAPE_CREATE_COOLDOWN = new ConcurrentHashMap<>();
     private static final long SHAPE_COOLDOWN_MS = 500;
+    /** V4-13 — per-player working copy of a box being nudged (not yet committed to SlotManager). */
+    private static final Map<UUID, SlotData.ShapeBox> BOX_NUDGE_WORK = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> CLICK_COOLDOWN = new ConcurrentHashMap<>();
     private static final long CLICK_COOLDOWN_MS = 100;
     private static final long FACE_IMPORT_TIMEOUT_MS = 5 * 60_000L;
@@ -172,6 +176,10 @@ public class GuiManager {
     /** L3 — cached market listing per-player (fetched async). */
     private static final Map<UUID, java.util.List<JsonObject>> MARKET_CACHE = new ConcurrentHashMap<>();
     private static final int MARKET_PAGE_SIZE = 18;
+    /** V4-45 — market search query per player. */
+    private static final Map<UUID, String> MARKET_SEARCH_QUERIES = new ConcurrentHashMap<>();
+    /** V4-45 — market sort mode per player: "name" or "date" (default). */
+    private static final Map<UUID, String> MARKET_SORT_MODES = new ConcurrentHashMap<>();
     /** 1.27 — per-player sort preference (session-only, resets on disconnect). */
     private static final Map<UUID, SortMode> PLAYER_SORT_PREFS = new ConcurrentHashMap<>();
     /** Phase 2 — shared bulk selection (persists across bulk hub pages and op picker pages). */
@@ -347,6 +355,8 @@ public class GuiManager {
         SEARCH_QUERIES.remove(uuid);
         RECENT_BLOCKS.remove(uuid);
         MARKET_CACHE.remove(uuid);
+        MARKET_SEARCH_QUERIES.remove(uuid);
+        MARKET_SORT_MODES.remove(uuid);
         // 1.37 — bulk recolor wizard state cleanup to prevent memory leaks
         BULK_RECOLOR_COLOR.remove(uuid);
         BULK_RECOLOR_SCOPE.remove(uuid);
@@ -406,6 +416,8 @@ public class GuiManager {
         int max   = total == 0 ? 0 : Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
         page = Math.max(0, Math.min(page, max));
         pushBackStack(player.getUuid());
+        String _hPicker = FirstUseHints.hint(player.getUuid(), "open_block_list");
+        if (_hPicker != null) player.sendMessage(Text.literal(_hPicker), false);
         openScreenFromGuiState(player, GuiState.picker(page), buildPicker(player.getUuid(), page, false), Text.translatable("customblocks.gui.picker.title"));
     }
 
@@ -413,6 +425,8 @@ public class GuiManager {
         SlotData d = SlotManager.getById(id);
         if (d == null) { openMain(player, returnPage); return; }
         trackRecentBlock(player.getUuid(), id);
+        String _hEditor = FirstUseHints.hint(player.getUuid(), "open_editor");
+        if (_hEditor != null) player.sendMessage(Text.literal(_hEditor), false);
         if (!fromCommand) pushBackStack(player.getUuid());
         openScreenFromGuiState(player,
             fromCommand ? GuiState.editorFromCommand(id) : GuiState.editor(id, returnPage),
@@ -476,6 +490,8 @@ public class GuiManager {
         SlotData d = SlotManager.getById(id);
         if (d == null) { openMain(player, returnPage); return; }
         pushBackStack(player.getUuid());
+        String _hShape = FirstUseHints.hint(player.getUuid(), "open_shape_editor");
+        if (_hShape != null) player.sendMessage(Text.literal(_hShape), false);
         openScreenFromGuiState(player, GuiState.shapeEditor(id, returnPage), buildShapeEditor(d, 0), Text.translatable("customblocks.gui.shape_editor.title").append(Text.literal(" §8— " + d.displayName)));
     }
 
@@ -546,6 +562,8 @@ public class GuiManager {
         SlotData d = SlotManager.getById(id);
         if (d == null) { openMain(player, returnPage); return; }
         pushBackStack(player.getUuid());
+        String _hProps = FirstUseHints.hint(player.getUuid(), "open_properties");
+        if (_hProps != null) player.sendMessage(Text.literal(_hProps), false);
         openScreenFromGuiState(player, GuiState.properties(id, returnPage), buildPropertiesGui(d), Text.translatable("customblocks.gui.properties.title").append(Text.literal(" §8— " + d.displayName)));
     }
 
@@ -642,6 +660,18 @@ public class GuiManager {
 
     public static void openHistoryGui(ServerPlayerEntity player, int page) {
         openScreenFromGuiState(player, GuiState.historyGui(page), buildHistoryGui(page), Text.literal(normalizeFormattingCodes("§eRecent History")));
+    }
+
+    public static void openSnapshotsGui(ServerPlayerEntity player, int page) {
+        pushBackStack(player.getUuid());
+        String _hSnap = FirstUseHints.hint(player.getUuid(), "first_snapshot");
+        if (_hSnap != null) player.sendMessage(Text.literal(_hSnap), false);
+        openScreenFromGuiState(player, GuiState.snapshotsGui(page), buildSnapshotsGui(page), Text.literal(normalizeFormattingCodes("§6Snapshots")));
+    }
+
+    public static void openDeletedBlocksGui(ServerPlayerEntity player, int page) {
+        pushBackStack(player.getUuid());
+        openScreenFromGuiState(player, GuiState.deletedBlocksGui(page), buildDeletedBlocksGui(page), Text.literal(normalizeFormattingCodes("§cDeleted Blocks")));
     }
 
     public static void openScriptGui(ServerPlayerEntity player, int page) {
@@ -809,46 +839,53 @@ public class GuiManager {
 
     private static SimpleInventory buildWelcomeGui(ServerPlayerEntity player) {
         SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+
+        boolean firstTime = !com.customblocks.core.OnboardingManager.hasSeenWelcome(player.getUuid());
 
         // Header
-        inv.setStack(4, named(Items.NETHER_STAR,
+        inv.setStack(4, uiGlint(Items.NETHER_STAR,
             "§b§lCustomBlocks — Active",
-            "§7Your custom block mod is running.",
-            "§7" + com.customblocks.core.SlotManager.usedSlots() + " custom block(s) defined.",
+            "§7" + com.customblocks.core.SlotManager.usedSlots() + " custom block(s) defined",
             "§7Pack: " + (com.customblocks.network.ResourcePackServer.isRunning() ? "§aOnline" : "§cOffline")));
 
-        // Quick start
-        inv.setStack(20, named(Items.BOOK,
-            "§6§lQuick Start",
-            "§f/cb new <name>  §7— Create a block",
-            "§f/cb list       §7— Browse all blocks",
-            "§f/cb help       §7— All commands",
-            "",
-            "§eClick to open your library"));
+        if (firstTime) {
+            // First-time: show tutorial prompt
+            inv.setStack(20, uiGlint(Items.ENCHANTED_BOOK,
+                "§a§l▶ Start Tutorial",
+                "§7Get a step-by-step guide to create your first",
+                "§7custom block, give it to yourself, and edit it.",
+                "§8Takes about 2 minutes.  §eClick to begin."));
 
-        // Library shortcut
-        inv.setStack(22, named(Items.CHEST,
-            "§a§lBlock Library",
-            "§7Browse and edit all " + com.customblocks.core.SlotManager.usedSlots() + " custom block(s).",
-            "",
-            "§eClick to open"));
+            inv.setStack(24, uiGlint(Items.PAPER,
+                "§7Skip Tutorial",
+                "§7Go straight to the main menu.",
+                "§8You can run /cb help anytime for guidance."));
+        } else {
+            // Returning player: shortcuts
+            inv.setStack(20, uiGlint(Items.BOOK,
+                "§6§lQuick Start",
+                "§f/cb create §7— New block",
+                "§f/cb list   §7— Browse blocks",
+                "§f/cb help   §7— Commands",
+                "§eClick to open library"));
 
-        // Config shortcut
-        inv.setStack(24, named(Items.COMPARATOR,
-            "§e§lConfiguration",
-            "§7Adjust port, cloud sharing, AI,",
-            "§7and behaviour settings.",
-            "",
-            "§eClick to open"));
+            inv.setStack(22, uiGlint(Items.CHEST,
+                "§a§lBlock Library",
+                "§7Browse and edit all " + com.customblocks.core.SlotManager.usedSlots() + " block(s).",
+                "§eClick to open"));
 
-        // Safety Center shortcut
-        inv.setStack(31, named(Items.SHIELD,
-            "§c§lSafety Center",
-            "§7Undo, backup, and panic tools.",
-            "",
-            "§eClick to open"));
+            inv.setStack(24, uiGlint(Items.COMPARATOR,
+                "§e§lConfiguration",
+                "§7Port, cloud sharing, AI, behaviour.",
+                "§eClick to open"));
 
-        // Back
+            inv.setStack(31, uiGlint(Items.SHIELD,
+                "§c§lSafety Center",
+                "§7Undo, backup, and panic tools.",
+                "§eClick to open"));
+        }
+
         inv.setStack(49, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
         return inv;
     }
@@ -1168,6 +1205,9 @@ public class GuiManager {
                 case RECENT_GUI -> openRecentGui(player);
                 case SAFETY_CENTER -> openSafetyCenter(player);
                 case HISTORY_GUI -> openHistoryGui(player, state.page());
+                case SNAPSHOTS_GUI -> openSnapshotsGui(player, state.page());
+                case DELETED_BLOCKS_GUI -> openDeletedBlocksGui(player, state.page());
+                case BOX_NUDGE_EDITOR -> openBoxNudgeEditor(player, state.editingId(), state.shapeBoxPage(), state.page());
                 case SCRIPT_GUI -> openScriptGui(player, state.page());
                 case SCRIPT_SUMMARY -> {
                     com.customblocks.core.MacroManager.ScriptRunResult result = LAST_SCRIPT_RESULTS.get(player.getUuid());
@@ -1249,10 +1289,22 @@ public class GuiManager {
                 case COLOR_FILL_MODE -> handleColorFillModeClick(player, state, slot);
                 case RECOVER_GUI -> handleRecoverGuiClick(player, state, slot);
                 case WELCOME_MENU -> {
-                    if (slot == 20 || slot == 22) { openMain(player, 0); }         // Quick Start / Library
-                    else if (slot == 24) { openConfigGui(player); }                 // Configuration
-                    else if (slot == 31) { openSafetyCenter(player); }             // Safety Center
-                    else if (slot == 49) { openMain(player, 0); }                  // Back
+                    boolean firstTime = !com.customblocks.core.OnboardingManager.hasSeenWelcome(player.getUuid());
+                    if (firstTime) {
+                        if (slot == 20) { // Start Tutorial
+                            com.customblocks.core.OnboardingManager.markSeen(player.getUuid());
+                            com.customblocks.core.OnboardingManager.sendTutorial(player);
+                            openMain(player, 0);
+                        } else if (slot == 24 || slot == 49) { // Skip
+                            com.customblocks.core.OnboardingManager.markSeen(player.getUuid());
+                            openMain(player, 0);
+                        }
+                    } else {
+                        if (slot == 20 || slot == 22) { openMain(player, 0); }     // Quick Start / Library
+                        else if (slot == 24) { openConfigGui(player); }             // Configuration
+                        else if (slot == 31) { openSafetyCenter(player); }         // Safety Center
+                        else if (slot == 49) { openMain(player, 0); }              // Back
+                    }
                 }
                 case FEATURE_MENU -> handleFeatureMenuClick(player, state, slot);
                 case STATS_GUI -> handleStatsGuiClick(player, state, slot);
@@ -1264,6 +1316,9 @@ public class GuiManager {
                 case RECENT_GUI -> handleRecentGuiClick(player, state, slot);
                 case SAFETY_CENTER -> handleSafetyCenterClick(player, state, slot);
                 case HISTORY_GUI -> handleHistoryGuiClick(player, state, slot);
+                case SNAPSHOTS_GUI -> handleSnapshotsGuiClick(player, state, slot);
+                case DELETED_BLOCKS_GUI -> handleDeletedBlocksGuiClick(player, state, slot, button);
+                case BOX_NUDGE_EDITOR -> handleBoxNudgeClick(player, state, slot, button);
                 case SCRIPT_GUI -> handleScriptGuiClick(player, state, slot);
                 case SCRIPT_SUMMARY -> handleScriptSummaryClick(player, state, slot);
                 case CACHE_DASHBOARD -> handleCacheDashboardClick(player, state, slot);
@@ -1556,6 +1611,14 @@ public class GuiManager {
             case REID_TEXT -> {
                 if ("__search__".equals(blockId)) {
                     openSearchPicker(player, text, 0);
+                    return true;
+                }
+                if ("__market_search__".equals(blockId)) {
+                    MARKET_SEARCH_QUERIES.put(player.getUuid(), text.toLowerCase(java.util.Locale.ROOT).trim());
+                    java.util.List<JsonObject> cached = MARKET_CACHE.getOrDefault(player.getUuid(), java.util.List.of());
+                    openScreenFromGuiState(player, GuiState.marketGui(0),
+                        buildMarketGui(player.getUuid(), cached, 0),
+                        Text.translatable("customblocks.gui.market.title", cached.size()));
                     return true;
                 }
                 if ("__givesquare__".equals(blockId)) {
@@ -2451,7 +2514,7 @@ public class GuiManager {
         inv.setStack(29, strItem("History Mode", CustomBlocksConfig.undoMode, "Choose whether undo history is shared or per-player"));
         inv.setStack(30, colorFillModeButton(CustomBlocksConfig.colorToolBackgroundMode));
         inv.setStack(31, strItem("Green Shade", CustomBlocksConfig.triangleGreenHex, "Edit the built-in Green triangle/square shade"));
-        inv.setStack(32, strItem("Voice Mode", CustomBlocksConfig.voiceMode, "Visual style for the assistant AI"));
+        inv.setStack(32, voiceModeButton(CustomBlocksConfig.voiceMode));
         // Slot 33 was Cloud Vault URL — removed (URL is now a hardcoded constant, not user-configurable)
         inv.setStack(34, strItem("Yellow Shade", CustomBlocksConfig.triangleYellowHex, "Edit the built-in Yellow triangle/square shade"));
         // Row 5: Back
@@ -2488,6 +2551,32 @@ public class GuiManager {
             "§7Extra: edges plus small trapped holes —",
             "§7large blobs are skipped.",
             "§8Click to choose / change the mode.");
+    }
+
+    private static ItemStack voiceModeButton(String mode) {
+        // V4-46: All 6 voice modes shown as cycling button
+        Item icon = switch (mode.toLowerCase(java.util.Locale.ROOT)) {
+            case "friendly"     -> Items.BOOK;
+            case "professional" -> Items.WRITABLE_BOOK;
+            case "royal"        -> Items.WRITTEN_BOOK;
+            case "minimal"      -> Items.MAP;
+            case "arabic"       -> Items.KNOWLEDGE_BOOK;
+            case "silly"        -> Items.HONEYCOMB;
+            default             -> Items.NAME_TAG;
+        };
+        String desc = switch (mode.toLowerCase(java.util.Locale.ROOT)) {
+            case "friendly"     -> "Celebratory language with symbols";
+            case "professional" -> "Clean and factual, no flair";
+            case "royal"        -> "Elaborate, formal tone";
+            case "minimal"      -> "One-line messages only, no color codes";
+            case "arabic"       -> "Arabic language messages";
+            case "silly"        -> "Playful and comedic";
+            default             -> "Unknown mode";
+        };
+        return uiGlint(icon, "§d§lVoice Tone §f→ §e" + mode,
+            "§7" + desc,
+            "§8Click to cycle · modes: friendly / professional / royal",
+            "§8                 minimal / arabic / silly");
     }
 
     public static void openColorFillModeGui(ServerPlayerEntity player) {
@@ -2602,7 +2691,18 @@ public class GuiManager {
             case 29 -> configPrompt(player, "undoMode", "History Mode (global / per_player / both):");
             case 30 -> openColorFillModeGui(player);
             case 31 -> configPrompt(player, "triangleGreenHex", "Green Shade Hex (#RRGGBB):");
-            case 32 -> configPrompt(player, "voiceMode", "AI Style:");
+            case 32 -> {
+                // V4-46: cycle through all 6 voice modes
+                java.util.List<String> modes = java.util.List.of("friendly","professional","royal","minimal","arabic","silly");
+                String cur = CustomBlocksConfig.voiceMode;
+                int idx = modes.indexOf(cur.toLowerCase(java.util.Locale.ROOT));
+                String next = modes.get((idx + 1) % modes.size());
+                CustomBlocksConfig.voiceMode = next;
+                CustomBlocksConfig.save();
+                playClick(player);
+                send(player, "§a[Config] §fVoice mode: §e" + next);
+                openConfigGui(player, false);
+            }
             // case 33 was Cloud Vault URL — removed (hardcoded constant)
             case 34 -> configPrompt(player, "triangleYellowHex", "Yellow Shade Hex (#RRGGBB):");
             case 45 -> openMain(player, 0);
@@ -2759,6 +2859,13 @@ public class GuiManager {
     private static void handlePickerClick(ServerPlayerEntity player, GuiState state, int slot, boolean brokenOnly, net.minecraft.screen.slot.SlotActionType actionType, int button) {
         int page = state.page();
         if (slot == 0) { openMain(player, 0); return; }
+        // V4-23: slot 8 = search in normal picker
+        if (slot == 8 && !brokenOnly) {
+            openShortInputPrompt(player,
+                new PendingInput(InputAction.REID_TEXT, "__search__", null, null, null, page),
+                "§6Search Blocks", new ItemStack(Items.SPYGLASS), "");
+            return;
+        }
         if (slot == 8 && brokenOnly) {
             List<SlotData> broken = brokenBlocks();
             if (broken.isEmpty()) { send(player, "§7No broken blocks to delete."); return; }
@@ -2824,13 +2931,18 @@ public class GuiManager {
                     refreshScreen(player, buildPicker(player.getUuid(), page, true));
                     return;
                 }
+                // V4-22: right-click → open bulk delete with this block pre-checked
+                if (!brokenOnly && actionType == net.minecraft.screen.slot.SlotActionType.PICKUP && button == 1) {
+                    BULK_DELETE_SELECTIONS.computeIfAbsent(player.getUuid(), k -> ConcurrentHashMap.newKeySet()).add(targetId);
+                    openBulkDelete(player, 0);
+                    return;
+                }
                 // Category-assign triggers (in priority order):
                 //   • Middle-click → CLONE         (creative only)
                 //   • Drop key (Q) → THROW
-                //   • Right-click  → PICKUP with button == 1
+                //   • Shift+click  → QUICK_MOVE/QUICK_CRAFT
                 boolean assign = actionType == net.minecraft.screen.slot.SlotActionType.CLONE
-                    || actionType == net.minecraft.screen.slot.SlotActionType.THROW
-                    || (actionType == net.minecraft.screen.slot.SlotActionType.PICKUP && button == 1);
+                    || actionType == net.minecraft.screen.slot.SlotActionType.THROW;
                 if (!brokenOnly && (actionType == net.minecraft.screen.slot.SlotActionType.QUICK_MOVE
                         || actionType == net.minecraft.screen.slot.SlotActionType.QUICK_CRAFT)) assign = true;
                 if (assign) {
@@ -2846,51 +2958,35 @@ public class GuiManager {
     private static void handleMainClick(ServerPlayerEntity player, GuiState state, int slot) {
         UUID uuid = player.getUuid();
         switch (slot) {
-            // Row 2: primary actions
-            case 19 -> openEditorPicker(player, 0);
-            case 21 -> openShortInputPrompt(
+            // Row 1: primary actions
+            case 10 -> openShortInputPrompt(
                 player,
                 new PendingInput(InputAction.CREATE_ID, null, null, null, null, state.page()),
                 "§6New Block ID",
                 new ItemStack(Items.COMMAND_BLOCK),
-                ""
-            );
-            case 23 -> openShortInputPrompt(player,
+                "");
+            case 12 -> openEditorPicker(player, 0);
+            case 14 -> openShortInputPrompt(player,
                 new PendingInput(InputAction.REID_TEXT, "__search__", null, null, null, state.page()),
                 "§6Search Blocks",
                 new ItemStack(Items.SPYGLASS),
                 "");
-            case 25 -> openMagicItemsGui(player);
+            case 16 -> openMagicItemsGui(player);
 
-            // Row 3: recent blocks (slots 30, 32, 34)
-            case 30, 32, 34 -> {
-                Deque<String> recent = RECENT_BLOCKS.getOrDefault(uuid, new ArrayDeque<>());
-                int ri = (slot - 30) / 2; // 30->0, 32->1, 34->2
-                int idx = 0;
-                for (String rid : recent) {
-                    if (idx == ri && SlotManager.hasId(rid)) { openEditor(player, rid, state.page()); return; }
-                    idx++;
-                }
-            }
-
-            // Row 4: secondary actions
-            case 37 -> openStatsGui(player);
-            case 38 -> openMarketGui(player, 0, false);  // L3
-            case 39 -> openMaintenanceMenu(player);
-            case 41 -> openBulkDelete(player, 0);
-            case 43 -> openHelpGui(player);
-
-            // Row 5: navigation
-            case 46 -> {
+            // Row 2: bulk + undo/redo
+            case 19 -> openBulkDelete(player, 0);
+            case 21 -> openBulkRecolorWizard(player, 0);
+            case 23 -> {
                 int undoSz = UndoManager.undoSize(uuid);
                 if (undoSz == 0) { send(player, "§7Nothing to undo."); refreshScreen(player, buildMain(player, state.page())); return; }
                 UndoManager.UndoEntry entry = UndoManager.popUndo(uuid);
                 if (entry == null) { refreshScreen(player, buildMain(player, state.page())); return; }
                 applyUndoEntry(player, entry);
+                String _hUndo = FirstUseHints.hint(uuid, "first_undo");
+                if (_hUndo != null) send(player, _hUndo);
                 refreshScreen(player, buildMain(player, state.page()));
             }
-            case 48 -> openUndoPicker(player, 0);
-            case 50 -> {
+            case 25 -> {
                 int redoSz = UndoManager.redoSize(uuid);
                 if (redoSz == 0) { send(player, "§7Nothing to redo."); refreshScreen(player, buildMain(player, state.page())); return; }
                 UndoManager.UndoEntry entry = UndoManager.popRedo(uuid);
@@ -2898,7 +2994,18 @@ public class GuiManager {
                 applyRedoEntry(player, entry);
                 refreshScreen(player, buildMain(player, state.page()));
             }
-            case 52 -> openConfigWarningGui(player);
+
+            // Row 3: config + tools
+            case 28 -> openConfigWarningGui(player);
+            case 30 -> openResourceHub(player);
+            case 32 -> openHistoryGui(player, 0);
+            case 34 -> openHelpGui(player);
+
+            // Row 4: diagnostics + exit
+            case 37 -> openBrokenBlocks(player, 0);
+            case 39 -> openDeletedBlocksGui(player, 0);
+            case 41 -> send(player, "§6[CB] §fAI Assistant coming soon.");
+            case 43 -> player.closeHandledScreen();
             default -> {}
         }
     }
@@ -3198,7 +3305,15 @@ public class GuiManager {
         if (slot == 23) { UndoManager.pushUndoMutation(id, d, "clearshape", uuid); SlotManager.setShape(id, null); SlotManager.saveAll(); broadcastShape(player.getServer(),SlotManager.getById(id)); send(player,"§a[Shape] Cleared — full cube."); reopenShapeEditor(player,id,rp,0); return; }
         if (slot >= 28 && slot <= 36) {
             int boxIdx = boxPage*9 + (slot-28);
-            if (boxIdx < boxes.size()) { UndoManager.pushUndoMutation(id, d, "removeshape", uuid); SlotManager.removeBox(id,boxIdx); SlotManager.saveAll(); broadcastShape(player.getServer(),SlotManager.getById(id)); send(player,"§a[Shape] Removed box #"+boxIdx+"."); int np=Math.min(boxPage,Math.max(0,(boxes.size()-2)/9)); reopenShapeEditor(player,id,rp,np); }
+            if (boxIdx < boxes.size()) {
+                if (button == 1) {
+                    // Right-click → open nudge editor for this box (V4-13)
+                    openBoxNudgeEditor(player, id, boxIdx, rp);
+                } else {
+                    // Left-click → delete the box
+                    UndoManager.pushUndoMutation(id, d, "removeshape", uuid); SlotManager.removeBox(id,boxIdx); SlotManager.saveAll(); broadcastShape(player.getServer(),SlotManager.getById(id)); send(player,"§a[Shape] Removed box #"+boxIdx+"."); int np=Math.min(boxPage,Math.max(0,(boxes.size()-2)/9)); reopenShapeEditor(player,id,rp,np);
+                }
+            }
             return;
         }
         List<SlotData> variants = findShapeVariants(id);
@@ -3853,13 +3968,13 @@ public class GuiManager {
     }
 
     private static SimpleInventory buildMain(ServerPlayerEntity player, int page) {
-        // Layout follows Main plan.md:151-158
-        //   Row 0 (slot 4)         : Title
-        //   Row 2 (19,21,23,25)    : Primary actions (1-slot gaps)
-        //   Row 3 (30,32,34)       : Recent blocks (if any)
-        //   Row 4 (37,39,41,43)    : Secondary actions (1-slot gaps)
-        //   Row 5 (46,48,50,52)    : Navigation (undo/history/redo/config)
-        //   Everything else        : invisible gray panes
+        // V4-04 clean grid layout:
+        //   Row 0 (slot 4)         : Title header
+        //   Row 1 (10,12,14,16)    : Create, Edit Blocks, Search, Magic Items
+        //   Row 2 (19,21,23,25)    : Bulk Delete, Bulk Recolor, Undo, Redo
+        //   Row 3 (28,30,32,34)    : Config, Resource Pack, History, Help
+        //   Row 4 (37,39,41,43)    : Broken Blocks, Deleted Blocks, AI, Exit
+        //   Row 5 (45-53)          : Glass padding
         SimpleInventory inv = new SimpleInventory(54);
         UUID uuid = player.getUuid();
         int undoSz = UndoManager.undoSize(uuid);
@@ -3875,57 +3990,56 @@ public class GuiManager {
             brokenCount > 0 ? "§cBroken: §f" + brokenCount : "§aAll textures OK",
             "§8Type /cb help for commands"));
 
-        // Row 2: primary actions (spaced by 1 slot)
-        inv.setStack(19, uiGlint(Items.CRAFTING_TABLE, "§e§lBlock Manager",
-            "§7Browse, edit, or create blocks", "§8" + blockCount + " block(s) registered"));
-        inv.setStack(21, uiGlint(Items.EMERALD, "§a§l+ Create New Block",
+        // Row 1: primary actions
+        inv.setStack(10, uiGlint(Items.EMERALD, "§a§l+ Create New Block",
             "§7Create a new custom block", "§8Type an ID in chat"));
-        inv.setStack(23, uiGlint(Items.SPYGLASS, "§f§lSearch Blocks",
+        inv.setStack(12, uiGlint(Items.CRAFTING_TABLE, "§e§lEdit Blocks",
+            "§7Browse and edit all blocks", "§8" + blockCount + " block(s) registered"));
+        inv.setStack(14, uiGlint(Items.SPYGLASS, "§f§lSearch Blocks",
             "§7Find a block by name or ID", "§8Type a query in chat"));
-        inv.setStack(25, uiGlint(Items.BRUSH, "§d§lMagic Items",
+        inv.setStack(16, uiGlint(Items.BRUSH, "§d§lMagic Items",
             "§7Wands, color squares, triangles"));
 
-        // Row 3: recent blocks (inline, spaced)
-        Deque<String> recent = RECENT_BLOCKS.getOrDefault(uuid, new ArrayDeque<>());
-        int ri = 0;
-        int[] recentSlots = {30, 32, 34};
-        for (String rid : recent) {
-            if (ri >= recentSlots.length) break;
-            SlotData rd = SlotManager.getById(rid);
-            if (rd == null) continue;
-            inv.setStack(recentSlots[ri], uiGlint(Items.CLOCK,
-                "§7§lRecent: §f" + rd.displayName,
-                "§7ID: §f" + rd.customId, "§8Click to edit"));
-            ri++;
-        }
-
-        // Row 4: secondary actions (spaced by 1 slot)
-        inv.setStack(37, uiGlint(Items.SPYGLASS, "§d§l📊 Statistics",
-            "§7Most-placed blocks, usage totals",
-            "§8Total placements: §f" + com.customblocks.core.PlacementStats.grandTotal()));
-        inv.setStack(38, uiGlint(Items.ENDER_EYE, "§5§l✦ Cloud Vault Market",
-            "§7Browse & import community blocks",
-            "§8Run: §f/cb market"));
-        inv.setStack(39, uiGlint(Items.STRUCTURE_VOID, "§6§lServer Tools",
-            "§7Broken blocks, resource pack, data",
-            brokenCount > 0 ? "§c" + brokenCount + " broken" : "§aAll OK"));
-        inv.setStack(41, uiGlint(Items.LAVA_BUCKET, "§c§l⚠ Bulk Delete",
+        // Row 2: bulk + undo
+        inv.setStack(19, uiGlint(Items.LAVA_BUCKET, "§c§l⚠ Bulk Delete",
             "§7Select and delete multiple blocks"));
-        inv.setStack(43, uiGlint(Items.BOOK, "§a§lHelp & Info", "§7Interactive help guide"));
-
-        // Row 5: navigation (undo, history, redo, config)
-        inv.setStack(46, undoSz > 0
+        inv.setStack(21, uiGlint(Items.COMPARATOR, "§6§lBulk Recolor",
+            "§7Recolor many blocks at once"));
+        inv.setStack(23, undoSz > 0
             ? uiGlint(Items.GOLDEN_PICKAXE, "§6§l↩ Undo §e(" + undoSz + ")", "§7Click to undo last action")
             : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Undo (Empty)"));
-        inv.setStack(48, (undoSz + redoSz) > 0
-            ? uiGlint(Items.KNOWLEDGE_BOOK, "§6§lHistory §7(" + (undoSz + redoSz) + ")",
-                "§7Browse undo/redo entries", "§8Click to open picker")
-            : ui(Items.GRAY_STAINED_GLASS_PANE, "§8History (Empty)"));
-        inv.setStack(50, redoSz > 0
+        inv.setStack(25, redoSz > 0
             ? uiGlint(Items.DIAMOND_PICKAXE, "§b§l↪ Redo §3(" + redoSz + ")", "§7Click to redo last undone action")
             : ui(Items.GRAY_STAINED_GLASS_PANE, "§8Redo (Empty)"));
-        inv.setStack(52, uiGlint(Items.COMPARATOR, "§6§l⚙ Config",
+
+        // Row 3: config + tools + history + help
+        inv.setStack(28, uiGlint(Items.COMPARATOR, "§6§l⚙ Config",
             "§7View and edit server-wide settings"));
+        inv.setStack(30, uiGlint(Items.BEACON, "§b§lResource Pack",
+            "§7Manage texture pack delivery & sync"));
+        inv.setStack(32, (undoSz + redoSz) > 0
+            ? uiGlint(Items.KNOWLEDGE_BOOK, "§6§lHistory §7(" + (undoSz + redoSz) + ")",
+                "§7Browse undo/redo entries", "§8Click to open picker")
+            : ui(Items.KNOWLEDGE_BOOK, "§8History (Empty)"));
+        inv.setStack(34, uiGlint(Items.BOOK, "§a§lHelp & Info", "§7Interactive help guide"));
+
+        // Row 4: diagnostics + coming-soon + exit
+        inv.setStack(37, brokenCount > 0
+            ? uiGlint(Items.DAMAGED_ANVIL, "§c§l⚠ Broken Blocks §c(" + brokenCount + ")",
+                "§7View and repair blocks with missing textures")
+            : ui(Items.DAMAGED_ANVIL, "§7Broken Blocks §8(None)"));
+        int trashSz = com.customblocks.core.TrashManager.size();
+        inv.setStack(39, trashSz > 0
+            ? uiGlint(Items.ENDER_CHEST, "§5§l🗑 Deleted Blocks §5(" + trashSz + ")",
+                "§7Browse and restore recently deleted blocks",
+                "§8Left-click to open trash bin")
+            : ui(Items.ENDER_CHEST, "§5§l🗑 Deleted Blocks §8(Empty)",
+                "§7Deleted blocks will appear here",
+                "§8Trash bin is currently empty"));
+        inv.setStack(41, uiGlint(Items.PLAYER_HEAD, "§e§lAI Assistant",
+            "§7Manage and run AI block tasks",
+            "§8Coming soon"));
+        inv.setStack(43, ui(Items.BARRIER, "§c§lClose", "§8ESC or click to close"));
 
         return inv;
     }
@@ -4596,7 +4710,7 @@ public class GuiManager {
                 player.getServer().execute(() -> {
                     if (STATES.containsKey(uuid) && STATES.get(uuid).mode() == GuiMode.MARKET_GUI) {
                         openScreenFromGuiState(player, GuiState.marketGui(finalPage),
-                            buildMarketGui(items, finalPage),
+                            buildMarketGui(uuid, items, finalPage),
                             Text.translatable("customblocks.gui.market.title", items.size()));
                     }
                 });
@@ -4604,7 +4718,7 @@ public class GuiManager {
         } else {
             java.util.List<JsonObject> cached = MARKET_CACHE.getOrDefault(uuid, java.util.List.of());
             openScreenFromGuiState(player, GuiState.marketGui(page),
-                buildMarketGui(cached, page),
+                buildMarketGui(uuid, cached, page),
                 Text.translatable("customblocks.gui.market.title", cached.size()));
         }
     }
@@ -4631,14 +4745,55 @@ public class GuiManager {
     }
 
     private static SimpleInventory buildMarketGui(java.util.List<JsonObject> items, int page) {
+        return buildMarketGui(null, items, page);
+    }
+
+    private static SimpleInventory buildMarketGui(UUID uuid, java.util.List<JsonObject> rawItems, int page) {
+        // Apply search filter
+        String query = uuid != null ? MARKET_SEARCH_QUERIES.getOrDefault(uuid, "") : "";
+        java.util.List<JsonObject> items = query.isEmpty() ? rawItems : rawItems.stream()
+            .filter(m -> {
+                String dn = m.has("displayName") ? m.get("displayName").getAsString().toLowerCase(java.util.Locale.ROOT) : "";
+                String id = m.has("customId")    ? m.get("customId").getAsString().toLowerCase(java.util.Locale.ROOT)    : "";
+                return dn.contains(query) || id.contains(query);
+            }).toList();
+
+        // Apply sort
+        String sortMode = uuid != null ? MARKET_SORT_MODES.getOrDefault(uuid, "date") : "date";
+        if ("name".equals(sortMode)) {
+            items = items.stream().sorted((a, b) -> {
+                String an = a.has("displayName") ? a.get("displayName").getAsString() : "";
+                String bn = b.has("displayName") ? b.get("displayName").getAsString() : "";
+                return an.compareToIgnoreCase(bn);
+            }).toList();
+        }
+
         SimpleInventory inv = new SimpleInventory(54);
         ItemStack purplePane = ui(Items.PURPLE_STAINED_GLASS_PANE, " ");
         for (int s : new int[]{0,1,2,3,4,5,6,7,8,9,17,18,26,27,35,36,44,45,46,47,48,49,50,51,52,53}) inv.setStack(s, purplePane.copy());
 
         // Header
-        inv.setStack(4, named(Items.BEACON, "§5§l✦ §r§fCloud Vault Market",
+        String filterLabel = query.isEmpty() ? "" : " §8[filter: §f" + query + "§8]";
+        inv.setStack(4, named(Items.BEACON, "§5§l✦ §r§fCloud Vault" + filterLabel,
             "§7Browse blocks shared by the community.",
-            "§8Click any block to import it."));
+            "§8" + items.size() + " result(s) · Click any block to import."));
+
+        // Search slot
+        inv.setStack(8, ui(Items.SPYGLASS,
+            query.isEmpty() ? "§7Search Vault..." : "§eSearch: §f" + query,
+            "§7Click to search by name or ID",
+            query.isEmpty() ? "" : "§8Click to clear: type a blank line"));
+
+        // Sort toggle
+        inv.setStack(7, ui(Items.COMPARATOR,
+            "§7Sort: §f" + ("name".equals(sortMode) ? "Name A→Z" : "Latest first"),
+            "§8Click to toggle sort order"));
+
+        // Upload button
+        inv.setStack(6, ui(Items.CHEST_MINECART, "§a§l▲ Share a Block",
+            "§7Type §f/cb share <id> §7to share a block",
+            "§7or §f/cb sharecategory <cat> §7for a whole category",
+            "§8Shared blocks appear here for everyone to import."));
 
         // Listing: slots 10-16, 19-25, 28-34  (3 rows × 7 = 21 slots)
         int[] listingSlots = {10,11,12,13,14,15,16, 19,20,21,22,23,24,25, 28,29,30,31,32,33,34};
@@ -4651,12 +4806,14 @@ public class GuiManager {
             String code        = meta.has("code")        ? meta.get("code").getAsString() : "";
             String customId    = meta.has("customId")    ? meta.get("customId").getAsString() : "";
             String createdAt   = meta.has("createdAt")   ? meta.get("createdAt").getAsString().substring(0, 10) : "?";
+            int downloads      = meta.has("downloads")   ? meta.get("downloads").getAsInt() : -1;
+            String dlLine      = downloads >= 0 ? "§7Downloads: §f" + downloads : "";
             ItemStack entry = uiGlint(Items.ENDER_EYE,
                 "§b§l" + displayName,
                 "§7Code: §f" + code,
                 "§7ID:   §8" + customId,
                 "§7Date: §8" + createdAt,
-                "",
+                dlLine,
                 "§a§l» Click to import");
             inv.setStack(listingSlots[i], entry);
         }
@@ -4665,7 +4822,7 @@ public class GuiManager {
         if (page > 0) inv.setStack(46, customHead(MHF_LEFT, "§a§l« Previous Page"));
         inv.setStack(49, named(Items.COMPASS,
             "§7Page §f" + (page + 1) + " §7of §f" + Math.max(1, (int) Math.ceil(items.size() / (double) MARKET_PAGE_SIZE)),
-            "§8" + items.size() + " total blocks in vault"));
+            "§8" + rawItems.size() + " total in vault" + (query.isEmpty() ? "" : " · " + items.size() + " matching")));
         if ((page + 1) * MARKET_PAGE_SIZE < items.size())
             inv.setStack(52, customHead(MHF_RIGHT, "§a§lNext Page »"));
         inv.setStack(50, named(Items.RECOVERY_COMPASS, "§e§l⟳ Refresh"));
@@ -4675,7 +4832,16 @@ public class GuiManager {
 
     private static void handleMarketGuiClick(ServerPlayerEntity player, GuiState state, int slot) {
         int page = state.page();
-        java.util.List<JsonObject> items = MARKET_CACHE.getOrDefault(player.getUuid(), java.util.List.of());
+        UUID uuid = player.getUuid();
+        java.util.List<JsonObject> rawItems = MARKET_CACHE.getOrDefault(uuid, java.util.List.of());
+        // Build filtered list for pagination math
+        String query = MARKET_SEARCH_QUERIES.getOrDefault(uuid, "");
+        java.util.List<JsonObject> items = query.isEmpty() ? rawItems : rawItems.stream()
+            .filter(m -> {
+                String dn = m.has("displayName") ? m.get("displayName").getAsString().toLowerCase(java.util.Locale.ROOT) : "";
+                String id = m.has("customId")    ? m.get("customId").getAsString().toLowerCase(java.util.Locale.ROOT)    : "";
+                return dn.contains(query) || id.contains(query);
+            }).toList();
         int[] listingSlots = {10,11,12,13,14,15,16, 19,20,21,22,23,24,25, 28,29,30,31,32,33,34};
 
         // Back
@@ -4683,24 +4849,46 @@ public class GuiManager {
 
         // Refresh
         if (slot == 50) {
-            MARKET_CACHE.remove(player.getUuid());
+            MARKET_CACHE.remove(uuid);
+            MARKET_SEARCH_QUERIES.remove(uuid);
             openMarketGui(player, 0, true);
             return;
         }
 
+        // Search
+        if (slot == 8) {
+            openShortInputPrompt(player,
+                new PendingInput(InputAction.REID_TEXT, "__market_search__", null, null, null, page),
+                "§5Search Vault", new ItemStack(Items.SPYGLASS), query);
+            return;
+        }
+
+        // Sort toggle
+        if (slot == 7) {
+            String current = MARKET_SORT_MODES.getOrDefault(uuid, "date");
+            MARKET_SORT_MODES.put(uuid, "date".equals(current) ? "name" : "date");
+            openScreenFromGuiState(player, GuiState.marketGui(0),
+                buildMarketGui(uuid, rawItems, 0),
+                Text.translatable("customblocks.gui.market.title", rawItems.size()));
+            return;
+        }
+
+        // Upload info (slot 6 — informational only, no action)
+        if (slot == 6) return;
+
         // Prev page
         if (slot == 46 && page > 0) {
             openScreenFromGuiState(player, GuiState.marketGui(page - 1),
-                buildMarketGui(items, page - 1),
-                Text.translatable("customblocks.gui.market.title", items.size()));
+                buildMarketGui(uuid, rawItems, page - 1),
+                Text.translatable("customblocks.gui.market.title", rawItems.size()));
             return;
         }
 
         // Next page
         if (slot == 52 && (page + 1) * MARKET_PAGE_SIZE < items.size()) {
             openScreenFromGuiState(player, GuiState.marketGui(page + 1),
-                buildMarketGui(items, page + 1),
-                Text.translatable("customblocks.gui.market.title", items.size()));
+                buildMarketGui(uuid, rawItems, page + 1),
+                Text.translatable("customblocks.gui.market.title", rawItems.size()));
             return;
         }
 
@@ -4712,7 +4900,6 @@ public class GuiManager {
                 JsonObject meta = items.get(idx);
                 String code = meta.has("code") ? meta.get("code").getAsString() : null;
                 if (code == null) return;
-                // Run the importblock command on behalf of the player
                 final String finalCode = code;
                 try {
                     player.getServer().getCommandManager().getDispatcher()
@@ -4756,6 +4943,16 @@ public class GuiManager {
             "§71. Use high-resolution PNGs for best quality.",
             "§72. The Block Editor is the fastest way to customize.",
             "§73. Keep unique IDs short and descriptive."));
+
+        // V4-34 — keyboard shortcut overlay
+        inv.setStack(42, ui(Items.WRITABLE_BOOK, "§e§lKeyboard Shortcuts",
+            "§7In Block List: §fLeft-click §8→ §7editor",
+            "§7              §fRight-click §8→ §7category",
+            "§7              §fSlot 8 §8→ §7search",
+            "§7In Editor:    §fAll changes §8→ §7live/instant",
+            "§7Anywhere:     §f/cb help §8→ §7this guide",
+            "§7              §f/cb undo §8→ §7undo last action",
+            "§7              §fESC §8→ §7back / close GUI"));
 
         inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
         return inv;
@@ -4941,7 +5138,7 @@ public class GuiManager {
     private static SimpleInventory buildPicker(UUID playerUuid, int page, boolean brokenOnly) {
         SimpleInventory inv = new SimpleInventory(54);
         // 1.23 — broken view uses reason map; normal view uses sorted list (1.27 sort-aware)
-        java.util.Map<SlotData, SlotData.TextureReason> brokenMap = brokenOnly
+        java.util.Map<SlotData, SlotData.BlockHealth> brokenMap = brokenOnly
                 ? com.customblocks.core.SlotManager.brokenBlocksWithReasons() : null;
         List<SlotData> blocks = brokenOnly ? new ArrayList<>(brokenMap.keySet()) : sortedBlocks(playerUuid);
         int total = blocks.size(), maxPage = total==0?0:Math.max(0,(total-1)/BLOCKS_PER_PAGE);
@@ -4956,7 +5153,9 @@ public class GuiManager {
         for (int i=5;i<=7;i++) inv.setStack(i,glass());
         if (brokenOnly && total > 0)
             inv.setStack(8, uiGlint(Items.TNT, "§c§l⚠ Delete All Broken", "§7Remove all " + total + " broken block(s)", "§cThis action uses undo support."));
-        else inv.setStack(8, glass());
+        else
+            // V4-23: search shortcut at slot 8
+            inv.setStack(8, uiGlint(Items.SPYGLASS, "§f§lSearch Blocks", "§7Click to search by name or ID"));
         for (int i=9;i<=17;i++) inv.setStack(i, ui(Items.BLUE_STAINED_GLASS_PANE,"§r"));
         int start = page * BLOCKS_PER_PAGE;
         for (int i=0; i<BLOCKS_PER_PAGE; i++) {
@@ -4970,12 +5169,14 @@ public class GuiManager {
                 if (isFav) ll.add("§6★ Favorite §8— Press §fF §8to unfavorite");
                 else ll.add("§8☆ Press §fF §8to favorite");
                 List<String> tags=new ArrayList<>(); if(d.hasFaces())tags.add("§d⬡faces"); if(d.isAnimated())tags.add("§b⏳anim"); if(d.noCollision)tags.add("§c⊘hitbox"); if(!tags.isEmpty())ll.add(String.join("  ",tags));
-                // 1.23 — show TextureReason tooltip in broken-blocks view
+                // V4-00 — show BlockHealth tooltip in broken-blocks view
                 if (brokenOnly && brokenMap != null) {
-                    SlotData.TextureReason reason = brokenMap.get(d);
-                    if (reason != null) {
-                        ll.add("§c⚠ " + reason.tooltip);
-                        if (reason == SlotData.TextureReason.NEVER_UPLOADED) {
+                    SlotData.BlockHealth health = brokenMap.get(d);
+                    if (health != null) {
+                        ll.add("§c⚠ " + health.tooltip);
+                        if (health == SlotData.BlockHealth.LOAD_FAILURE) {
+                            ll.add("§aShift-click §8→ retry loading texture");
+                        } else if (health == SlotData.BlockHealth.PLACEHOLDER) {
                             ll.add("§7Shift-click §8→ suppress this warning");
                         }
                     }
@@ -4989,7 +5190,12 @@ public class GuiManager {
         inv.setStack(45, page>0 ? uiGlint(Items.ARROW,"§7◀ Previous Page","§8Go to page "+page) : ui(Items.GRAY_STAINED_GLASS_PANE,"§8◀ First Page",""));
         for (int i=46;i<=48;i++) inv.setStack(i,glass());
         inv.setStack(49, ui(Items.PAPER,"§ePage §f"+(page+1)+" §7/ §f"+(maxPage+1),"§7Total: §f"+total+" blocks"));
-        inv.setStack(50, glass());
+        // V4-33 — ? help button at slot 50
+        inv.setStack(50, ui(Items.BOOK, "§7? Help",
+            "§7Left-click a block §8→ §fOpen Block Editor",
+            "§7Right-click §8→ §fAssign to category",
+            "§7Slot 8 §8→ §fSearch by name or ID",
+            "§8Type §f/cb help §8for full guide."));
         // 1.27 — sort button (slot 51); hidden in broken-only view
         if (!brokenOnly) {
             SortMode cur = PLAYER_SORT_PREFS.getOrDefault(playerUuid, SortMode.NAME_ASC);
@@ -5183,8 +5389,157 @@ public class GuiManager {
         if (confirmDelete) inv.setStack(52, uiGlint(Items.GREEN_CONCRETE,"§a§l✖ Cancel","§7Go back without deleting."));
 
         inv.setStack(45, uiGlint(Items.ECHO_SHARD,"§c◀ Back to Block List"));
+        // V4-33 — ? help button
+        inv.setStack(47, ui(Items.BOOK, "§7? Help", "§7This is the Block Editor.", "§7All changes are live — no need to save.", "§8Click any button to see what it does.", "§8Type §f/cb help §8for the full guide."));
         return inv;
     }
+
+    // ── V4-13 Box Nudge Editor ──────────────────────────────────────────────────
+
+    /** Opens the nudge editor for box at index {@code boxIdx} of block {@code id}. */
+    public static void openBoxNudgeEditor(ServerPlayerEntity player, String id, int boxIdx, int returnPage) {
+        SlotData d = SlotManager.getById(id);
+        if (d == null || d.shapeBoxes == null || boxIdx >= d.shapeBoxes.size()) {
+            reopenShapeEditor(player, id, returnPage, 0);
+            return;
+        }
+        BOX_NUDGE_WORK.put(player.getUuid(), d.shapeBoxes.get(boxIdx));
+        pushBackStack(player.getUuid());
+        openScreenFromGuiState(player, GuiState.boxNudgeEditor(id, boxIdx, returnPage),
+            buildBoxNudgeEditor(d, d.shapeBoxes.get(boxIdx), boxIdx),
+            Text.literal("§5§lNudge Box §8— §f" + d.displayName));
+    }
+
+    /** Builds the 54-slot box nudge editor GUI using {@code box} as the live values. */
+    private static SimpleInventory buildBoxNudgeEditor(SlotData d, SlotData.ShapeBox box, int boxIdx) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+
+        inv.setStack(0, uiGlint(Items.ECHO_SHARD, "§c◀ Back / Cancel", "§7Discards changes and returns to shape editor"));
+        inv.setStack(4, ui(Items.STRUCTURE_VOID, "§5§lBox #" + boxIdx + " §8— §f" + d.displayName,
+            "§7x1=" + fmtCoord(box.x1()) + "  y1=" + fmtCoord(box.y1()) + "  z1=" + fmtCoord(box.z1()),
+            "§7x2=" + fmtCoord(box.x2()) + "  y2=" + fmtCoord(box.y2()) + "  z2=" + fmtCoord(box.z2()),
+            "§aLeft-click ◀▶ §7nudges §f+1 §7(1/16 block)  |  §aRight-click §7nudges §f+4"));
+
+        // Min-corner column (x1, y1, z1) — left side, slots 10-12, 19-21, 28-30
+        inv.setStack(10, uiGlint(Items.RED_DYE,   "§c◀ x1 −1", "§8Left:−1  Right:−4"));
+        inv.setStack(11, ui(Items.PINK_DYE,        "§fx1 = §e" + fmtCoord(box.x1()), "§7Min corner X  (0–16)"));
+        inv.setStack(12, uiGlint(Items.LIME_DYE,  "§ax1 +1▶", "§8Left:+1  Right:+4"));
+
+        inv.setStack(19, uiGlint(Items.RED_DYE,   "§c◀ y1 −1", "§8Left:−1  Right:−4"));
+        inv.setStack(20, ui(Items.PINK_DYE,        "§fy1 = §e" + fmtCoord(box.y1()), "§7Min corner Y  (0–16)"));
+        inv.setStack(21, uiGlint(Items.LIME_DYE,  "§ay1 +1▶", "§8Left:+1  Right:+4"));
+
+        inv.setStack(28, uiGlint(Items.RED_DYE,   "§c◀ z1 −1", "§8Left:−1  Right:−4"));
+        inv.setStack(29, ui(Items.PINK_DYE,        "§fz1 = §e" + fmtCoord(box.z1()), "§7Min corner Z  (0–16)"));
+        inv.setStack(30, uiGlint(Items.LIME_DYE,  "§az1 +1▶", "§8Left:+1  Right:+4"));
+
+        // Max-corner column (x2, y2, z2) — right side, slots 14-16, 23-25, 32-34
+        inv.setStack(14, uiGlint(Items.RED_DYE,   "§c◀ x2 −1", "§8Left:−1  Right:−4"));
+        inv.setStack(15, ui(Items.CYAN_DYE,        "§fx2 = §e" + fmtCoord(box.x2()), "§7Max corner X  (0–16)"));
+        inv.setStack(16, uiGlint(Items.LIME_DYE,  "§ax2 +1▶", "§8Left:+1  Right:+4"));
+
+        inv.setStack(23, uiGlint(Items.RED_DYE,   "§c◀ y2 −1", "§8Left:−1  Right:−4"));
+        inv.setStack(24, ui(Items.CYAN_DYE,        "§fy2 = §e" + fmtCoord(box.y2()), "§7Max corner Y  (0–16)"));
+        inv.setStack(25, uiGlint(Items.LIME_DYE,  "§ay2 +1▶", "§8Left:+1  Right:+4"));
+
+        inv.setStack(32, uiGlint(Items.RED_DYE,   "§c◀ z2 −1", "§8Left:−1  Right:−4"));
+        inv.setStack(33, ui(Items.CYAN_DYE,        "§fz2 = §e" + fmtCoord(box.z2()), "§7Max corner Z  (0–16)"));
+        inv.setStack(34, uiGlint(Items.LIME_DYE,  "§az2 +1▶", "§8Left:+1  Right:+4"));
+
+        // Bottom nav
+        inv.setStack(45, uiGlint(Items.BARRIER,          "§cCancel", "§7Discard all changes and return"));
+        inv.setStack(49, uiGlint(Items.NETHER_STAR,      "§a§lSave Box", "§7Commit changes and return to shape editor"));
+        inv.setStack(53, uiGlint(Items.TOTEM_OF_UNDYING, "§eReset to Original", "§7Undo all nudges — restore the box as it was when this screen opened"));
+        return inv;
+    }
+
+    private static String fmtCoord(float v) {
+        if (v == (int) v) return String.valueOf((int) v);
+        String s = String.format("%.3f", v);
+        while (s.endsWith("0")) s = s.substring(0, s.length() - 1);
+        if (s.endsWith(".")) s = s.substring(0, s.length() - 1);
+        return s;
+    }
+
+    /** Handles clicks in the Box Nudge Editor. */
+    private static void handleBoxNudgeClick(ServerPlayerEntity player, GuiState state, int slot, int button) {
+        String id = state.editingId();
+        int boxIdx = state.shapeBoxPage();
+        int rp = state.page();
+
+        SlotData d = SlotManager.getById(id);
+        if (d == null) { openMain(player, rp); return; }
+
+        SlotData.ShapeBox orig = (d.shapeBoxes != null && boxIdx < d.shapeBoxes.size())
+            ? d.shapeBoxes.get(boxIdx) : null;
+        SlotData.ShapeBox work = BOX_NUDGE_WORK.getOrDefault(player.getUuid(), orig);
+        if (work == null) { reopenShapeEditor(player, id, rp, 0); return; }
+
+        // step: 1 unit = 1/16 block. Left-click = 1, right-click = 4.
+        float step = button == 1 ? 4f : 1f;
+
+        SlotData.ShapeBox updated = switch (slot) {
+            case 10 -> nudgeBox(work, -step, 0, 0, 0, 0, 0);
+            case 12 -> nudgeBox(work,  step, 0, 0, 0, 0, 0);
+            case 19 -> nudgeBox(work, 0, -step, 0, 0, 0, 0);
+            case 21 -> nudgeBox(work, 0,  step, 0, 0, 0, 0);
+            case 28 -> nudgeBox(work, 0, 0, -step, 0, 0, 0);
+            case 30 -> nudgeBox(work, 0, 0,  step, 0, 0, 0);
+            case 14 -> nudgeBox(work, 0, 0, 0, -step, 0, 0);
+            case 16 -> nudgeBox(work, 0, 0, 0,  step, 0, 0);
+            case 23 -> nudgeBox(work, 0, 0, 0, 0, -step, 0);
+            case 25 -> nudgeBox(work, 0, 0, 0, 0,  step, 0);
+            case 32 -> nudgeBox(work, 0, 0, 0, 0, 0, -step);
+            case 34 -> nudgeBox(work, 0, 0, 0, 0, 0,  step);
+            default -> null;
+        };
+
+        if (updated != null) {
+            BOX_NUDGE_WORK.put(player.getUuid(), updated);
+            refreshScreen(player, buildBoxNudgeEditor(d, updated, boxIdx));
+            return;
+        }
+
+        if (slot == 0 || slot == 45) {
+            BOX_NUDGE_WORK.remove(player.getUuid());
+            reopenShapeEditor(player, id, rp, boxIdx / 9);
+            return;
+        }
+
+        if (slot == 49) {
+            if (orig == null) { reopenShapeEditor(player, id, rp, 0); return; }
+            UndoManager.pushUndoMutation(id, d, "nudgebox#" + boxIdx, player.getUuid());
+            final SlotData.ShapeBox finalWork = work;
+            SlotManager.update(id, dd -> {
+                if (dd.shapeBoxes == null || boxIdx >= dd.shapeBoxes.size()) return dd;
+                java.util.List<SlotData.ShapeBox> nb = new java.util.ArrayList<>(dd.shapeBoxes);
+                nb.set(boxIdx, finalWork);
+                return dd.withShapeBoxes(nb);
+            });
+            com.customblocks.block.SlotBlock.invalidateShape(d.index);
+            SlotManager.saveAll();
+            broadcastShape(player.getServer(), SlotManager.getById(id));
+            BOX_NUDGE_WORK.remove(player.getUuid());
+            send(player, "§a[Shape] Box #" + boxIdx + " saved.");
+            reopenShapeEditor(player, id, rp, boxIdx / 9);
+            return;
+        }
+
+        if (slot == 53 && orig != null) {
+            BOX_NUDGE_WORK.put(player.getUuid(), orig);
+            refreshScreen(player, buildBoxNudgeEditor(d, orig, boxIdx));
+        }
+    }
+
+    private static SlotData.ShapeBox nudgeBox(SlotData.ShapeBox b,
+            float dx1, float dy1, float dz1, float dx2, float dy2, float dz2) {
+        return new SlotData.ShapeBox(
+            clamp016(b.x1() + dx1), clamp016(b.y1() + dy1), clamp016(b.z1() + dz1),
+            clamp016(b.x2() + dx2), clamp016(b.y2() + dy2), clamp016(b.z2() + dz2));
+    }
+
+    private static float clamp016(float v) { return Math.max(0f, Math.min(16f, v)); }
 
     private static SimpleInventory buildShapeEditor(SlotData d, int boxPage) {
         SimpleInventory inv = new SimpleInventory(54);
@@ -5211,7 +5566,7 @@ public class GuiManager {
         for (int i=24;i<=26;i++) inv.setStack(i,glass());
         inv.setStack(27, ui(Items.PURPLE_STAINED_GLASS_PANE,"§5── Custom Boxes §8(click to delete) ──","§7Individual hitbox parts"));
         int bstart = boxPage*9;
-        for (int i=0;i<9&&(bstart+i)<boxes.size();i++) { SlotData.ShapeBox b=boxes.get(bstart+i); inv.setStack(28+i,ui(Items.STRUCTURE_VOID,"§e§lCustom Box #"+(bstart+i),"§7"+b.toDisplayString(),"§c§oClick to DELETE this box")); }
+        for (int i=0;i<9&&(bstart+i)<boxes.size();i++) { SlotData.ShapeBox b=boxes.get(bstart+i); inv.setStack(28+i,ui(Items.STRUCTURE_VOID,"§e§lCustom Box #"+(bstart+i),"§7"+b.toDisplayString(),"§c§oLeft-click: DELETE  §7|  §aRight-click: NUDGE/edit")); }
         for (int s=28+Math.min(9,Math.max(0,boxes.size()-bstart));s<=36;s++) inv.setStack(s,glass());
         List<SlotData> variants = findShapeVariants(d.customId);
         inv.setStack(37, ui(Items.LIME_STAINED_GLASS_PANE,"§a── Shape Variants ──","§7Variant blocks based on this design"));
@@ -5514,6 +5869,149 @@ public class GuiManager {
         return inv;
     }
 
+    private static final int SNAPSHOTS_PER_PAGE = 18;
+
+    private static SimpleInventory buildSnapshotsGui(int page) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        java.util.List<com.customblocks.core.SnapshotManager.SnapshotMeta> snaps = com.customblocks.core.SnapshotManager.list();
+        int total = snaps.size();
+        int offset = page * SNAPSHOTS_PER_PAGE;
+
+        inv.setStack(4, uiGlint(Items.CLOCK, "§6§lSnapshots",
+            "§7Total: §f" + total,
+            "§7Page §f" + (page + 1),
+            "§8Click a snapshot to restore it."));
+
+        int[] slots = { 10,11,12,13,14,15,16, 19,20,21,22,23,24,25, 28,29,30,31 };
+        for (int i = 0; i < slots.length; i++) {
+            int idx = offset + i;
+            if (idx >= total) break;
+            com.customblocks.core.SnapshotManager.SnapshotMeta snap = snaps.get(idx);
+            String reason = snap.reason();
+            String ts = snap.timestamp();
+            long kb = snap.sizeBytes() / 1024;
+            net.minecraft.item.Item icon = reason.startsWith("auto") ? Items.CLOCK
+                    : reason.startsWith("pre_restore") ? Items.ORANGE_DYE
+                    : Items.LIME_DYE;
+            inv.setStack(slots[i], uiGlint(icon,
+                "§f" + snap.filename(),
+                "§7Time:   §e" + ts,
+                "§7Reason: §b" + reason,
+                "§7Size:   §f" + kb + " KB",
+                "§aClick to RESTORE this snapshot"));
+        }
+
+        if (page > 0)                              inv.setStack(45, uiGlint(Items.ARROW, "§7◀ Prev Page"));
+        if (offset + SNAPSHOTS_PER_PAGE < total)   inv.setStack(53, uiGlint(Items.ARROW, "§7Next Page ▶"));
+        inv.setStack(49, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
+        return inv;
+    }
+
+    private static void handleSnapshotsGuiClick(ServerPlayerEntity player, GuiState state, int slot) {
+        int page = state.page();
+        if (slot == 49) { handleEscBack(player); return; }
+        if (slot == 45 && page > 0) {
+            openSnapshotsGui(player, page - 1); return;
+        }
+        if (slot == 53) {
+            openSnapshotsGui(player, page + 1); return;
+        }
+        int[] slots = { 10,11,12,13,14,15,16, 19,20,21,22,23,24,25, 28,29,30,31 };
+        for (int i = 0; i < slots.length; i++) {
+            if (slot == slots[i]) {
+                int idx = page * SNAPSHOTS_PER_PAGE + i;
+                java.util.List<com.customblocks.core.SnapshotManager.SnapshotMeta> snaps = com.customblocks.core.SnapshotManager.list();
+                if (idx >= snaps.size()) { playError(player); return; }
+                String filename = snaps.get(idx).filename();
+                boolean ok = com.customblocks.core.SnapshotManager.restore(filename);
+                if (ok) {
+                    com.customblocks.network.NetworkManager.broadcastFullSync(player.getServer());
+                    FeedbackHelper.actionBar(player, "§a§l✔ §r§aRestored snapshot: §f" + filename);
+                    send(player, "§a[Snapshots] Restored from §f" + filename + "§a.");
+                    openSnapshotsGui(player, 0);
+                } else {
+                    playError(player);
+                    send(player, "§c[Snapshots] Failed to restore §f" + filename + "§c.");
+                }
+                return;
+            }
+        }
+    }
+
+    // ── V4-18 Deleted Blocks GUI ──────────────────────────────────────────────
+
+    private static final int TRASH_PER_PAGE = 18;
+
+    private static SimpleInventory buildDeletedBlocksGui(int page) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        java.util.List<com.customblocks.core.TrashManager.TrashEntry> entries = com.customblocks.core.TrashManager.list();
+        int total = entries.size();
+        int offset = page * TRASH_PER_PAGE;
+
+        inv.setStack(4, uiGlint(Items.RED_DYE, "§c§lDeleted Blocks",
+            "§7Total: §f" + total,
+            "§7Page §f" + (page + 1),
+            "§aLeft-click to restore.",
+            "§cRight-click to permanently delete."));
+
+        int[] slots = { 10,11,12,13,14,15,16, 19,20,21,22,23,24,25, 28,29,30,31 };
+        for (int i = 0; i < slots.length; i++) {
+            int idx = offset + i;
+            if (idx >= total) break;
+            com.customblocks.core.TrashManager.TrashEntry e = entries.get(idx);
+            String ts = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").format(new java.util.Date(e.deletedAt()));
+            inv.setStack(slots[i], uiGlint(Items.BARRIER,
+                "§f" + e.displayName(),
+                "§7ID:      §b" + e.originalId(),
+                "§7Deleted: §e" + ts,
+                "§aLeft-click §7to restore",
+                "§cRight-click §7to delete permanently"));
+        }
+
+        if (page > 0)                          inv.setStack(45, uiGlint(Items.ARROW, "§7◀ Prev Page"));
+        if (offset + TRASH_PER_PAGE < total)   inv.setStack(53, uiGlint(Items.ARROW, "§7Next Page ▶"));
+        inv.setStack(49, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
+        return inv;
+    }
+
+    private static void handleDeletedBlocksGuiClick(ServerPlayerEntity player, GuiState state, int slot, int button) {
+        int page = state.page();
+        if (slot == 49) { handleEscBack(player); return; }
+        if (slot == 45 && page > 0) { openDeletedBlocksGui(player, page - 1); return; }
+        if (slot == 53) { openDeletedBlocksGui(player, page + 1); return; }
+
+        int[] slots = { 10,11,12,13,14,15,16, 19,20,21,22,23,24,25, 28,29,30,31 };
+        for (int i = 0; i < slots.length; i++) {
+            if (slot == slots[i]) {
+                int idx = page * TRASH_PER_PAGE + i;
+                java.util.List<com.customblocks.core.TrashManager.TrashEntry> entries = com.customblocks.core.TrashManager.list();
+                if (idx >= entries.size()) { playError(player); return; }
+                String id = entries.get(idx).originalId();
+                if (button == 1) {
+                    // Right-click = permanent delete
+                    com.customblocks.core.TrashManager.permanentlyDelete(id);
+                    FeedbackHelper.actionBar(player, "§c§l✘ §r§cPermanently deleted: §f" + id);
+                    send(player, "§c[Trash] Permanently deleted §f" + id + "§c.");
+                } else {
+                    // Left-click = restore
+                    boolean ok = com.customblocks.core.TrashManager.restore(id);
+                    if (ok) {
+                        com.customblocks.network.NetworkManager.broadcastFullSync(player.getServer());
+                        FeedbackHelper.actionBar(player, "§a§l✔ §r§aRestored: §f" + id);
+                        send(player, "§a[Trash] Restored §f" + id + "§a.");
+                    } else {
+                        playError(player);
+                        send(player, "§c[Trash] Could not restore §f" + id + "§c.");
+                    }
+                }
+                openDeletedBlocksGui(player, page);
+                return;
+            }
+        }
+    }
+
     private static SimpleInventory buildScriptGui(int page) {
         SimpleInventory inv = new SimpleInventory(54);
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
@@ -5556,23 +6054,100 @@ public class GuiManager {
         SimpleInventory inv = new SimpleInventory(54);
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
         inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
-        inv.setStack(20, uiGlint(Items.NETHER_STAR, "§dAI Provider", "§7Configured: §f" + CustomBlocksConfig.aiApiProvider));
-        inv.setStack(22, uiGlint(Items.BRUSH, "§bSmart Suggest", "§7Open a block editor and use the AI tools there."));
-        inv.setStack(24, uiGlint(Items.PAPER, "§7Status", "§7Global AI hub is lightweight for now.", "§7Per-block AI suggestions are still available."));
+
+        // Title
+        inv.setStack(4, uiGlint(Items.NETHER_STAR, "§d§lAI Command Hub",
+            "§7Type commands in chat via §f/cb ai \"...\"",
+            "§7Provider: §f" + CustomBlocksConfig.aiApiProvider));
+
+        // Command examples — row 2 (slots 10-16)
+        inv.setStack(10, ui(Items.BARRIER, "§cDelete Commands",
+            "§f/cb ai \"delete blocks starting with mob_\"",
+            "§f/cb ai \"delete all broken blocks\"",
+            "§f/cb ai \"remove block oak_plank\"",
+            "§8Supports: prefix, name, containing, broken"));
+
+        inv.setStack(13, ui(Items.SPYGLASS, "§bFind Commands",
+            "§f/cb ai \"list all blocks\"",
+            "§f/cb ai \"find blocks containing gem\"",
+            "§f/cb ai \"show blocks starting with ice\"",
+            "§f/cb ai \"how many blocks\"",
+            "§8Returns matching block IDs in chat"));
+
+        inv.setStack(16, ui(Items.GLOWSTONE_DUST, "§eGlow Commands",
+            "§f/cb ai \"set glow 10 on block volcano\"",
+            "§f/cb ai \"set glow level 5 on all blocks with fire\"",
+            "§8Level 0-15  ·  Supports prefix & name match"));
+
+        // Row 3 (slots 19-25)
+        inv.setStack(19, ui(Items.NAME_TAG, "§aRename Command",
+            "§f/cb ai \"rename oak_plank to Oak Plank\"",
+            "§8Underscores in new name become spaces"));
+
+        inv.setStack(22, ui(Items.BOOK, "§7Tips",
+            "§7All AI commands support §f/cb undo §7to reverse.",
+            "§7Use §f'starting with X' §7for prefix match.",
+            "§7Use §f'containing X' §7to match any part of ID.",
+            "§7Use §f'named X' §7for exact ID match."));
+
+        inv.setStack(25, uiGlint(Items.BRUSH, "§bPer-Block AI",
+            "§7Open any block editor with §f/cb editor <id>",
+            "§7Use the §fAI Suggest §7button for smart suggestions",
+            "§7on name, textures, sounds, and more."));
+
         return inv;
     }
 
     private static SimpleInventory buildCustomColorStudioGui(ServerPlayerEntity player, String initialHex) {
         SimpleInventory inv = new SimpleInventory(54);
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        inv.setStack(0,  uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
         inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
-        String active = initialHex != null && !initialHex.isBlank() ? initialHex : "Use /cb customcolor <hex>";
-        inv.setStack(13, uiGlint(Items.MAGENTA_DYE, "§dCustom Color Tools", "§7Current: §f" + active));
+        inv.setStack(4,  uiGlint(Items.MAGENTA_DYE, "§d§lColor Studio",
+            "§7Click any color to receive square + triangle",
+            "§8" + ColorLibrary.ALL.size() + " named colors · /cb customcolor <hex> for custom"));
+
+        // Recent colors — slots 1-3, 5-7 (up to 6)
         java.util.List<String> recent = com.customblocks.core.PlayerPaletteManager.getRecent(player.getUuid());
-        for (int i = 0; i < recent.size() && i < 9; i++) {
-            inv.setStack(27 + i, ui(Items.FIREWORK_STAR, "§f#" + recent.get(i), "§7Recent color"));
+        int[] recentSlots = {1, 2, 3, 5, 6, 7};
+        for (int i = 0; i < recentSlots.length && i < recent.size(); i++) {
+            String hex = recent.get(i).toUpperCase(java.util.Locale.ROOT);
+            inv.setStack(recentSlots[i], ui(Items.FIREWORK_STAR, "§e#" + hex, "§7Recent color  §aClick to get tools"));
         }
+
+        // Named colors grid — slots 9-35 (27 colors) then 36-37 (remaining 2)
+        java.util.List<ColorLibrary.LibColor> colors = ColorLibrary.ALL;
+        for (int i = 0; i < colors.size() && i < 29; i++) {
+            ColorLibrary.LibColor c = colors.get(i);
+            inv.setStack(9 + i, ui(customColorDyeItem(c), "§f" + c.name(),
+                c.rgbLabel(), "§aClick to get square + triangle"));
+        }
+
+        inv.setStack(49, uiGlint(Items.BOOK, "§7Color Guide",
+            "§7/cb customcolor §f<hex> §7— instant custom hex",
+            "§7/cb palette §7— save your favorite colors"));
         return inv;
+    }
+
+    private static Item customColorDyeItem(ColorLibrary.LibColor c) {
+        return switch (c.name().toLowerCase(java.util.Locale.ROOT)) {
+            case "red", "crimson", "maroon" -> Items.RED_DYE;
+            case "orange", "coral", "peach" -> Items.ORANGE_DYE;
+            case "yellow", "gold", "butter" -> Items.YELLOW_DYE;
+            case "lime", "mint" -> Items.LIME_DYE;
+            case "green", "forest" -> Items.GREEN_DYE;
+            case "cyan" -> Items.CYAN_DYE;
+            case "blue", "navy", "baby blue", "indigo" -> Items.BLUE_DYE;
+            case "purple", "lavender" -> Items.PURPLE_DYE;
+            case "magenta" -> Items.MAGENTA_DYE;
+            case "pink", "rose" -> Items.PINK_DYE;
+            case "white" -> Items.WHITE_DYE;
+            case "light gray" -> Items.LIGHT_GRAY_DYE;
+            case "gray", "dark gray" -> Items.GRAY_DYE;
+            case "black" -> Items.BLACK_DYE;
+            case "brown" -> Items.BROWN_DYE;
+            default -> Items.PAPER;
+        };
     }
 
     private static SimpleInventory buildCacheDashboardGui(ServerPlayerEntity player, int tab) {
@@ -5673,7 +6248,31 @@ public class GuiManager {
     }
 
     private static void handleCustomColorStudioClick(ServerPlayerEntity player, GuiState state, int slot) {
-        handleSimpleBackOnly(player, slot);
+        if (slot == 0 || slot == 45 || slot == 49) { handleEscBack(player); return; }
+
+        // Recent colors in top row (slots 1-3, 5-7)
+        java.util.List<String> recent = com.customblocks.core.PlayerPaletteManager.getRecent(player.getUuid());
+        int[] recentSlots = {1, 2, 3, 5, 6, 7};
+        for (int i = 0; i < recentSlots.length && i < recent.size(); i++) {
+            if (slot == recentSlots[i]) {
+                com.customblocks.command.CustomBlockCommand.cmdGiveCustomColorToolsInternal(
+                    player.getCommandSource(), recent.get(i));
+                openCustomColorStudio(player, recent.get(i));
+                return;
+            }
+        }
+
+        // Named color grid — slots 9-37 (up to 29 colors)
+        if (slot >= 9 && slot <= 37) {
+            int idx = slot - 9;
+            java.util.List<ColorLibrary.LibColor> colors = ColorLibrary.ALL;
+            if (idx < colors.size()) {
+                ColorLibrary.LibColor c = colors.get(idx);
+                com.customblocks.command.CustomBlockCommand.cmdGiveCustomColorToolsInternal(
+                    player.getCommandSource(), c.hex());
+                openCustomColorStudio(player, c.hex().replace("#", ""));
+            }
+        }
     }
 
     private static void handleCacheDashboardClick(ServerPlayerEntity player, GuiState state, int slot) {
@@ -5702,7 +6301,7 @@ public class GuiManager {
         REOPENING_SCREENS.remove(player.getUuid());
     }
 
-    private static void openShortInputPrompt(ServerPlayerEntity player, PendingInput pending, String title, ItemStack promptItem, String initialText) {
+    public static void openShortInputPrompt(ServerPlayerEntity player, PendingInput pending, String title, ItemStack promptItem, String initialText) {
         PENDING.put(player.getUuid(), pending);
         AnvilPromptManager.open(player, Text.literal(title), promptItem, initialText);
     }
@@ -7599,10 +8198,10 @@ public class GuiManager {
             "§7Step 3: Preview then Apply"));
         inv.setStack(11, uiGlint(net.minecraft.item.Items.AMETHYST_CLUSTER, "§aColor: §f" + color, // Royal Directive
             "§7Click to cycle: green / yellow / black"));
-        inv.setStack(13, uiGlint(net.minecraft.item.Items.NETHER_STAR, "§bScope: §f" + scopeLabel, // Royal Directive
+        inv.setStack(13, uiGlint(net.minecraft.item.Items.NETHER_STAR, "§bFilter: §f" + scopeLabel, // Royal Directive V4-20
             "§7" + bulkRecolorScopeDescription(scopeKey),
-            "§8Click to cycle scope type"));
-        inv.setStack(15, uiGlint(net.minecraft.item.Items.NAME_TAG, "§dScope Value",
+            "§8Click to cycle filter type"));
+        inv.setStack(15, uiGlint(net.minecraft.item.Items.NAME_TAG, "§dFilter Value",
             "§7Current: §f" + (scopeValue == null || scopeValue.isBlank() ? "(none)" : scopeValue),
             "§8Click to edit value for category/query/ids/range"));
         inv.setStack(16, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§cExclude List", // Royal Directive
@@ -7618,7 +8217,7 @@ public class GuiManager {
             preview.sample().isEmpty() ? "§8No sample yet" : "§8Sample: " + String.join(", ", preview.sample())));
         inv.setStack(24, uiGlint(net.minecraft.item.Items.YELLOW_CONCRETE, "§e§lReview & Continue",
             "§7Open final confirmation screen",
-            "§7Scope: §f" + scopeLabel,
+            "§7Filter: §f" + scopeLabel,
             "§7Selected IDs: §f" + selectedCount));
         inv.setStack(45, uiGlint(net.minecraft.item.Items.ECHO_SHARD, "§c← Back")); // Royal Directive
 
@@ -7690,7 +8289,7 @@ public class GuiManager {
         if (slot == 15) {
             openShortInputPrompt(player,
                 new PendingInput(InputAction.BULK_RECOLOR_SCOPE, null, null, null, null, state.page()),
-                "§6Bulk Recolor Scope Value", new net.minecraft.item.ItemStack(net.minecraft.item.Items.NAME_TAG),
+                "§6Bulk Recolor Filter Value", new net.minecraft.item.ItemStack(net.minecraft.item.Items.NAME_TAG),
                 BULK_RECOLOR_SCOPE_VALUE.getOrDefault(uuid, ""));
             return;
         }

@@ -29,7 +29,7 @@ public final class DidYouMean {
         "dupe", "duplicate", "hexagon", "brush", "chisel",
         "showbrokenblocks", "givecategory", "givedisplayblock",
         "reid", "bulkcolor", "resume", "magicitems",
-        "listgui", "helpgui",
+        "listgui", "helpgui", "help",
     };
 
     private static final ConcurrentHashMap<UUID, String> LAST_SUGGESTED = new ConcurrentHashMap<>();

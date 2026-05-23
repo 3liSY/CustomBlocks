@@ -14,6 +14,7 @@ import com.customblocks.core.PlayerPaletteManager;
 import com.customblocks.core.SlotData;
 import com.customblocks.core.SlotManager;
 import com.customblocks.core.UndoManager;
+import com.customblocks.core.FirstUseHints;
 import com.customblocks.item.ColorTriangleItem;
 import com.customblocks.network.NetworkManager;
 import com.customblocks.command.PermissionHelper;
@@ -71,15 +72,47 @@ public class CustomBlockCommand {
         } catch (Exception e) { throw new RuntimeException(e); }
     }
 
+    // V4-36 — block suggestions include display name as hover tooltip
     private static final SuggestionProvider<ServerCommandSource> BLOCK_SUGGESTIONS =
-            (ctx, builder) -> { for (String id : SlotManager.allSlots().stream().map(d -> d.customId).collect(java.util.stream.Collectors.toList())) builder.suggest(id); return builder.buildFuture(); };
+            (ctx, builder) -> {
+                for (com.customblocks.core.SlotData d : SlotManager.allSlots()) {
+                    builder.suggest(d.customId, net.minecraft.text.Text.literal(d.displayName));
+                }
+                return builder.buildFuture();
+            };
 
     private static final String[] VALID_SOUNDS = {
         "stone","wood","grass","metal","glass","sand","wool",
         "gravel","snow","dirt","coral","bamboo","nether_brick","ice","honey","bone","slime"
     };
+    // V4-36 — sound suggestions include category description as tooltip
+    private static final java.util.Map<String, String> SOUND_DESCS = java.util.Map.ofEntries(
+        java.util.Map.entry("stone",       "Hard stone / cobblestone"),
+        java.util.Map.entry("wood",        "Wooden planks / logs"),
+        java.util.Map.entry("grass",       "Grass / leaves"),
+        java.util.Map.entry("metal",       "Iron / chain / anvil"),
+        java.util.Map.entry("glass",       "Glass blocks / panes"),
+        java.util.Map.entry("sand",        "Sand / gravel / soul sand"),
+        java.util.Map.entry("wool",        "Wool / carpet"),
+        java.util.Map.entry("gravel",      "Gravel"),
+        java.util.Map.entry("snow",        "Snow block / powder"),
+        java.util.Map.entry("dirt",        "Dirt / path"),
+        java.util.Map.entry("coral",       "Coral / wet materials"),
+        java.util.Map.entry("bamboo",      "Bamboo / scaffolding"),
+        java.util.Map.entry("nether_brick","Nether brick"),
+        java.util.Map.entry("ice",         "Ice / packed ice"),
+        java.util.Map.entry("honey",       "Honey block"),
+        java.util.Map.entry("bone",        "Bone block"),
+        java.util.Map.entry("slime",       "Slime block")
+    );
     private static final SuggestionProvider<ServerCommandSource> SOUND_SUGGESTIONS =
-            (ctx, builder) -> { for (String s : VALID_SOUNDS) builder.suggest(s); return builder.buildFuture(); };
+            (ctx, builder) -> {
+                for (String s : VALID_SOUNDS) {
+                    String desc = SOUND_DESCS.getOrDefault(s, s);
+                    builder.suggest(s, net.minecraft.text.Text.literal(desc));
+                }
+                return builder.buildFuture();
+            };
 
     private static final SuggestionProvider<ServerCommandSource> CATEGORY_SUGGESTIONS =
             (ctx, builder) -> { for (com.customblocks.core.Category cat : com.customblocks.core.CategoryManager.getAllCategories()) builder.suggest(cat.key()); return builder.buildFuture(); };
@@ -87,8 +120,29 @@ public class CustomBlockCommand {
     private static final SuggestionProvider<ServerCommandSource> FACE_SUGGESTIONS =
             (ctx, builder) -> { for (String f : SlotData.FACE_KEYS) builder.suggest(f); return builder.buildFuture(); };
 
+    private static final java.util.Map<String, String> SHAPE_DESCS = java.util.Map.ofEntries(
+        java.util.Map.entry("full",        "Full 1x1x1 cube"),
+        java.util.Map.entry("slab",        "Bottom half-slab"),
+        java.util.Map.entry("thin",        "Thin slab (1/8 height)"),
+        java.util.Map.entry("carpet",      "Carpet (1/16 height)"),
+        java.util.Map.entry("wall",        "Centered pillar"),
+        java.util.Map.entry("comparator",  "Small 3/4 cube"),
+        java.util.Map.entry("small",       "Small 1/2 cube centered"),
+        java.util.Map.entry("micro",       "Tiny centered cube"),
+        java.util.Map.entry("pane",        "Thin vertical pane"),
+        java.util.Map.entry("trapdoor",    "Trapdoor-style thin slab"),
+        java.util.Map.entry("fence",       "Fence-style post"),
+        java.util.Map.entry("stairs",      "Stair-shaped cutout"),
+        java.util.Map.entry("cross",       "Cross / X shape")
+    );
     private static final SuggestionProvider<ServerCommandSource> SHAPE_SUGGESTIONS =
-            (ctx, builder) -> { for (String k : SlotManager.SHAPE_PRESETS.keySet()) builder.suggest(k); return builder.buildFuture(); };
+            (ctx, builder) -> {
+                for (String k : SlotManager.SHAPE_PRESETS.keySet()) {
+                    String desc = SHAPE_DESCS.getOrDefault(k, k);
+                    builder.suggest(k, net.minecraft.text.Text.literal(desc));
+                }
+                return builder.buildFuture();
+            };
 
     private static final SuggestionProvider<ServerCommandSource> DRESS_OVERLAY_SUGGESTIONS =
             (ctx, builder) -> { for (String overlay : ColorVariantService.dressOverlays()) builder.suggest(overlay); return builder.buildFuture(); };
@@ -97,12 +151,12 @@ public class CustomBlockCommand {
             (ctx, builder) -> { builder.suggest("--preview"); builder.suggest("--apply"); return builder.buildFuture(); };
     private static final SuggestionProvider<ServerCommandSource> VOICE_MODE_SUGGESTIONS =
             (ctx, builder) -> {
-                builder.suggest("friendly");
-                builder.suggest("professional");
-                builder.suggest("royal");
-                builder.suggest("minimal");
-                builder.suggest("arabic");
-                builder.suggest("silly");
+                builder.suggest("friendly",      net.minecraft.text.Text.literal("Warm, encouraging tone"));
+                builder.suggest("professional",  net.minecraft.text.Text.literal("Formal, precise language"));
+                builder.suggest("royal",         net.minecraft.text.Text.literal("Regal, poetic style"));
+                builder.suggest("minimal",       net.minecraft.text.Text.literal("Short, no-frills responses"));
+                builder.suggest("arabic",        net.minecraft.text.Text.literal("Arabic language responses"));
+                builder.suggest("silly",         net.minecraft.text.Text.literal("Fun, playful humor"));
                 return builder.buildFuture();
             };
 
@@ -141,6 +195,17 @@ public class CustomBlockCommand {
                 // ── create / createurl ──────────────────────────────────────
                 .then(CommandManager.literal("create")
                     .requires(PermissionHelper::canCreate)
+                    // V4-09: no-args → prompt for ID (starts guided creation flow)
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p == null) return usage(ctx.getSource(), "create");
+                        GuiManager.openShortInputPrompt(p,
+                            new GuiManager.PendingInput(GuiManager.InputAction.CREATE_ID, null, null, null, null, 0),
+                            "§6New Block ID",
+                            new net.minecraft.item.ItemStack(net.minecraft.item.Items.COMMAND_BLOCK),
+                            "");
+                        return 1;
+                    })
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .executes(ctx -> usage(ctx.getSource(), "create"))
                         .then(CommandManager.argument("name", StringArgumentType.string())
@@ -353,6 +418,23 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("delete")
                     .requires(PermissionHelper::canDelete)
                     .executes(ctx -> usage(ctx.getSource(), "delete"))
+                    // V4-19: /cb delete # — delete block player is looking at
+                    .then(CommandManager.literal("#")
+                        .executes(ctx -> {
+                            ServerPlayerEntity p = ctx.getSource().getPlayer();
+                            if (p == null) { ChatHelper.error(ctx.getSource(), "Player only."); return 0; }
+                            net.minecraft.util.hit.HitResult hit = p.raycast(10.0, 0.0f, false);
+                            if (!(hit instanceof net.minecraft.util.hit.BlockHitResult bhr)) {
+                                ChatHelper.error(ctx.getSource(), "Not looking at a block."); return 0;
+                            }
+                            net.minecraft.block.BlockState bs = p.getWorld().getBlockState(bhr.getBlockPos());
+                            if (!(bs.getBlock() instanceof com.customblocks.block.SlotBlock sb)) {
+                                ChatHelper.error(ctx.getSource(), "Not a custom block."); return 0;
+                            }
+                            SlotData d = SlotManager.getBySlot(sb.getSlotKey());
+                            if (d == null) { ChatHelper.error(ctx.getSource(), "Not a custom block."); return 0; }
+                            return cmdDelete(ctx.getSource(), d.customId);
+                        }))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
                         .executes(ctx -> cmdDelete(ctx.getSource(), StringArgumentType.getString(ctx, "id")))))
@@ -360,7 +442,12 @@ public class CustomBlockCommand {
                 // ── bulkdelete ──────────────────────────────────────────────
                 .then(CommandManager.literal("bulkdelete")
                     .requires(PermissionHelper::canBulk)
-                    .executes(ctx -> usage(ctx.getSource(), "bulkdelete"))
+                    .executes(ctx -> {
+                        // V4-21: no-args opens bulk delete GUI
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) { GuiManager.openBulkDelete(p, 0); return 1; }
+                        return usage(ctx.getSource(), "bulkdelete");
+                    })
                     .then(CommandManager.argument("ids", StringArgumentType.greedyString())
                         .suggests(MULTI_BLOCK_SUGGESTIONS)
                         .executes(ctx -> cmdBulkDelete(ctx.getSource(),
@@ -496,6 +583,30 @@ public class CustomBlockCommand {
                                 StringArgumentType.getString(ctx, "id"),
                                 StringArgumentType.getString(ctx, "newid"))))))
 
+                // ── swapid ──────────────────────────────────────────────────
+                .then(CommandManager.literal("swapid")
+                    .requires(PermissionHelper::canEdit)
+                    .executes(ctx -> usage(ctx.getSource(), "swapid"))
+                    .then(CommandManager.argument("id1", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("id2", StringArgumentType.word())
+                            .suggests(BLOCK_SUGGESTIONS)
+                            .executes(ctx -> cmdSwapId(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "id1"),
+                                StringArgumentType.getString(ctx, "id2"))))))
+
+                // ── swapname ────────────────────────────────────────────────
+                .then(CommandManager.literal("swapname")
+                    .requires(PermissionHelper::canEdit)
+                    .executes(ctx -> usage(ctx.getSource(), "swapname"))
+                    .then(CommandManager.argument("id1", StringArgumentType.word())
+                        .suggests(BLOCK_SUGGESTIONS)
+                        .then(CommandManager.argument("id2", StringArgumentType.word())
+                            .suggests(BLOCK_SUGGESTIONS)
+                            .executes(ctx -> cmdSwapName(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "id1"),
+                                StringArgumentType.getString(ctx, "id2"))))))
+
                 // ── exportblock ─────────────────────────────────────────────
                 .then(CommandManager.literal("exportblock")
                     .requires(PermissionHelper::canAdmin)
@@ -546,7 +657,7 @@ public class CustomBlockCommand {
                         .suggests(BLOCK_SUGGESTIONS)
                         .executes(ctx -> usage(ctx.getSource(), "give"))
                         .executes(ctx -> cmdGive(ctx.getSource(), StringArgumentType.getString(ctx, "id"), 1, null))
-                        .then(CommandManager.argument("amount", IntegerArgumentType.integer(1, 64))
+                        .then(CommandManager.argument("amount", IntegerArgumentType.integer(1))
                             .executes(ctx -> cmdGive(ctx.getSource(), StringArgumentType.getString(ctx, "id"),
                                 IntegerArgumentType.getInteger(ctx, "amount"), null))
                             .then(CommandManager.argument("player", EntityArgumentType.players())
@@ -641,6 +752,21 @@ public class CustomBlockCommand {
                         return 1;
                     }))
 
+                // V4-18: /cb deletedblocks — browse trash
+                .then(CommandManager.literal("deletedblocks")
+                    .requires(PermissionHelper::canUse)
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) { GuiManager.openDeletedBlocksGui(p, 0); return 1; }
+                        // Console: list trash
+                        var trash = com.customblocks.core.TrashManager.list();
+                        if (trash.isEmpty()) { ChatHelper.info(ctx.getSource(), "§7Trash is empty."); return 1; }
+                        ChatHelper.info(ctx.getSource(), "§6Deleted blocks (" + trash.size() + "):");
+                        for (var e : trash)
+                            ChatHelper.info(ctx.getSource(), "  §f" + e.displayName() + " §8(§b" + e.originalId() + "§8) — deleted " + new java.util.Date(e.deletedAt()));
+                        return 1;
+                    }))
+
                 .then(CommandManager.literal("settabicon")
                     .requires(PermissionHelper::canEdit)
                     .executes(ctx -> {
@@ -657,7 +783,7 @@ public class CustomBlockCommand {
                     .requires(PermissionHelper::canEdit)
                     .executes(ctx -> usage(ctx.getSource(), "resize"))
                     .then(CommandManager.argument("id", StringArgumentType.word()).suggests(BLOCK_SUGGESTIONS)
-                        .executes(ctx -> usage(ctx.getSource(), "resize"))
+                        .executes(ctx -> cmdResizeInfo(ctx.getSource(), StringArgumentType.getString(ctx, "id")))
                         .then(CommandManager.argument("size", IntegerArgumentType.integer())
                             .executes(ctx -> cmdResizeSafe(ctx.getSource(),
                                 StringArgumentType.getString(ctx, "id"),
@@ -716,6 +842,33 @@ public class CustomBlockCommand {
                         com.customblocks.gui.GuiManager.openRecoverGui(p, 0);
                         return 1;
                     }))
+
+                // ── /cb snapshots (V4-43) ────────────────────────────────────
+                .then(CommandManager.literal("snapshots")
+                    .requires(PermissionHelper::canAdmin)
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) { GuiManager.openSnapshotsGui(p, 0); return 1; }
+                        // Console: list snapshots as text
+                        var list = com.customblocks.core.SnapshotManager.list();
+                        if (list.isEmpty()) { ChatHelper.info(ctx.getSource(), "§7No snapshots found."); return 1; }
+                        ChatHelper.info(ctx.getSource(), "§6§lSnapshots (" + list.size() + "):");
+                        for (var s : list) ChatHelper.info(ctx.getSource(), "  §f" + s.filename() + " §7— " + s.timestamp() + " §8(" + (s.sizeBytes()/1024) + " KB)");
+                        return 1;
+                    })
+                    .then(CommandManager.literal("save")
+                        .executes(ctx -> {
+                            com.customblocks.core.SnapshotManager.takeSnapshot("manual");
+                            ChatHelper.success(ctx.getSource(), "§aSnapshot saved (manual).");
+                            return 1;
+                        })
+                        .then(CommandManager.argument("name", StringArgumentType.word())
+                            .executes(ctx -> {
+                                String name = StringArgumentType.getString(ctx, "name").replaceAll("[^a-zA-Z0-9_\\-]", "_");
+                                com.customblocks.core.SnapshotManager.takeSnapshot("manual_" + name);
+                                ChatHelper.success(ctx.getSource(), "§aSnapshot saved: §fmanual_" + name);
+                                return 1;
+                            }))))
 
                 // (givesquare/givetriangle/giverectangle removed — use /cb square, /cb triangle, /cb rectangle)
 
@@ -783,14 +936,12 @@ public class CustomBlockCommand {
                     .executes(ctx -> cmdImportFolder(ctx.getSource())))
 
                 .then(CommandManager.literal("list")
-                    .executes(ctx -> cmdList(ctx.getSource())))
-
-                .then(CommandManager.literal("help")
-                    .executes(ctx -> cmdHelp(ctx.getSource(), 1))
-                    .then(CommandManager.literal("scopes")
-                        .executes(ctx -> cmdHelpScopes(ctx.getSource())))
-                    .then(CommandManager.argument("page", IntegerArgumentType.integer(1, 500))
-                        .executes(ctx -> cmdHelp(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "page")))))
+                    .executes(ctx -> cmdList(ctx.getSource()))
+                    .then(CommandManager.literal("export")
+                        .executes(ctx -> usage(ctx.getSource(), "list export <txt|csv|json>"))
+                        .then(CommandManager.argument("format", StringArgumentType.word())
+                            .executes(ctx -> cmdListExport(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "format").toLowerCase(java.util.Locale.ROOT))))))
 
                 // ── new graphical interfaces ─────────────────────────────────
                 .then(CommandManager.literal("listgui")
@@ -801,11 +952,28 @@ public class CustomBlockCommand {
                         return 1;
                     }))
 
+                // V4-49: helpgui renamed to /cb help (opens GUI); old chat-text help removed
+                .then(CommandManager.literal("help")
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) GuiManager.openHelpGui(p);
+                        else ChatHelper.error(ctx.getSource(), ChatHelper.formattedKey("cmd.console_player_only"));
+                        return 1;
+                    }))
                 .then(CommandManager.literal("helpgui")
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
                         if (p != null) GuiManager.openHelpGui(p);
                         else ChatHelper.error(ctx.getSource(), ChatHelper.formattedKey("cmd.console_player_only"));
+                        return 1;
+                    }))
+
+                // V4-50: /cb edithud — HUD layout editor (client-side; stub until client screen is built)
+                .then(CommandManager.literal("edithud")
+                    .requires(PermissionHelper::canUse)
+                    .executes(ctx -> {
+                        ChatHelper.info(ctx.getSource(), "§bHUD Editor: §7The Lunar-style HUD editor is coming in a future update.");
+                        ChatHelper.info(ctx.getSource(), "§7In the meantime, customize the HUD via §f/cb config §7→ HUD settings.");
                         return 1;
                     }))
 
@@ -842,6 +1010,18 @@ public class CustomBlockCommand {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
                         if (p != null) GuiManager.openMagicItemsGui(p);
                         else ChatHelper.error(ctx.getSource(), ChatHelper.formattedKey("cmd.console_player_only"));
+                        return 1;
+                    }))
+
+                // ── V4-24 editmagicitems ──────────────────────────────────────
+                .then(CommandManager.literal("editmagicitems")
+                    .requires(PermissionHelper::canUse)
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p == null) { ChatHelper.error(ctx.getSource(), ChatHelper.formattedKey("cmd.console_player_only")); return 0; }
+                        GuiManager.openMagicItemsGui(p);
+                        ChatHelper.info(ctx.getSource(), "§7Magic Items Editor: §fClick any item in the GUI to receive it.");
+                        ChatHelper.info(ctx.getSource(), "§7To rename your held magic item: §f/cb renameheld <new name>");
                         return 1;
                     }))
 
@@ -1007,7 +1187,12 @@ public class CustomBlockCommand {
 
                 .then(CommandManager.literal("square")
                     .requires(PermissionHelper::canGive)
-                    .executes(ctx -> usage(ctx.getSource(), "square"))
+                    // V4-15: no-args opens magic items GUI so player can pick a square
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) { GuiManager.openMagicItemsGui(p); return 1; }
+                        return usage(ctx.getSource(), "square");
+                    })
                     .then(CommandManager.argument("color", StringArgumentType.word())
                         .suggests((ctx, b) -> { b.suggest("black"); b.suggest("yellow"); b.suggest("green"); return b.buildFuture(); })
                         .executes(ctx -> cmdGiveSquare(ctx.getSource(),
@@ -1015,7 +1200,12 @@ public class CustomBlockCommand {
 
                 .then(CommandManager.literal("triangle")
                     .requires(PermissionHelper::canGive)
-                    .executes(ctx -> usage(ctx.getSource(), "triangle"))
+                    // V4-15: no-args opens magic items GUI so player can pick a triangle
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) { GuiManager.openMagicItemsGui(p); return 1; }
+                        return usage(ctx.getSource(), "triangle");
+                    })
                     .then(CommandManager.argument("color", StringArgumentType.word())
                         .suggests((ctx, b) -> { b.suggest("black"); b.suggest("yellow"); b.suggest("green"); return b.buildFuture(); })
                         .executes(ctx -> cmdGiveTriangle(ctx.getSource(),
@@ -1037,10 +1227,17 @@ public class CustomBlockCommand {
                     .requires(PermissionHelper::canGive)
                     .executes(ctx -> cmdGiveChiselInternal(ctx.getSource())))
 
-                .then(CommandManager.literal("diamondtriangle")
-                    .requires(PermissionHelper::canGive)
-                    .executes(ctx -> cmdGiveDiamondInternal(ctx.getSource())))
+                // V4-42: /cb bgstudio — opens Background Studio (replaces removed diamondtriangle)
+                .then(CommandManager.literal("bgstudio")
+                    .requires(PermissionHelper::canUse)
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p == null) { ChatHelper.error(ctx.getSource(), "Player only."); return 0; }
+                        GuiManager.openBgStudio(p);
+                        return 1;
+                    }))
 
+                // V4-49: diamondtriangle removed — use /cb triangle instead
                 .then(CommandManager.literal("customtriangle")
                     .requires(PermissionHelper::canGive)
                     .executes(ctx -> usage(ctx.getSource(), "customtriangle"))
@@ -1054,7 +1251,21 @@ public class CustomBlockCommand {
                     .executes(ctx -> usage(ctx.getSource(), "setface"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
-                        .executes(ctx -> usage(ctx.getSource(), "setface"))
+                        .executes(ctx -> {
+                            // V4-12: no face given — detect from crosshair, prompt for URL
+                            ServerPlayerEntity p = ctx.getSource().getPlayer();
+                            if (p == null) return usage(ctx.getSource(), "setface");
+                            String id = sanitize(StringArgumentType.getString(ctx, "id"));
+                            if (!SlotManager.hasId(id)) { ctx.getSource().sendMessage(notFound(id)); return 0; }
+                            String face = autoDetectFace(ctx.getSource());
+                            if (face == null) { ChatHelper.error(ctx.getSource(), "Look at a block face first, then run /cb setface <id>."); return 0; }
+                            GuiManager.openShortInputPrompt(p,
+                                new GuiManager.PendingInput(GuiManager.InputAction.SETFACE_URL, id, face, null, null, 0),
+                                "§6URL for " + face + " face of " + id,
+                                new net.minecraft.item.ItemStack(net.minecraft.item.Items.PAINTING),
+                                "");
+                            return 1;
+                        })
                         .then(CommandManager.argument("face", StringArgumentType.word()).suggests(FACE_SUGGESTIONS)
                             .executes(ctx -> usage(ctx.getSource(), "setface"))
                             .then(CommandManager.argument("size", IntegerArgumentType.integer(16, 256))
@@ -1084,7 +1295,13 @@ public class CustomBlockCommand {
                     .executes(ctx -> usage(ctx.getSource(), "clearface"))
                     .then(CommandManager.argument("id", StringArgumentType.word())
                         .suggests(BLOCK_SUGGESTIONS)
-                        .executes(ctx -> usage(ctx.getSource(), "clearface"))
+                        .executes(ctx -> {
+                            // V4-12: no face given — detect from crosshair
+                            String id = sanitize(StringArgumentType.getString(ctx, "id"));
+                            String face = autoDetectFace(ctx.getSource());
+                            if (face == null) { ChatHelper.error(ctx.getSource(), "Look at a block face first, then run /cb clearface <id>."); return 0; }
+                            return cmdClearFace(ctx.getSource(), id, face);
+                        })
                         .then(CommandManager.argument("face", StringArgumentType.word()).suggests(FACE_SUGGESTIONS)
                             .executes(ctx -> cmdClearFace(ctx.getSource(),
                                 StringArgumentType.getString(ctx, "id"),
@@ -1099,10 +1316,12 @@ public class CustomBlockCommand {
                         .executes(ctx -> cmdClearAllFaces(ctx.getSource(),
                             StringArgumentType.getString(ctx, "id")))))
 
-                // ── history (Phase H₁) ──────────────────────────────────────
+                // ── history (Phase H₁ / V4-17) ──────────────────────────────
                 .then(CommandManager.literal("history")
                     .requires(PermissionHelper::canAdmin)
                     .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) { GuiManager.openHistoryGui(p, 0); return 1; }
                         var entries = com.customblocks.core.HistoryTracker.latest(20);
                         if (entries.isEmpty()) {
                             ChatHelper.info(ctx.getSource(), "§7No mutations recorded this session.");
@@ -1409,6 +1628,15 @@ public class CustomBlockCommand {
                         .executes(ctx -> cmdToleranceSet(ctx.getSource(),
                             IntegerArgumentType.getInteger(ctx, "value")))));
 
+                // ── V4-29 trianglemode ─────────────────────────────────────────
+                tree.then(CommandManager.literal("trianglemode")
+                    .requires(PermissionHelper::canUse)
+                    .executes(ctx -> cmdTriangleModeShow(ctx.getSource()))
+                    .then(CommandManager.literal("edge")
+                        .executes(ctx -> cmdTriangleModeSet(ctx.getSource(), "edge")))
+                    .then(CommandManager.literal("full")
+                        .executes(ctx -> cmdTriangleModeSet(ctx.getSource(), "full"))));
+
                 // ── Phase 4.3 recent ───────────────────────────────────────────
                 tree.then(CommandManager.literal("recent")
                     .requires(PermissionHelper::canUse)
@@ -1561,13 +1789,29 @@ public class CustomBlockCommand {
                         return 1;
                     }));
 
-                // ── /cb historygui ────────────────────────────────────────────
+                // ── /cb historygui / undogui / redogui (V4-17) ───────────────
                 tree.then(CommandManager.literal("historygui")
                     .requires(PermissionHelper::canAdmin)
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
                         if (p == null) { ChatHelper.error(ctx.getSource(), "Player only."); return 0; }
                         com.customblocks.gui.GuiManager.openHistoryGui(p, 0);
+                        return 1;
+                    }));
+                tree.then(CommandManager.literal("undogui")
+                    .requires(PermissionHelper::canEdit)
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p == null) { ChatHelper.error(ctx.getSource(), "Player only."); return 0; }
+                        com.customblocks.gui.GuiManager.openUndoPicker(p, 0);
+                        return 1;
+                    }));
+                tree.then(CommandManager.literal("redogui")
+                    .requires(PermissionHelper::canEdit)
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p == null) { ChatHelper.error(ctx.getSource(), "Player only."); return 0; }
+                        com.customblocks.gui.GuiManager.openUndoPicker(p, 0);
                         return 1;
                     }));
 
@@ -1579,7 +1823,21 @@ public class CustomBlockCommand {
                         if (p == null) { ChatHelper.error(ctx.getSource(), "Player only."); return 0; }
                         com.customblocks.gui.GuiManager.openAiGui(p);
                         return 1;
-                    }));
+                    })
+                    .then(CommandManager.argument("command", com.mojang.brigadier.arguments.StringArgumentType.greedyString())
+                        .executes(ctx -> {
+                            String text = com.mojang.brigadier.arguments.StringArgumentType.getString(ctx, "command");
+                            ServerCommandSource src = ctx.getSource();
+                            ServerPlayerEntity p = src.getPlayer();
+                            com.customblocks.assistant.AiCommandParser.ParseResult r =
+                                com.customblocks.assistant.AiCommandParser.parse(text);
+                            if (r == null) {
+                                ChatHelper.info(src, "§7AI: I didn't understand that. Try: §f'list all blocks'§7, §f'delete blocks starting with X'§7, §f'set glow 5 on block X'§7.");
+                                return 0;
+                            }
+                            com.customblocks.assistant.AiCommandParser.execute(r, src, p != null ? p.getUuid() : null);
+                            return 1;
+                        })));
 
                 // ── /cb customcolor (Phase 11.2) ───────────────────────────────
                 tree.then(CommandManager.literal("customcolor")
@@ -1605,7 +1863,11 @@ public class CustomBlockCommand {
                 // ── /cb config (Phase 10.2) ────────────────────────────────────
                 tree.then(CommandManager.literal("config")
                     .requires(PermissionHelper::canConfig)
-                    .executes(ctx -> cmdConfigList(ctx.getSource()))
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) { GuiManager.openConfigWarningGui(p); return 1; }
+                        return cmdConfigList(ctx.getSource());
+                    })
                     .then(CommandManager.literal("max-slots")
                         .executes(ctx -> cmdConfigGet(ctx.getSource(), "max-slots", String.valueOf(com.customblocks.CustomBlocksConfig.maxSlots)))
                         .then(CommandManager.argument("value", IntegerArgumentType.integer(1, 100_000))
@@ -2080,6 +2342,7 @@ public class CustomBlockCommand {
             return 0;
         }
         SlotData d = SlotManager.getById(id);
+        com.customblocks.core.TrashManager.addToTrash(d); // V4-18: move to trash before removing
         UndoManager.pushUndoDeletion(id, d.deepCopy(), getPlayerUuid(src));
         SlotManager.remove(id);
         SlotManager.saveAll();
@@ -2092,6 +2355,8 @@ public class CustomBlockCommand {
         ServerPlayerEntity p = src.getPlayer();
         if (p != null) {
             com.customblocks.gui.ChatHelper.clickableUndo(p, id);
+            String _hDel = FirstUseHints.hint(p.getUuid(), "first_delete");
+            if (_hDel != null) p.sendMessage(Text.literal(_hDel), false);
         } else {
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.block_deleted", id));
         }
@@ -2110,6 +2375,7 @@ public class CustomBlockCommand {
             String id = sanitize(rawId);
             if (!SlotManager.hasId(id)) { notFound.add(id); continue; }
             SlotData d = SlotManager.getById(id);
+            com.customblocks.core.TrashManager.addToTrash(d); // V4-18
             UndoManager.pushUndoDeletion(id, d.deepCopy(), getPlayerUuid(src));
             SlotManager.remove(id);
             NetworkManager.broadcastUpdate(src.getServer(),
@@ -2287,6 +2553,8 @@ public class CustomBlockCommand {
                 ChatHelper.error(src, ChatHelper.formattedKey("cmd.import_no_slots"));
                 return 0;
             }
+            // V4-06: push undo so /cb undo can remove the imported block
+            UndoManager.pushUndoCreate(id, getPlayerUuid(src));
 
             int light = obj.has("light") ? obj.get("light").getAsInt() : 0;
             float hard = obj.has("hard") ? obj.get("hard").getAsFloat() : 1.5f;
@@ -2442,6 +2710,55 @@ public class CustomBlockCommand {
             new SlotUpdatePayload("add", updated.index, newId, updated.displayName, updated.texture,
                 updated.lightLevel, updated.hardness, updated.soundType, null, null, updated.animMeta));
         ChatHelper.success(src, ChatHelper.formattedKey("cmd.reid_done", oldId, newId));
+        return 1;
+    }
+
+    private static int cmdSwapId(ServerCommandSource src, String rawId1, String rawId2) {
+        String id1 = sanitize(rawId1);
+        String id2 = sanitize(rawId2);
+        if (!SlotManager.hasId(id1)) { src.sendMessage(notFound(id1)); return 0; }
+        if (!SlotManager.hasId(id2)) { src.sendMessage(notFound(id2)); return 0; }
+        if (id1.equals(id2)) { ChatHelper.error(src, "The two IDs are the same."); return 0; }
+        SlotData d1 = SlotManager.getById(id1);
+        SlotData d2 = SlotManager.getById(id2);
+        UndoManager.pushUndoMutation(id1, d1, "swapid", getPlayerUuid(src));
+        UndoManager.pushUndoMutation(id2, d2, "swapid", getPlayerUuid(src));
+        // Swap IDs: rename id1 to a temp, id2 to id1, temp to id2
+        String tmp = "__swaptmp_" + System.nanoTime();
+        SlotManager.reId(id1, tmp);
+        SlotManager.reId(id2, id1);
+        SlotManager.reId(tmp, id2);
+        SlotManager.saveAll();
+        MinecraftServer server = src.getServer();
+        SlotData u1 = SlotManager.getById(id2);
+        SlotData u2 = SlotManager.getById(id1);
+        if (u1 != null) NetworkManager.broadcastUpdate(server,
+            new SlotUpdatePayload("add", u1.index, id2, u1.displayName, u1.texture, u1.lightLevel, u1.hardness, u1.soundType, null, null, u1.animMeta));
+        if (u2 != null) NetworkManager.broadcastUpdate(server,
+            new SlotUpdatePayload("add", u2.index, id1, u2.displayName, u2.texture, u2.lightLevel, u2.hardness, u2.soundType, null, null, u2.animMeta));
+        ChatHelper.success(src, "§aSwapped IDs: §f" + id1 + " §7↔ §f" + id2);
+        return 1;
+    }
+
+    private static int cmdSwapName(ServerCommandSource src, String rawId1, String rawId2) {
+        String id1 = sanitize(rawId1);
+        String id2 = sanitize(rawId2);
+        if (!SlotManager.hasId(id1)) { src.sendMessage(notFound(id1)); return 0; }
+        if (!SlotManager.hasId(id2)) { src.sendMessage(notFound(id2)); return 0; }
+        if (id1.equals(id2)) { ChatHelper.error(src, "The two IDs are the same."); return 0; }
+        SlotData d1 = SlotManager.getById(id1);
+        SlotData d2 = SlotManager.getById(id2);
+        UndoManager.pushUndoMutation(id1, d1, "swapname", getPlayerUuid(src));
+        UndoManager.pushUndoMutation(id2, d2, "swapname", getPlayerUuid(src));
+        String name1 = d1.displayName;
+        String name2 = d2.displayName;
+        SlotManager.rename(id1, name2);
+        SlotManager.rename(id2, name1);
+        SlotManager.saveAll();
+        MinecraftServer server = src.getServer();
+        NetworkManager.broadcastUpdate(server, new SlotUpdatePayload("rename", d1.index, id1, name2, null, 0, 0, "stone"));
+        NetworkManager.broadcastUpdate(server, new SlotUpdatePayload("rename", d2.index, id2, name1, null, 0, 0, "stone"));
+        ChatHelper.success(src, "§aSwapped names: §f" + id1 + " §7↔ §f" + id2);
         return 1;
     }
 
@@ -2624,6 +2941,7 @@ public class CustomBlockCommand {
                                 d.lightLevel, d.hardness, d.soundType, null, null, fa));
                     ChatHelper.success(src, ChatHelper.formattedKey("cmd.texture_updated", id));
                     com.customblocks.core.HistoryTracker.record(getPlayerUuid(src), getPlayerName(src), "retextured", id);
+                    { ServerPlayerEntity _rp = src.getPlayer(); if (_rp != null) { String _h = FirstUseHints.hint(_rp.getUuid(), "first_retexture"); if (_h != null) _rp.sendMessage(Text.literal(_h), false); } }
                 });
             } catch (Exception e) {
                 server.execute(() -> {
@@ -2658,7 +2976,7 @@ public class CustomBlockCommand {
             GuiManager.logError();
             return 0; 
         }
-        ItemStack stack = new ItemStack(item, Math.max(1, Math.min(64, amount)));
+        ItemStack stack = new ItemStack(item, Math.max(1, amount)); // V4-14: no upper cap — operators trusted
         if (targets == null || targets.isEmpty()) {
             try {
                 ServerPlayerEntity self = src.getPlayerOrThrow();
@@ -2683,13 +3001,13 @@ public class CustomBlockCommand {
         if (raw.isEmpty()) return usage(src, "give");
         try {
             int amount = Integer.parseInt(raw);
-            if (amount < 1 || amount > 64) {
-                ChatHelper.error(src, "Give amount must be between 1 and 64.");
+            if (amount < 1) {
+                ChatHelper.error(src, "Give amount must be at least 1.");
                 return 0;
             }
             return cmdGive(src, id, amount, null);
         } catch (NumberFormatException ex) {
-            ChatHelper.error(src, "Invalid give amount '" + raw + "'. Use 1-64 or provide a valid target player.");
+            ChatHelper.error(src, "Invalid give amount '" + raw + "'. Provide a positive integer.");
             return 0;
         }
     }
@@ -2797,8 +3115,39 @@ public class CustomBlockCommand {
         NetworkManager.broadcastUpdate(src.getServer(),
             new SlotUpdatePayload("setprop", d.index, id, null, null, level, d.hardness, d.soundType));
         triggerGlowUpdate(src.getServer(), d.index);
-        ChatHelper.success(src, ChatHelper.formattedKey("cmd.light_set", id, level));
+        // V4-07: warn if no instance of this block is within 32 blocks of any online player
+        boolean nearPlayer = isBlockNearAnyPlayer(src.getServer(), d.index, 32);
+        ChatHelper.success(src, ChatHelper.formattedKey("cmd.light_set", id, level)
+            + (nearPlayer ? "" : " §7Block is far from all players — lighting will update when a player gets close."));
         return 1;
+    }
+
+    /** V4-07 — returns true if any placed instance of slotIndex is within maxDist blocks of any online player. */
+    private static boolean isBlockNearAnyPlayer(MinecraftServer server, int slotIndex, int maxDist) {
+        String slotKey = "slot_" + slotIndex;
+        int maxDistSq = maxDist * maxDist;
+        int chunkRadius = (maxDist >> 4) + 1;
+        for (net.minecraft.server.world.ServerWorld world : server.getWorlds()) {
+            for (net.minecraft.server.network.ServerPlayerEntity p : world.getPlayers()) {
+                int cx = p.getChunkPos().x;
+                int cz = p.getChunkPos().z;
+                for (int dx = -chunkRadius; dx <= chunkRadius; dx++) {
+                    for (int dz = -chunkRadius; dz <= chunkRadius; dz++) {
+                        net.minecraft.world.chunk.WorldChunk chunk = world.getChunkManager().getWorldChunk(cx + dx, cz + dz);
+                        if (chunk == null) continue;
+                        for (net.minecraft.util.math.BlockPos pos : chunk.getBlockEntityPositions()) {
+                            net.minecraft.block.BlockState st = chunk.getBlockState(pos);
+                            if (st.getBlock() instanceof com.customblocks.block.SlotBlock sb
+                                    && sb.getSlotKey().equals(slotKey)
+                                    && p.getBlockPos().getSquaredDistance(pos) <= maxDistSq) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     /** Wrapper that validates the level range and gives a friendly message. */
@@ -2869,15 +3218,28 @@ public class CustomBlockCommand {
     }
 
     private static int cmdSetTabIcon(ServerCommandSource src, String url) {
+        // V4-08: fail fast if slot would be needed but none are free
+        if (!SlotManager.hasId("tab_icon") && SlotManager.freeSlots() <= 0) {
+            ChatHelper.error(src, "All block slots are full. Free a slot before setting a tab icon.");
+            return 0;
+        }
         ChatHelper.info(src, ChatHelper.formattedKey("cmd.downloading_tab_icon"));
         MinecraftServer server = src.getServer();
         thread(() -> {
             try {
                 byte[] bytes = ImageProcessor.downloadAndProcess(url).bytes();
                 server.execute(() -> {
+                    // V4-06: push undo before modifying tab_icon
+                    SlotData oldTabIcon = SlotManager.getById("tab_icon");
+                    UUID actorUuid = getPlayerUuid(src);
+                    if (oldTabIcon != null) UndoManager.pushUndoMutation("tab_icon", oldTabIcon, "settabicon", actorUuid);
                     SlotManager.setTabIconTexture(bytes);
-                    if (!SlotManager.hasId("tab_icon")) SlotManager.assign("tab_icon", "Tab Icon", bytes);
-                    else SlotManager.updateTexture("tab_icon", bytes);
+                    if (!SlotManager.hasId("tab_icon")) {
+                        SlotManager.assign("tab_icon", "Tab Icon", bytes);
+                        UndoManager.pushUndoCreate("tab_icon", actorUuid);
+                    } else {
+                        SlotManager.updateTexture("tab_icon", bytes);
+                    }
                     SlotManager.saveAll();
                     SlotData d = SlotManager.getById("tab_icon");
                     if (d != null)
@@ -3022,6 +3384,7 @@ public class CustomBlockCommand {
                 UndoManager.undoSize(getPlayerUuid(src))));
             if (UndoManager.undoSize(getPlayerUuid(src)) > 0)
                 ChatHelper.info(src, ChatHelper.formattedKey("cmd.undo_next_hint", UndoManager.peekUndoDescription(getPlayerUuid(src))));
+            { ServerPlayerEntity _up = src.getPlayer(); if (_up != null) { String _h = FirstUseHints.hint(_up.getUuid(), "first_undo"); if (_h != null) _up.sendMessage(Text.literal(_h), false); } }
             return 1;
         }
 
@@ -3073,6 +3436,7 @@ public class CustomBlockCommand {
             UndoManager.undoSize(getPlayerUuid(src)), UndoManager.redoSize(getPlayerUuid(src))));
         if (UndoManager.undoSize(getPlayerUuid(src)) > 0)
             ChatHelper.info(src, ChatHelper.formattedKey("cmd.undo_next_hint", UndoManager.peekUndoDescription(getPlayerUuid(src))));
+        { ServerPlayerEntity _up = src.getPlayer(); if (_up != null) { String _h = FirstUseHints.hint(_up.getUuid(), "first_undo"); if (_h != null) _up.sendMessage(Text.literal(_h), false); } }
         return 1;
     }
 
@@ -3261,6 +3625,24 @@ public class CustomBlockCommand {
                 d.texture != null ? d.texture.clone() : null,
                 d.lightLevel, d.hardness, d.soundType, facesCopy, d.animMeta,
                 d.shapeBoxes != null ? new java.util.ArrayList<>(d.shapeBoxes) : null, d.noCollision);
+    }
+
+    /** V4-11 — show current texture size and available options when no size is given. */
+    private static int cmdResizeInfo(ServerCommandSource src, String id) {
+        if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
+        SlotData d = SlotManager.getById(id);
+        String sizeStr = "no texture";
+        if (d.texture != null && d.texture.length >= 24) {
+            int w = ((d.texture[16] & 0xFF) << 24) | ((d.texture[17] & 0xFF) << 16)
+                  | ((d.texture[18] & 0xFF) << 8)  |  (d.texture[19] & 0xFF);
+            sizeStr = w + "px";
+        }
+        src.sendMessage(net.minecraft.text.Text.literal(
+            "§eResize §8— §f" + d.displayName + "\n"
+          + "§7Current size: §f" + sizeStr + "\n"
+          + "§7Available: §f16, 32, 64, 128, 256\n"
+          + "§7Usage: §f/cb resize " + id + " <size>"));
+        return 1;
     }
 
     /** Wrapper validating size range with branded message. */
@@ -3461,44 +3843,105 @@ public class CustomBlockCommand {
     }
 
     private static int cmdList(ServerCommandSource src) {
-        final String D = "§8§m                                              §r";
+        // V4-48: compact summary + export buttons
         int used = SlotManager.usedSlots(), free = SlotManager.freeSlots();
-        src.sendMessage(Text.literal(" "));
-        ChatHelper.info(src, ChatHelper.formattedKey("cmd.list_stats", used, free));
-        src.sendMessage(Text.literal(D));
-        if (used == 0) {
-            src.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.list_empty_hint")));
-            src.sendMessage(Text.literal(D));
-            src.sendMessage(Text.literal(" "));
-            return 1;
-        }
+        int broken = SlotManager.brokenBlocks().size();
+        String brokenStr = broken > 0 ? " §c· " + broken + " broken§r" : "";
 
-        try {
-            ServerPlayerEntity p = src.getPlayerOrThrow();
-            p.sendMessage(ChatHelper.rawPrefixed("").append(Text.literal("  " + ChatHelper.formattedKey("cmd.listgui_hint")).styled(s -> s.withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.RUN_COMMAND, "/cb listgui")).withFormatting(net.minecraft.util.Formatting.UNDERLINE))), false);
-            p.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.list_breakdown_hint")));
-        } catch(Exception e) {
-            CustomBlocksMod.LOGGER.debug("[CB] cmdList: not a player ({}), skipping GUI hint", e.getMessage());
-        }
+        src.sendMessage(Text.literal("§b§lCustomBlocks: §f" + used + " §7blocks · §f" + free + " §7slots free" + brokenStr));
 
+        // Export buttons — only shown to players; console gets text message instead
+        ServerPlayerEntity p = src.getPlayer();
+        if (p != null) {
+            net.minecraft.text.MutableText exportLine = Text.literal("§7Export: ");
+            exportLine.append(Text.literal("[TXT]").styled(s -> s
+                .withColor(net.minecraft.util.Formatting.GREEN)
+                .withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.RUN_COMMAND, "/cb list export txt"))
+                .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, Text.literal("Write block-list.txt")))));
+            exportLine.append(Text.literal(" "));
+            exportLine.append(Text.literal("[CSV]").styled(s -> s
+                .withColor(net.minecraft.util.Formatting.YELLOW)
+                .withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.RUN_COMMAND, "/cb list export csv"))
+                .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, Text.literal("Write block-list.csv")))));
+            exportLine.append(Text.literal(" "));
+            exportLine.append(Text.literal("[JSON]").styled(s -> s
+                .withColor(net.minecraft.util.Formatting.AQUA)
+                .withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.RUN_COMMAND, "/cb list export json"))
+                .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, Text.literal("Write block-list.json")))));
+            p.sendMessage(exportLine, false);
+        } else {
+            src.sendMessage(Text.literal("§7Use /cb list export txt|csv|json to export the block list."));
+        }
+        return 1;
+    }
+
+    private static int cmdListExport(ServerCommandSource src, String format) {
         java.util.List<SlotData> sorted = new java.util.ArrayList<>(SlotManager.allSlots());
         sorted.removeIf(d -> "tab_icon".equals(d.customId));
         sorted.sort(java.util.Comparator.comparingInt(d -> d.index));
-        for (SlotData d : sorted) {
-            StringBuilder line = new StringBuilder();
-            line.append("  §f").append(String.format("%-20s", d.customId))
-                .append(" §7→ §e").append(d.displayName)
-                .append(" §8(#").append(d.index).append(")");
-            if (d.lightLevel > 0) line.append("  §6✦").append(d.lightLevel);
-            if (d.hardness < 0)   line.append("  §c∞");
-            if (d.isAnimated())   line.append("  §b⟳GIF");
-            if (d.hasFaces())     line.append("  §d⬡faces");
-            if (!d.soundType.equals("stone")) line.append("  §7[").append(d.soundType).append("]");
-            src.sendMessage(Text.literal(line.toString()));
+        java.nio.file.Path exportDir = java.nio.file.Path.of("config", "customblocks");
+        try {
+            java.nio.file.Files.createDirectories(exportDir);
+        } catch (Exception e) {
+            ChatHelper.error(src, "Could not create export directory: " + e.getMessage()); return 0;
         }
-        src.sendMessage(Text.literal(D));
-        src.sendMessage(Text.literal(" "));
+        try {
+            switch (format) {
+                case "txt" -> {
+                    java.nio.file.Path out = exportDir.resolve("block-list.txt");
+                    StringBuilder sb = new StringBuilder();
+                    for (SlotData d : sorted) sb.append(d.customId).append("  ").append(d.displayName).append("\n");
+                    java.nio.file.Files.writeString(out, sb.toString(), java.nio.charset.StandardCharsets.UTF_8);
+                    ChatHelper.success(src, "§aExported §f" + sorted.size() + " §ablocks to §fconfig/customblocks/block-list.txt");
+                }
+                case "csv" -> {
+                    java.nio.file.Path out = exportDir.resolve("block-list.csv");
+                    StringBuilder sb = new StringBuilder("id,name,light,hardness,sound,collision\n");
+                    for (SlotData d : sorted)
+                        sb.append(csvEscape(d.customId)).append(",")
+                          .append(csvEscape(d.displayName)).append(",")
+                          .append(d.lightLevel).append(",")
+                          .append(d.hardness).append(",")
+                          .append(csvEscape(d.soundType)).append(",")
+                          .append(d.noCollision ? "false" : "true").append("\n");
+                    java.nio.file.Files.writeString(out, sb.toString(), java.nio.charset.StandardCharsets.UTF_8);
+                    ChatHelper.success(src, "§aExported §f" + sorted.size() + " §ablocks to §fconfig/customblocks/block-list.csv");
+                }
+                case "json" -> {
+                    java.nio.file.Path out = exportDir.resolve("block-list.json");
+                    StringBuilder sb = new StringBuilder("[\n");
+                    for (int i = 0; i < sorted.size(); i++) {
+                        SlotData d = sorted.get(i);
+                        sb.append("  {\"id\":\"").append(jsonEscape(d.customId)).append("\",")
+                          .append("\"name\":\"").append(jsonEscape(d.displayName)).append("\",")
+                          .append("\"light\":").append(d.lightLevel).append(",")
+                          .append("\"hardness\":").append(d.hardness).append(",")
+                          .append("\"sound\":\"").append(jsonEscape(d.soundType)).append("\",")
+                          .append("\"collision\":").append(!d.noCollision).append("}");
+                        if (i < sorted.size() - 1) sb.append(",");
+                        sb.append("\n");
+                    }
+                    sb.append("]");
+                    java.nio.file.Files.writeString(out, sb.toString(), java.nio.charset.StandardCharsets.UTF_8);
+                    ChatHelper.success(src, "§aExported §f" + sorted.size() + " §ablocks to §fconfig/customblocks/block-list.json");
+                }
+                default -> { ChatHelper.error(src, "Unknown format: " + format + ". Use txt, csv, or json."); return 0; }
+            }
+        } catch (Exception e) {
+            ChatHelper.error(src, "Export failed: " + e.getMessage()); return 0;
+        }
         return 1;
+    }
+
+    private static String csvEscape(String s) {
+        if (s == null) return "";
+        if (s.contains(",") || s.contains("\"") || s.contains("\n")) return "\"" + s.replace("\"", "\"\"") + "\"";
+        return s;
+    }
+
+    private static String jsonEscape(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
     }
 
     private static final int HELP_PAGE_SIZE = 10;
@@ -3608,6 +4051,16 @@ public class CustomBlockCommand {
 
 
 
+    /** V4-28 — Add lore lines to an item stack before giving it. */
+    private static ItemStack withToolLore(net.minecraft.item.Item item, String... loreLines) {
+        ItemStack stack = new ItemStack(item, 1);
+        java.util.List<net.minecraft.text.Text> ll = new java.util.ArrayList<>();
+        for (String line : loreLines)
+            ll.add(net.minecraft.text.Text.literal(line).styled(s -> s.withItalic(false)));
+        stack.set(net.minecraft.component.DataComponentTypes.LORE, new net.minecraft.component.type.LoreComponent(ll));
+        return stack;
+    }
+
     public static int cmdGiveSquareInternal(ServerCommandSource src, String color) {
         String c = color.toLowerCase().trim();
         if (!c.equals("black") && !c.equals("yellow") && !c.equals("green")) {
@@ -3617,9 +4070,12 @@ public class CustomBlockCommand {
         net.minecraft.item.Item item = net.minecraft.registry.Registries.ITEM.get(id);
         if (item == null || item == net.minecraft.item.Items.AIR) { ChatHelper.error(src, ChatHelper.formattedKey("cmd.give_square_not_found")); return 0; }
         try {
-            src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(item, 1));
+            src.getPlayerOrThrow().getInventory().insertStack(withToolLore(item,
+                "§7Right-click a placed custom block to §eswap§7 it to the matching color variant.",
+                "§8Use §f/cb square <color>§8 for black, yellow, or green."));
             String disp = Character.toUpperCase(c.charAt(0)) + c.substring(1);
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.give_square_done", disp));
+            { ServerPlayerEntity _sp = src.getPlayer(); if (_sp != null) { String _h = FirstUseHints.hint(_sp.getUuid(), "hold_square"); if (_h != null) _sp.sendMessage(Text.literal(_h), false); } }
         } catch (Exception ex) { ex.printStackTrace(); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
         return 1;
     }
@@ -3633,9 +4089,14 @@ public class CustomBlockCommand {
         net.minecraft.item.Item item = net.minecraft.registry.Registries.ITEM.get(id);
         if (item == null || item == net.minecraft.item.Items.AIR) { ChatHelper.error(src, ChatHelper.formattedKey("cmd.give_triangle_not_found")); return 0; }
         try {
-            src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(item, 1));
+            src.getPlayerOrThrow().getInventory().insertStack(withToolLore(item,
+                "§7Right-click a placed custom block: §eremove its background color",
+                "§7Mode: Edge fill (perimeter) or Full fill (everywhere)",
+                "§7Switch mode: §f/cb trianglemode edge §7or §f/cb trianglemode full",
+                "§7Adjust sensitivity: §f/cb tolerance <10-80>"));
             String disp = Character.toUpperCase(c.charAt(0)) + c.substring(1);
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.give_triangle_done", disp));
+            { ServerPlayerEntity _tp = src.getPlayer(); if (_tp != null) { String _h = FirstUseHints.hint(_tp.getUuid(), "hold_triangle"); if (_h != null) _tp.sendMessage(Text.literal(_h), false); } }
         } catch (Exception ex) { ex.printStackTrace(); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
         return 1;
     }
@@ -3647,7 +4108,9 @@ public class CustomBlockCommand {
             ChatHelper.error(src, ChatHelper.formattedKey("cmd.give_rainbow_rectangle_not_found")); return 0;
         }
         try {
-            src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(rectItem, 1));
+            src.getPlayerOrThrow().getInventory().insertStack(withToolLore(rectItem,
+                "§7Right-click two corners of a flat surface to §efill it§7 with custom blocks.",
+                "§8Left-click to clear placed blocks. Works on any flat face."));
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.give_rainbow_rectangle_done"));
         } catch (Exception ex) { ex.printStackTrace(); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
         return 1;
@@ -3658,7 +4121,11 @@ public class CustomBlockCommand {
         net.minecraft.item.Item item = net.minecraft.registry.Registries.ITEM.get(id);
         if (item == null || item == net.minecraft.item.Items.AIR) { ChatHelper.error(src, ChatHelper.formattedKey("cmd.give_golden_hexagon_not_found")); return 0; }
         try {
-            src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(item, 1));
+            src.getPlayerOrThrow().getInventory().insertStack(withToolLore(item,
+                "§7Right-click a block face: §erotate 90° CW",
+                "§7Sneak + right-click: §erotate 90° CCW",
+                "§7Air-click: §etoggle Single-Face / All-Faces mode",
+                "§8Auto-detects which face you're aiming at."));
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.give_golden_hexagon_done"));
         } catch (Exception ex) { ex.printStackTrace(); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
         return 1;
@@ -3669,7 +4136,11 @@ public class CustomBlockCommand {
         net.minecraft.item.Item item = net.minecraft.registry.Registries.ITEM.get(id);
         if (item == null || item == net.minecraft.item.Items.AIR) { ChatHelper.error(src, ChatHelper.formattedKey("cmd.give_lumina_brush_not_found")); return 0; }
         try {
-            src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(item, 1));
+            src.getPlayerOrThrow().getInventory().insertStack(withToolLore(item,
+                "§7Right-click block: §eopen Properties editor §7(light, hardness, sound)",
+                "§7Sneak + right-click: §ecopy properties to clipboard",
+                "§7Right-click with clipboard: §epaste all properties onto block",
+                "§7Air-click: §eopen block picker"));
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.give_lumina_brush_done"));
         } catch (Exception ex) { ex.printStackTrace(); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
         return 1;
@@ -3680,7 +4151,11 @@ public class CustomBlockCommand {
         net.minecraft.item.Item item = net.minecraft.registry.Registries.ITEM.get(id);
         if (item == null || item == net.minecraft.item.Items.AIR) { ChatHelper.error(src, ChatHelper.formattedKey("cmd.give_amethyst_chisel_not_found")); return 0; }
         try {
-            src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(item, 1));
+            src.getPlayerOrThrow().getInventory().insertStack(withToolLore(item,
+                "§7Right-click block: §eopen Shape Editor §7(hitbox, presets, multi-box)",
+                "§7Sneak + right-click: §ecopy block's hitbox to clipboard",
+                "§7Right-click with clipboard: §epaste hitbox onto block",
+                "§7Air-click: §eopen block picker"));
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.give_amethyst_chisel_done"));
         } catch (Exception ex) { ex.printStackTrace(); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
         return 1;
@@ -4147,11 +4622,16 @@ public class CustomBlockCommand {
     private static int cmdGui(ServerCommandSource src) {
         try {
             ServerPlayerEntity player = src.getPlayerOrThrow();
-            GuiManager.openFeatureMenu(player, 0);
-        } catch (Exception ex) { 
-            ex.printStackTrace(); 
+            // V4-30: first-time players see the welcome/onboarding screen
+            if (!com.customblocks.core.OnboardingManager.hasSeenWelcome(player.getUuid())) {
+                GuiManager.openWelcomeGui(player);
+            } else {
+                GuiManager.openFeatureMenu(player, 0);
+            }
+        } catch (Exception ex) {
+            ex.printStackTrace();
             com.customblocks.gui.GuiManager.logError();
-            ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); 
+            ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage()));
         }
         return 1;
     }
@@ -4727,6 +5207,24 @@ public class CustomBlockCommand {
     private static java.util.UUID getPlayerUuid(net.minecraft.server.command.ServerCommandSource src) {
         var p = src.getPlayer();
         return p != null ? p.getUuid() : null;
+    }
+
+    /** V4-12: Raycast from player crosshair to auto-detect which face they're looking at. Returns null if not aimed at a block. */
+    private static String autoDetectFace(ServerCommandSource src) {
+        ServerPlayerEntity p = src.getPlayer();
+        if (p == null) return null;
+        net.minecraft.util.hit.HitResult hit = p.raycast(5.0, 0.0f, false);
+        if (hit instanceof net.minecraft.util.hit.BlockHitResult bhr) {
+            return switch (bhr.getSide()) {
+                case UP    -> "top";
+                case DOWN  -> "bottom";
+                case NORTH -> "north";
+                case SOUTH -> "south";
+                case EAST  -> "east";
+                case WEST  -> "west";
+            };
+        }
+        return null;
     }
 
     private static String getPlayerName(net.minecraft.server.command.ServerCommandSource src) {
@@ -5366,6 +5864,30 @@ public class CustomBlockCommand {
         ColorTriangleItem.PLAYER_TOLERANCE.remove(player.getUuid());
         int def = ColorTriangleItem.effectiveTolerance(player.getUuid());
         ChatHelper.success(src, "§aTolerance reset to default (§f" + def + "§a).");
+        return 1;
+    }
+
+    // ── V4-29 Triangle mode command implementations ─────────────────────────
+
+    private static int cmdTriangleModeShow(ServerCommandSource src) {
+        ServerPlayerEntity player = src.getPlayer();
+        if (player == null) { ChatHelper.error(src, ChatHelper.formattedKey("cmd.console_player_only")); return 0; }
+        String mode = com.customblocks.item.ColorTriangleItem.effectiveMode(player.getUuid());
+        boolean overridden = com.customblocks.item.ColorTriangleItem.PLAYER_MODE.containsKey(player.getUuid());
+        String desc = "edge".equals(mode)
+            ? "§7Seeds from entire image perimeter — safest for most textures."
+            : "§7Replaces matching pixels everywhere, including interior regions.";
+        ChatHelper.info(src, "§7Triangle fill mode: §f" + mode + (overridden ? " §8(custom)" : " §8(default)")
+            + "\n" + desc + "\n§7Switch: §f/cb trianglemode edge §7or §f/cb trianglemode full");
+        return 1;
+    }
+
+    private static int cmdTriangleModeSet(ServerCommandSource src, String mode) {
+        ServerPlayerEntity player = src.getPlayer();
+        if (player == null) { ChatHelper.error(src, ChatHelper.formattedKey("cmd.console_player_only")); return 0; }
+        com.customblocks.item.ColorTriangleItem.PLAYER_MODE.put(player.getUuid(), mode);
+        String desc = "edge".equals(mode) ? "Smart perimeter fill" : "Full image fill";
+        ChatHelper.success(src, "§aTriangle fill mode set to §f" + mode + " §7(" + desc + ")§a.");
         return 1;
     }
 

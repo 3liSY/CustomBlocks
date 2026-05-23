@@ -20,6 +20,8 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
+import net.minecraft.util.Hand;
+import net.minecraft.util.TypedActionResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
@@ -30,18 +32,23 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Golden Hexagon — UV face manipulation wand.
  *
- * Right-click a Custom Block face to cycle rotation (0 → 90 → 180 → 270).
- * Sneak + right-click to flip the face texture horizontally.
- *
- * Works on per-face textures AND the main block texture (applied to the
- * clicked face). Creates a face override automatically if one doesn't exist.
+ * Right-click a face → rotate 90° CW (or CCW if sneak is held).
+ * Air-click → toggle single-face / all-faces mode.
+ * Holds per-player rotation state counter and shows hotbar message while selected.
  */
 public class GoldenHexagonItem extends Item {
+
+    /** Per-player cumulative rotation display (0=0°, 1=90°, 2=180°, 3=270°). */
+    public static final Map<UUID, Integer> PLAYER_ROTATION = new ConcurrentHashMap<>();
+    /** Per-player mode: false=single-face (default), true=all-faces. */
+    public static final Map<UUID, Boolean> PLAYER_ALL_FACES = new ConcurrentHashMap<>();
 
     public GoldenHexagonItem(Settings settings) { super(settings); }
 
@@ -54,14 +61,38 @@ public class GoldenHexagonItem extends Item {
 
     @Override
     public void inventoryTick(ItemStack stack, World world, net.minecraft.entity.Entity entity, int slot, boolean selected) {
-        if (selected && !world.isClient && world.getTime() % 8 == 0 && world instanceof ServerWorld sw) {
-            sw.spawnParticles(net.minecraft.particle.ParticleTypes.ENCHANT,
-                entity.getX(), entity.getY() + 1.4, entity.getZ(),
-                2, 0.15, 0.2, 0.15, 0.01);
-            sw.spawnParticles(net.minecraft.particle.ParticleTypes.GLOW,
-                entity.getX(), entity.getY() + 1.2, entity.getZ(),
-                1, 0.2, 0.2, 0.2, 0.01);
+        if (!world.isClient && world instanceof ServerWorld sw) {
+            if (selected && world.getTime() % 8 == 0) {
+                sw.spawnParticles(net.minecraft.particle.ParticleTypes.ENCHANT,
+                    entity.getX(), entity.getY() + 1.4, entity.getZ(),
+                    2, 0.15, 0.2, 0.15, 0.01);
+                sw.spawnParticles(net.minecraft.particle.ParticleTypes.GLOW,
+                    entity.getX(), entity.getY() + 1.2, entity.getZ(),
+                    1, 0.2, 0.2, 0.2, 0.01);
+            }
+            // Show hotbar status message every 20 ticks while selected
+            if (selected && world.getTime() % 20 == 0 && entity instanceof ServerPlayerEntity sp) {
+                int rot = PLAYER_ROTATION.getOrDefault(sp.getUuid(), 0) * 90;
+                boolean allFaces = PLAYER_ALL_FACES.getOrDefault(sp.getUuid(), false);
+                String modeStr = allFaces ? "§aAll Faces" : "§7Single Face";
+                sp.sendMessage(Text.literal("§6Hexagon §8| §7Rotation: §e" + rot + "° §8| Mode: " + modeStr
+                    + " §8| §7Sneak+click=CCW, Air=toggle mode"), true);
+            }
         }
+    }
+
+    @Override
+    public TypedActionResult<ItemStack> use(World world, PlayerEntity user, Hand hand) {
+        if (world.isClient || hand != Hand.MAIN_HAND) return TypedActionResult.pass(user.getStackInHand(hand));
+        if (!PermissionHelper.canUseTool(user)) {
+            user.sendMessage(PermissionHelper.toolPermissionDeniedMessage(), true);
+            return TypedActionResult.fail(user.getStackInHand(hand));
+        }
+        // Air-click → toggle single-face / all-faces mode
+        boolean allFaces = !PLAYER_ALL_FACES.getOrDefault(user.getUuid(), false);
+        PLAYER_ALL_FACES.put(user.getUuid(), allFaces);
+        user.sendMessage(Text.literal("§6[Hexagon] §fMode: " + (allFaces ? "§aAll Faces" : "§7Single Face")), true);
+        return TypedActionResult.success(user.getStackInHand(hand));
     }
 
     @Override
@@ -97,8 +128,17 @@ public class GoldenHexagonItem extends Item {
         };
 
         boolean isSneaking = player != null && player.isSneaking();
+        boolean isAllFaces = PLAYER_ALL_FACES.getOrDefault(player != null ? player.getUuid() : UUID.randomUUID(), false);
 
-        // Get the texture bytes for this face
+        // Determine which faces to apply transformation to
+        java.util.List<String> targetFaces;
+        if (isAllFaces) {
+            targetFaces = java.util.List.of("top", "bottom", "north", "south", "east", "west");
+        } else {
+            targetFaces = java.util.List.of(face);
+        }
+
+        // Get source bytes for the clicked face
         byte[] faceBytes = data.faceTextures.containsKey(face)
             ? data.faceTextures.get(face)
             : data.texture;
@@ -120,13 +160,24 @@ public class GoldenHexagonItem extends Item {
         String blockId = data.customId;
         UUID uuid = player.getUuid();
 
+        // Update rotation state counter
+        int currentRot = PLAYER_ROTATION.getOrDefault(uuid, 0);
+        int newRot;
+        if (isSneaking) {
+            newRot = (currentRot + 3) % 4; // CCW = +3 mod 4
+        } else {
+            newRot = (currentRot + 1) % 4; // CW = +1 mod 4
+        }
+        PLAYER_ROTATION.put(uuid, newRot);
+
         // Push undo before transformation
         UndoManager.pushUndoMutation(blockId, data, "face_uv", uuid);
 
-        // Process the image transformation in a thread to avoid blocking
         final byte[] sourceBytes = faceBytes;
-        final boolean flip = isSneaking;
-        final String faceU = face.toUpperCase(Locale.ROOT);
+        final boolean ccw = isSneaking;
+        final java.util.List<String> faces = targetFaces;
+        final String faceLabel = isAllFaces ? "ALL FACES" : face.toUpperCase(Locale.ROOT);
+        final int rotDeg = newRot * 90;
 
         Thread t = new Thread(() -> {
             try {
@@ -137,50 +188,44 @@ public class GoldenHexagonItem extends Item {
                     return;
                 }
 
+                // Apply rotation to the texture (CW or CCW)
                 BufferedImage result;
-
-                if (flip) {
-                    // Horizontal flip
-                    AffineTransform tx = AffineTransform.getScaleInstance(-1, 1);
-                    tx.translate(-img.getWidth(), 0);
-                    AffineTransformOp op = new AffineTransformOp(tx, AffineTransformOp.TYPE_NEAREST_NEIGHBOR);
-                    result = op.filter(img, null);
+                int w = img.getWidth(), h = img.getHeight();
+                result = new BufferedImage(h, w, img.getType());
+                if (ccw) {
+                    // CCW 90°: (x,y) → (y, w-1-x)
+                    for (int y = 0; y < h; y++)
+                        for (int x = 0; x < w; x++)
+                            result.setRGB(y, w - 1 - x, img.getRGB(x, y));
                 } else {
-                    // Rotate 90° clockwise
-                    int w = img.getWidth();
-                    int h = img.getHeight();
-                    BufferedImage rotated = new BufferedImage(h, w, img.getType());
-                    for (int y = 0; y < h; y++) {
-                        for (int x = 0; x < w; x++) {
-                            rotated.setRGB(h - 1 - y, x, img.getRGB(x, y));
-                        }
-                    }
-                    result = rotated;
+                    // CW 90°: (x,y) → (h-1-y, x)
+                    for (int y = 0; y < h; y++)
+                        for (int x = 0; x < w; x++)
+                            result.setRGB(h - 1 - y, x, img.getRGB(x, y));
                 }
 
-                // Encode back to PNG
                 ByteArrayOutputStream bos = new ByteArrayOutputStream();
                 ImageIO.write(result, "png", bos);
                 byte[] newBytes = bos.toByteArray();
 
                 server.execute(() -> {
-                    // Apply as face override
-                    SlotManager.setFaceTexture(blockId, face, newBytes);
+                    for (String f : faces) {
+                        SlotManager.setFaceTexture(blockId, f, newBytes);
+                    }
                     SlotManager.saveAll();
 
                     SlotData updated = SlotManager.getById(blockId);
                     if (updated == null) return;
 
-                    // Broadcast update
-                    SlotUpdatePayload pkt = new SlotUpdatePayload(
-                        "setface", updated.index, blockId, updated.displayName,
-                        null, updated.lightLevel, updated.hardness, updated.soundType,
-                        face, null, null);
-                    NetworkManager.broadcastUpdate(server, pkt);
+                    for (String f : faces) {
+                        NetworkManager.broadcastUpdate(server, new SlotUpdatePayload(
+                            "setface", updated.index, blockId, updated.displayName,
+                            null, updated.lightLevel, updated.hardness, updated.soundType,
+                            f, null, null));
+                    }
 
-                    player.sendMessage(Text.literal(flip
-                        ? ChatHelper.formattedKey("cmd.tool_hex_done_flip", faceU)
-                        : ChatHelper.formattedKey("cmd.tool_hex_done_rotate", faceU)), true);
+                    String dir = ccw ? "CCW" : "CW";
+                    player.sendMessage(Text.literal("§6[Hexagon] §f" + faceLabel + " rotated " + dir + ". Display angle: §e" + rotDeg + "°"), true);
 
                     if (world instanceof ServerWorld sw) {
                         sw.spawnParticles(net.minecraft.particle.ParticleTypes.END_ROD,

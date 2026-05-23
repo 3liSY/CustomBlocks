@@ -747,6 +747,7 @@ public class CustomBlocksMod implements ModInitializer {
         com.customblocks.core.TemplateManager.load();
         com.customblocks.core.WelcomeManager.load();
         com.customblocks.core.SnapshotManager.start(CustomBlocksConfig.autoSnapshotMinutes);
+        com.customblocks.core.TrashManager.load(); // V4-18
 
         // ── Display Block Hooks ──────────────────────────────────────────────
         // Detect placement of a tagged display block, intercept right-clicks

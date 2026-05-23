@@ -107,7 +107,13 @@ public enum GuiMode {
     /** Phase 12.1 — Achievements GUI: shows all achievements, locked/unlocked with progress. */
     ACHIEVEMENTS_GUI,
     /** Phase 12.2 — Drop Config GUI: configure what a custom block drops when broken. */
-    DROP_CONFIG
+    DROP_CONFIG,
+    /** V4-43 — Snapshots GUI: paginated list of server snapshots with restore support. */
+    SNAPSHOTS_GUI,
+    /** V4-18 — Deleted Blocks GUI: browse and restore the trash bin. */
+    DELETED_BLOCKS_GUI,
+    /** V4-13 — Box Nudge Editor: fine-tune a single shape box with + / − buttons. */
+    BOX_NUDGE_EDITOR
 }
 
 
