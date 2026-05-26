@@ -7,12 +7,11 @@ import com.customblocks.core.UndoManager;
 import com.customblocks.block.SlotBlock;
 import com.customblocks.gui.GuiManager;
 import net.minecraft.block.BlockState;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.LoreComponent;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.ItemUsageContext;
+import net.minecraft.item.tooltip.TooltipType;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
@@ -47,21 +46,19 @@ public class AmethystChiselItem extends Item {
     @Override
     public Text getName()                { return Text.literal("§5§lAmethyst §r§dChisel"); }
     @Override
-    public Text getName(ItemStack stack) { return buildDisplayStack(stack).getName(); }
+    public Text getName(ItemStack stack) { return getName(); }
     @Override
     public boolean hasGlint(ItemStack stack) { return true; }
 
-    private ItemStack buildDisplayStack(ItemStack stack) {
-        ItemStack display = stack.copy();
-        display.set(DataComponentTypes.LORE, new LoreComponent(List.of(
-            Text.literal("§7Right-click block §8→ §fOpen Shape Editor"),
-            Text.literal("§7Sneak + right-click §8→ §fCopy block's hitbox"),
-            Text.literal("§7With hitbox copied, right-click §8→ §fPaste shape"),
-            Text.literal("§7Air-click §8→ §fOpen block picker"),
-            HITBOX_CLIPBOARD.isEmpty() ? Text.literal("§8Clipboard: empty") :
-                Text.literal("§aClipboard: shape ready to paste")
-        )));
-        return display;
+    @Override
+    public void appendTooltip(ItemStack stack, Item.TooltipContext context, List<Text> tooltip, TooltipType type) {
+        tooltip.add(Text.literal("§7Right-click block §8→ §fOpen Shape Editor"));
+        tooltip.add(Text.literal("§7Sneak + right-click §8→ §fCopy block's hitbox"));
+        tooltip.add(Text.literal("§7With hitbox copied, right-click §8→ §fPaste shape"));
+        tooltip.add(Text.literal("§7Air-click §8→ §fOpen block picker"));
+        tooltip.add(HITBOX_CLIPBOARD.isEmpty()
+            ? Text.literal("§8Clipboard: empty")
+            : Text.literal("§aClipboard: shape ready to paste"));
     }
 
     @Override
