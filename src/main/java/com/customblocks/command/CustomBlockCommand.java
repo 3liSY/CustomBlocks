@@ -969,12 +969,13 @@ public class CustomBlockCommand {
                         return 1;
                     }))
 
-                // V4-50: /cb edithud — HUD layout editor (client-side; stub until client screen is built)
+                // /cb edithud — opens HUD layout editor on the client
                 .then(CommandManager.literal("edithud")
                     .requires(PermissionHelper::canUse)
                     .executes(ctx -> {
-                        ChatHelper.info(ctx.getSource(), "§bHUD Editor: §7The Lunar-style HUD editor is coming in a future update.");
-                        ChatHelper.info(ctx.getSource(), "§7In the meantime, customize the HUD via §f/cb config §7→ HUD settings.");
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p == null) { ChatHelper.error(ctx.getSource(), ChatHelper.formattedKey("cmd.console_player_only")); return 1; }
+                        net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(p, new com.customblocks.network.OpenHudEditorPayload());
                         return 1;
                     }))
 

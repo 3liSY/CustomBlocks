@@ -363,6 +363,10 @@ public class CustomBlocksMod implements ModInitializer {
 
                 com.customblocks.network.OpenAnimGuiPayload.CODEC);
 
+        PayloadTypeRegistry.playS2C().register(
+                com.customblocks.network.OpenHudEditorPayload.ID,
+                com.customblocks.network.OpenHudEditorPayload.CODEC);
+
         PayloadTypeRegistry.playC2S().register(
                 com.customblocks.network.AnimSettingsPayload.ID,
                 com.customblocks.network.AnimSettingsPayload.CODEC);

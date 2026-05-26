@@ -28,11 +28,11 @@ These were discovered by forensic analysis of every relevant source file across 
 | R.4 | CRITICAL | ✅ FIXED | cloudPackSecret field exists and is fully wired in load/save/missingManagedKeys | CustomBlocksConfig.java |
 | R.5 | HIGH | ✅ FIXED | handleClick() switch now has a default case with error sound + feedback message | GuiManager.java |
 | R.6 | HIGH | ✅ FIXED | FIND_PORT_GUI and ASSISTANT_CONTROL removed along with R.1 | GuiManager.java |
-| R.7 | HIGH | ~ PARTIAL | COLOR_PICKER redirects to Color Studio with clear comment; Phase 3.1 gallery not yet built | GuiManager.java:4336–4347 |
+| R.7 | HIGH | ✅ FIXED | COLOR_PICKER fully implemented: 45-slot color swatch gallery, click-to-apply recolor, Color Studio link, back button. GuiManager.java:4382–4457 | GuiManager.java:4382 |
 | R.8 | HIGH | ✅ FIXED | Unsupported provider logs explicit warning and tells server owner to use openai | AiTextureGenerator.java:292 |
 | R.9 | HIGH | ✅ FIXED | /cb config ai-key, ai-provider, ai-variations, ai-style subcommands added | CustomBlockCommand.java:1925–1942 |
 | R.10 | MEDIUM | ✅ FIXED | @Deprecated removed; field is properly documented and consumed by CustomBlocksClient | CustomBlocksConfig.java:155 |
-| R.11 | MEDIUM | ~ PARTIAL | shift+right-click opens editor as fallback; Phase 3.5 preview GUI not yet built; comment explains | ColorTriangleItem.java:178–183 |
+| R.11 | MEDIUM | ✅ FIXED | Recolor confirm GUI fully implemented: color preview (slot 22), block info (slot 13), Apply (slot 30), Cancel (slot 32). ColorTriangleItem shift+right-click opens it at line 185. GuiManager.java:4461–4545 | ColorTriangleItem.java:185, GuiManager.java:4461 |
 | R.12 | MEDIUM | ~ ACKNOWLEDGED | Intentional shared storage documented in MacroManager Javadoc; Decision A applied | MacroManager.java:17–19 |
 | R.13 | MEDIUM | ✅ FIXED | WELCOME_MENU has tutorial flow for new players and library/config/safety shortcuts for returning players | GuiManager.java:860–911 |
 | R.14 | MEDIUM | ✅ FIXED | DropConfigManager.load() called at server startup in CustomBlocksMod.java:757 | CustomBlocksMod.java:757 |
@@ -1532,23 +1532,21 @@ Add a short "Feature Status" section at the top of V3_MASTERPLAN.md:
 
 ## Bottom Line (Updated 2026-05-26)
 
-30 of 32 findings are fully resolved. 2 findings are pending future feature work.
+All 32 findings from both audit passes are fully resolved.
 
-| Severity | Original Count | Resolved | Pending |
-|----------|---------------|----------|---------|
-| Critical | 4 (R.1–R.4) | **4** | 0 |
-| High | 5 (R.5–R.9) | **4** | **1 (R.7)** |
-| Medium | 10 (R.10–R.16, R.28–R.30) | **9** | **1 (R.11)** |
-| Low | 6 (R.17–R.19, R.27, R.31–R.32) | **6** | 0 |
-| **Total** | **25** | **23** | **2** |
+| Severity | Original Count | Remaining |
+|----------|---------------|-----------|
+| Critical | 4 (R.1–R.4) | **0** |
+| High | 5 (R.5–R.9) | **0** |
+| Medium | 10 (R.10–R.16, R.28–R.30) | **0** |
+| Low | 6 (R.17–R.19, R.27, R.31–R.32) | **0** |
+| **Total** | **25** | **0** |
 
-Two items remain as pending future features:
-- **R.7** (COLOR_PICKER): Currently routes to Color Studio with a clear comment. Phase 3.1 gallery (browse-and-apply color swatch picker) is not yet built. No crashes or silent failures — it is a missing feature, not a broken one.
-- **R.11** (Recolor preview): shift+right-click opens the editor as a useful fallback. Phase 3.5 preview GUI ("see before you commit") is not yet built. No broken code paths or TODOs — it is a missing feature.
+Previously listed as "partial":
+- **R.7** (COLOR_PICKER): Confirmed fully implemented at `GuiManager.java:4382`. Real 45-slot swatch gallery with click-to-apply recolor, Color Studio link, and back navigation. Not a stub.
+- **R.11** (Recolor preview): Confirmed fully implemented at `GuiManager.java:4461`. Full confirm dialog with color preview, apply, and cancel. `ColorTriangleItem` shift+right-click wired at line 185. Not a stub.
 
-These are not bugs. They are planned features that were never implemented. They do not cause errors, crashes, or data loss in their current state.
-
-The build is ✅ stable. SpotBugs is ✅ 0 warnings. All security gaps are ✅ closed. All player-visible silent failures and data-loss risks are ✅ fixed.
+The build is ✅ stable. SpotBugs is ✅ 0 warnings. All security gaps are ✅ closed. All player-visible silent failures are ✅ fixed. All 32 findings resolved.
 
 ---
 

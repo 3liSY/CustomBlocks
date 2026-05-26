@@ -1679,14 +1679,14 @@ public class GuiManager {
                     String col = text.toLowerCase().trim();
                     if (!List.of("black","yellow","green").contains(col)) { send(player, "§cChoose: §fblack §7| §fyellow §7| §fgreen"); openMain(player, rp); return true; }
                     Item it = net.minecraft.registry.Registries.ITEM.get(net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, col + "_square"));
-                    if (it != null && it != Items.AIR) player.getInventory().insertStack(new ItemStack(it, 1));
+                    if (it != null && it != Items.AIR) { ItemStack gs = new ItemStack(it, 1); if (!player.getInventory().insertStack(gs)) player.dropStack(gs); }
                     send(player, "Given §f" + col + " Square§a!"); openMain(player, rp); return true;
                 }
                 if ("__givetriangle__".equals(blockId)) {
                     String col = text.toLowerCase().trim();
                     if (!List.of("black","yellow","green").contains(col)) { send(player, "§cChoose: §fblack §7| §fyellow §7| §fgreen"); openMain(player, rp); return true; }
                     Item it = net.minecraft.registry.Registries.ITEM.get(net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, col + "_triangle"));
-                    if (it != null && it != Items.AIR) player.getInventory().insertStack(new ItemStack(it, 1));
+                    if (it != null && it != Items.AIR) { ItemStack gt = new ItemStack(it, 1); if (!player.getInventory().insertStack(gt)) player.dropStack(gt); }
                     send(player, "Given §f" + col + " Triangle§a!"); openMain(player, rp); return true;
                 }
                 String newId = text.toLowerCase().replaceAll("[^a-z0-9_\\-]", "_");
@@ -2404,7 +2404,7 @@ public class GuiManager {
             return;
         }
         ItemStack stack = com.customblocks.item.ColorTriangleItem.createCustomStack(item, rgb);
-        player.getInventory().insertStack(stack);
+        if (!player.getInventory().insertStack(stack)) player.dropStack(stack);
         send(player, "§b[BG Studio] Minted §f#" + String.format(Locale.ROOT, "%06X", rgb & 0xFFFFFF) + " §bTriangle.");
         if (player.getWorld() instanceof ServerWorld sw) {
             sw.spawnParticles(net.minecraft.particle.ParticleTypes.GLOW,
@@ -2425,8 +2425,10 @@ public class GuiManager {
             send(player, "§c[BG Studio] Custom Square/Triangle items are not registered.");
             return;
         }
-        player.getInventory().insertStack(com.customblocks.item.ColorSquareItem.createCustomStack(squareItem, rgb));
-        player.getInventory().insertStack(com.customblocks.item.ColorTriangleItem.createCustomStack(triangleItem, rgb));
+        ItemStack sqStack = com.customblocks.item.ColorSquareItem.createCustomStack(squareItem, rgb);
+        if (!player.getInventory().insertStack(sqStack)) player.dropStack(sqStack);
+        ItemStack triStack = com.customblocks.item.ColorTriangleItem.createCustomStack(triangleItem, rgb);
+        if (!player.getInventory().insertStack(triStack)) player.dropStack(triStack);
         send(player, "§b[BG Studio] Minted §f#" + String.format(Locale.ROOT, "%06X", rgb & 0xFFFFFF) + " §bSquare + Triangle.");
         if (player.getWorld() instanceof ServerWorld sw) {
             sw.spawnParticles(net.minecraft.particle.ParticleTypes.GLOW,
@@ -2883,7 +2885,8 @@ public class GuiManager {
                 try {
                     net.minecraft.item.Item item = net.minecraft.registry.Registries.ITEM.get(net.minecraft.util.Identifier.of(com.customblocks.CustomBlocksMod.MOD_ID, "rainbow_rectangle"));
                     if (item != null && item != net.minecraft.item.Items.AIR) {
-                        player.getInventory().insertStack(new net.minecraft.item.ItemStack(item));
+                        net.minecraft.item.ItemStack rrs = new net.minecraft.item.ItemStack(item);
+                        if (!player.getInventory().insertStack(rrs)) player.dropStack(rrs);
                         send(player, "§eGiven §6Rainbow Rectangle§e!");
                     }
                 } catch (Exception e) { send(player, "§cCould not give rectangle wand."); }

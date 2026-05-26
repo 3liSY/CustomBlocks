@@ -5,6 +5,7 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 
 import com.customblocks.client.gui.AnimBlockScreen;
+import com.customblocks.client.HudConfig;
 
 import com.customblocks.network.OpenAnimGuiPayload;
 
@@ -277,6 +278,8 @@ public class CustomBlocksClient implements ClientModInitializer {
     @Override
     @SuppressFBWarnings("ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
     public void onInitializeClient() {
+
+        HudConfig.load();
 
         devConsoleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.customblocks.devconsole",
@@ -676,7 +679,15 @@ public class CustomBlocksClient implements ClientModInitializer {
 
         });
 
-
+        // ── OpenHudEditorPayload — open HUD editor screen ────────────────────
+        ClientPlayNetworking.registerGlobalReceiver(com.customblocks.network.OpenHudEditorPayload.ID, (payload, context) -> {
+            MinecraftClient client = context.client();
+            client.execute(() -> {
+                if (client.currentScreen == null) {
+                    client.setScreen(new com.customblocks.client.gui.HudEditorScreen());
+                }
+            });
+        });
 
         // ── ChunkedTexturePayload — reassemble chunked textures ─────────────
 
@@ -985,37 +996,47 @@ public class CustomBlocksClient implements ClientModInitializer {
 
             if (data == null) return;
 
-            // Build HUD lines
-            String nameLine = "§f✦ " + data.displayName + " §8[" + data.customId + "]";
-            String detailLine = "§7Light: §f" + data.lightLevel
-                + "  §7Hard: §f" + data.hardness
-                + "  §7🔊 §f" + data.soundType;
-            String faceName = bhr.getSide().getName();
-            String statusLine = "§7Collision: " + (data.noCollision ? "§cOFF" : "§aON")
-                + "  §7Face: §f" + faceName;
+            // Build HUD lines respecting HudConfig toggles
+            java.util.List<String> lines = new java.util.ArrayList<>();
 
-            // Health warning
+            if (HudConfig.showName || HudConfig.showId) {
+                StringBuilder nameSb = new StringBuilder();
+                if (HudConfig.showName) nameSb.append("§f✦ ").append(data.displayName).append(" ");
+                if (HudConfig.showId)   nameSb.append("§8[").append(data.customId).append("]");
+                lines.add(nameSb.toString().trim());
+            }
+
+            StringBuilder detail = new StringBuilder();
+            if (HudConfig.showLight)    detail.append("§7Light: §f").append(data.lightLevel).append("  ");
+            if (HudConfig.showHardness) detail.append("§7Hard: §f").append(data.hardness).append("  ");
+            if (HudConfig.showSound)    detail.append("§7🔊 §f").append(data.soundType);
+            String detailStr = detail.toString().trim();
+            if (!detailStr.isEmpty()) lines.add(detailStr);
+
+            String faceName = bhr.getSide().getName();
+            StringBuilder status = new StringBuilder();
+            if (HudConfig.showCollision) status.append("§7Collision: ").append(data.noCollision ? "§cOFF" : "§aON").append("  ");
+            if (HudConfig.showFace)      status.append("§7Face: §f").append(faceName);
+            String statusStr = status.toString().trim();
+            if (!statusStr.isEmpty()) lines.add(statusStr);
+
             boolean broken = data.blockHealth == com.customblocks.core.SlotData.BlockHealth.CORRUPT
                           || data.blockHealth == com.customblocks.core.SlotData.BlockHealth.LOAD_FAILURE;
-            String healthLine = broken ? "§c⚠ " + data.blockHealth.name() : null;
+            if (broken) lines.add("§c⚠ " + data.blockHealth.name());
 
-            java.util.List<String> lines = new java.util.ArrayList<>();
-            lines.add(nameLine);
-            lines.add(detailLine);
-            lines.add(statusLine);
-            if (healthLine != null) lines.add(healthLine);
+            if (lines.isEmpty()) return;
 
             int lineH = client.textRenderer.fontHeight + 2;
             int totalH = lines.size() * lineH + 4;
-            int cx = ctx.getScaledWindowWidth() / 2;
             int maxW = 0;
             for (String l : lines) maxW = Math.max(maxW, client.textRenderer.getWidth(net.minecraft.text.Text.literal(l)));
-            int boxTop = 34;
-            ctx.fill(cx - maxW / 2 - 5, boxTop, cx + maxW / 2 + 5, boxTop + totalH, 0x99000000);
+            int boxLeft = (HudConfig.x >= 0) ? HudConfig.x : (ctx.getScaledWindowWidth() / 2 - maxW / 2 - 5);
+            int boxTop  = (HudConfig.y >= 0) ? HudConfig.y : 34;
+            ctx.fill(boxLeft, boxTop, boxLeft + maxW + 10, boxTop + totalH, 0x99000000);
             for (int i = 0; i < lines.size(); i++) {
-                ctx.drawCenteredTextWithShadow(client.textRenderer,
+                ctx.drawTextWithShadow(client.textRenderer,
                     net.minecraft.text.Text.literal(lines.get(i)),
-                    cx, boxTop + 2 + i * lineH, 0xFFFFFFFF);
+                    boxLeft + 5, boxTop + 2 + i * lineH, 0xFFFFFFFF);
             }
 
         });
