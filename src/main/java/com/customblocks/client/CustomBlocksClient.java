@@ -274,6 +274,7 @@ public class CustomBlocksClient implements ClientModInitializer {
 
 
     private static KeyBinding devConsoleKey;
+    private static KeyBinding hudToggleKey;
 
     @Override
     @SuppressFBWarnings("ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
@@ -285,6 +286,13 @@ public class CustomBlocksClient implements ClientModInitializer {
             "key.customblocks.devconsole",
             InputUtil.Type.KEYSYM,
             GLFW.GLFW_KEY_D,
+            "category.customblocks"
+        ));
+
+        hudToggleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+            "key.customblocks.hudtoggle",
+            InputUtil.Type.KEYSYM,
+            GLFW.GLFW_KEY_H,
             "category.customblocks"
         ));
 
@@ -334,6 +342,37 @@ public class CustomBlocksClient implements ClientModInitializer {
 
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+
+            // HUD show/hide keybind (default H)
+            while (hudToggleKey.wasPressed()) {
+                HudConfig.hudVisible = !HudConfig.hudVisible;
+                HudConfig.save();
+            }
+
+            // Fade alpha update — runs every tick (20/sec)
+            // Target: 1.0 if looking at a custom block AND hud is visible, else 0.0
+            float fadeTarget = 0f;
+            if (HudConfig.hudVisible && client.world != null && client.player != null) {
+                if (client.crosshairTarget instanceof net.minecraft.util.hit.BlockHitResult bhr) {
+                    var bs = client.world.getBlockState(bhr.getBlockPos());
+                    if (bs.getBlock() instanceof com.customblocks.block.SlotBlock sb2) {
+                        if (com.customblocks.core.SlotManager.getBySlot(sb2.getSlotKey()) != null) {
+                            fadeTarget = 1f;
+                        }
+                    }
+                }
+            }
+
+            if (HudConfig.fadeEnabled) {
+                float step = 0.08f; // ~12 ticks to fully appear/disappear
+                if (fadeTarget > HudConfig.currentAlpha) {
+                    HudConfig.currentAlpha = Math.min(HudConfig.currentAlpha + step, fadeTarget);
+                } else {
+                    HudConfig.currentAlpha = Math.max(HudConfig.currentAlpha - step, fadeTarget);
+                }
+            } else {
+                HudConfig.currentAlpha = fadeTarget;
+            }
 
             while (devConsoleKey.wasPressed()) {
                 if (net.minecraft.client.gui.screen.Screen.hasControlDown() && net.minecraft.client.gui.screen.Screen.hasShiftDown()) {
@@ -978,67 +1017,108 @@ public class CustomBlocksClient implements ClientModInitializer {
             }
         });
 
-        // ── V4-47 Enhanced HUD overlay ────────────────────────────────────────
+        // ── HUD overlay — Phase 2: multi-style, opacity, fade ────────────────
 
         HudRenderCallback.EVENT.register((ctx, tickCounter) -> {
 
+            float alpha = HudConfig.currentAlpha;
+            if (alpha <= 0.01f) return; // fully hidden — skip all rendering
+
             MinecraftClient client = MinecraftClient.getInstance();
-
             if (client.world == null || client.player == null) return;
-
             if (!(client.crosshairTarget instanceof BlockHitResult bhr)) return;
-
             var state = client.world.getBlockState(bhr.getBlockPos());
-
             if (!(state.getBlock() instanceof SlotBlock sb)) return;
-
             SlotData data = SlotManager.getBySlot(sb.getSlotKey());
-
             if (data == null) return;
 
-            // Build HUD lines respecting HudConfig toggles
+            // Build text lines
             java.util.List<String> lines = new java.util.ArrayList<>();
-
             if (HudConfig.showName || HudConfig.showId) {
                 StringBuilder nameSb = new StringBuilder();
                 if (HudConfig.showName) nameSb.append("§f✦ ").append(data.displayName).append(" ");
                 if (HudConfig.showId)   nameSb.append("§8[").append(data.customId).append("]");
                 lines.add(nameSb.toString().trim());
             }
-
             StringBuilder detail = new StringBuilder();
             if (HudConfig.showLight)    detail.append("§7Light: §f").append(data.lightLevel).append("  ");
             if (HudConfig.showHardness) detail.append("§7Hard: §f").append(data.hardness).append("  ");
             if (HudConfig.showSound)    detail.append("§7🔊 §f").append(data.soundType);
             String detailStr = detail.toString().trim();
             if (!detailStr.isEmpty()) lines.add(detailStr);
-
             String faceName = bhr.getSide().getName();
             StringBuilder status = new StringBuilder();
             if (HudConfig.showCollision) status.append("§7Collision: ").append(data.noCollision ? "§cOFF" : "§aON").append("  ");
             if (HudConfig.showFace)      status.append("§7Face: §f").append(faceName);
             String statusStr = status.toString().trim();
             if (!statusStr.isEmpty()) lines.add(statusStr);
-
             boolean broken = data.blockHealth == com.customblocks.core.SlotData.BlockHealth.CORRUPT
                           || data.blockHealth == com.customblocks.core.SlotData.BlockHealth.LOAD_FAILURE;
             if (broken) lines.add("§c⚠ " + data.blockHealth.name());
-
             if (lines.isEmpty()) return;
 
+            // Layout
+            float scale = Math.max(0.5f, Math.min(2.0f, HudConfig.scale));
             int lineH = client.textRenderer.fontHeight + 2;
-            int totalH = lines.size() * lineH + 4;
-            int maxW = 0;
+            int maxW  = 0;
             for (String l : lines) maxW = Math.max(maxW, client.textRenderer.getWidth(net.minecraft.text.Text.literal(l)));
-            int boxLeft = (HudConfig.x >= 0) ? HudConfig.x : (ctx.getScaledWindowWidth() / 2 - maxW / 2 - 5);
+            int totalH = lines.size() * lineH + 4;
+            int boxW   = maxW + 10;
+            int boxLeft = (HudConfig.x >= 0) ? HudConfig.x : (ctx.getScaledWindowWidth() / 2 - (int)(boxW * scale / 2));
             int boxTop  = (HudConfig.y >= 0) ? HudConfig.y : 34;
-            ctx.fill(boxLeft, boxTop, boxLeft + maxW + 10, boxTop + totalH, 0x99000000);
-            for (int i = 0; i < lines.size(); i++) {
-                ctx.drawTextWithShadow(client.textRenderer,
-                    net.minecraft.text.Text.literal(lines.get(i)),
-                    boxLeft + 5, boxTop + 2 + i * lineH, 0xFFFFFFFF);
+
+            // Alpha helpers
+            int a = Math.min(255, (int)(alpha * 255));
+            int bgA   = Math.min(255, (int)(alpha * HudConfig.bgOpacity   * 255));
+            int txtA  = Math.min(255, (int)(alpha * HudConfig.textOpacity * 255));
+            int accent = (HudConfig.accentColor & 0x00FFFFFF) | (a << 24);
+
+            ctx.getMatrices().push();
+            ctx.getMatrices().translate(boxLeft, boxTop, 0);
+            ctx.getMatrices().scale(scale, scale, 1f);
+
+            if (HudConfig.style == 2) {
+                // ── Plain Text — no background, just text with shadow ─────────
+                for (int i = 0; i < lines.size(); i++) {
+                    int textColor = (txtA << 24) | 0x00FFFFFF;
+                    ctx.drawTextWithShadow(client.textRenderer,
+                        net.minecraft.text.Text.literal(lines.get(i)),
+                        5, 2 + i * lineH, textColor);
+                }
+            } else if (HudConfig.style == 1) {
+                // ── Glow Box — rounded-ish corners, glowing border ───────────
+                int bg = (bgA << 24) | 0x00080818;
+                ctx.fill(2, 2, boxW - 2, totalH - 2, bg);
+                // Top/bottom border lines
+                ctx.fill(2, 0, boxW - 2, 2, accent);
+                ctx.fill(2, totalH - 2, boxW - 2, totalH, accent);
+                // Left/right border lines
+                ctx.fill(0, 2, 2, totalH - 2, accent);
+                ctx.fill(boxW - 2, 2, boxW, totalH - 2, accent);
+                // Inner glow strip along top
+                int glowColor = (Math.min(255, bgA + 40) << 24) | (HudConfig.accentColor & 0x00FFFFFF);
+                ctx.fill(2, 2, boxW - 2, 4, glowColor);
+                for (int i = 0; i < lines.size(); i++) {
+                    int textColor = (txtA << 24) | 0x00FFFFFF;
+                    ctx.drawTextWithShadow(client.textRenderer,
+                        net.minecraft.text.Text.literal(lines.get(i)),
+                        5, 2 + i * lineH, textColor);
+                }
+            } else {
+                // ── Pill (default) — compact bar, Lunar-style ─────────────────
+                int bg = (bgA << 24) | 0x00000000;
+                ctx.fill(0, 0, boxW, totalH, bg);
+                // Left accent bar (3px wide, full height)
+                ctx.fill(0, 0, 3, totalH, accent);
+                for (int i = 0; i < lines.size(); i++) {
+                    int textColor = (txtA << 24) | 0x00FFFFFF;
+                    ctx.drawTextWithShadow(client.textRenderer,
+                        net.minecraft.text.Text.literal(lines.get(i)),
+                        7, 2 + i * lineH, textColor);
+                }
             }
 
+            ctx.getMatrices().pop();
         });
 
     }

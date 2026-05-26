@@ -385,6 +385,17 @@ public class ColorTriangleItem extends Item {
                 }
             }
             if (fillTrapped) {
+                // Pass 1: recolor any unvisited pixels that match the background color.
+                // Catches same-color landlocked areas (e.g. red inside a red-background "9").
+                for (int x = 0; x < w; x++) {
+                    for (int y = 0; y < h; y++) {
+                        if (!visited[x][y] && isBackgroundLab(img, x, y, bgA, bgLab, labThreshold)) {
+                            img.setRGB(x, y, newArgb);
+                            visited[x][y] = true;
+                        }
+                    }
+                }
+                // Pass 2: existing behavior — recolor black/grey trapped holes
                 fillTrappedBackgroundRegions(img, visited, newArgb);
             }
         }

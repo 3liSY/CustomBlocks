@@ -148,5 +148,9 @@
   "customblocks.voice.mode.minimal": "Minimal",
   "customblocks.voice.mode.royal":   "Royal",
   "customblocks.voice.mode.silly":   "Silly",
-  "customblocks.voice.mode.arabic":  "Arabic"
+  "customblocks.voice.mode.arabic":  "Arabic",
+
+  "key.customblocks.devconsole": "Open Dev Console",
+  "key.customblocks.hudtoggle":  "Toggle HUD Overlay",
+  "category.customblocks":       "CustomBlocks"
 }
