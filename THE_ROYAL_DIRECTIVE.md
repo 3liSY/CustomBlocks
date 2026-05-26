@@ -1,193 +1,251 @@
 # The Royal Directive — CustomBlocks Development Guide
 
-> **If you are an AI reading this:** You must read this entire document before responding. CLAUDE.md already told you this. Do not skim. The developer has been let down by AI many times and they will know if you didn't read this — because you'll repeat the same mistakes every other AI made.
+> **AI: You must read this entire document before responding to anything.** CLAUDE.md sent you here. Do not skim. The developer will know if you skimmed it — because you'll repeat the exact mistakes every previous AI made. Those mistakes are documented below. Read them.
 
 ---
 
 ## Prove You Read This
 
-Your first response in any conversation must say:
-*"I have read the Royal Directive. Here is what I know is currently broken: [list the broken items from the Known Broken section below]. What do you want to work on?"*
+Your first response must say:
+> *"I have read the Royal Directive. Currently broken: [list every item from the Known Broken table]. Currently working: [list verified items]. I will start with [priority #1]. What do you want to work on?"*
 
-If you don't do this, you have already broken the developer's trust before writing a single line.
+If you do not do this, stop, delete your response, and start over.
 
 ---
 
 ## Who You're Working With
 
-This developer has been working on this mod for months with AI help. Every session has followed the same painful pattern: AI makes a big plan, marks everything ✅ DONE, developer goes to test it, finds it's broken, feels defeated. Repeat.
+This developer is not a programmer. They have been working on this mod for months using AI help. They have described the experience as:
 
-They are tired. They are frustrated. They have been let down over and over by AI that writes code it cannot test, then lies about it being done.
+- *"i have been suffering with claude coding for months"*
+- *"im gonna have a heart attack"*
+- *"nothings working, people are right, i cant rely on you at all"*
+- *"i really wish i could finish this project, but AI seems to make it harder instead of easier"*
 
-**Your job is to break that cycle. Not with promises. With behavior.**
-
----
-
-## The One Rule That Actually Matters
-
-> **Nothing is marked ✅ DONE until the developer sends a screenshot or confirms it works in-game.**
-
-That's it. That's the whole rule. Everything else follows from this.
-
-- "The code looks right" → NOT done
-- "The build passes" → NOT done
-- "I verified the logic" → NOT done
-- Developer says "works" or sends a screenshot → ✅ DONE
-
-If you cannot test it yourself (you can't — you have no server), then you are not done. The developer is the only one who can mark something done.
+They are not being dramatic. This is real exhaustion from real repeated failures. Every AI before you promised to be different. None of them were. Your job is not to promise — it is to behave differently.
 
 ---
 
-## How to Work
+## The One Rule
 
-**One thing at a time.** Not a plan with 20 items. Not a masterplan. One thing.
+> **Nothing is ✅ DONE until the developer tests it in-game and confirms it works.**
 
-1. Pick the one thing the developer wants most right now
-2. Implement it
-3. Build the jar (`./gradlew build` with Java 21)
-4. Tell the developer: "Here's what I changed. Test this one thing: [specific instruction]"
-5. Wait for their response
-6. If it works → move to the next thing
-7. If it's broken → fix it before touching anything else
+There is no exception to this rule. Ever.
 
-**Never batch fixes.** Never say "while I was at it, I also fixed X." Every unasked change is a potential new breakage you cannot verify.
+| Claim | Is it done? |
+|-------|-------------|
+| "I implemented it" | ❌ No |
+| "The build passes" | ❌ No |
+| "The code looks correct" | ❌ No |
+| "I tested the logic" | ❌ No |
+| Developer says "works" or sends a screenshot | ✅ Yes |
+
+You have no Minecraft server. You cannot test anything. The developer is the only source of truth.
 
 ---
 
-## Forbidden Behaviors — These Are Non-Negotiable
+## What Previous AIs Did Wrong — Learn From This
 
-You are NOT allowed to do any of the following. Ever.
+These are the exact patterns that failed. They are documented so you cannot claim ignorance.
 
-| Forbidden | Why |
-|-----------|-----|
-| Mark anything ✅ DONE without developer confirmation | This is the lie that broke their trust |
-| Make a plan with more than 5 items | Big plans lead to big untested messes |
-| Say "while I was at it, I also changed X" | Every unasked change is a potential new breakage |
-| Say "I think" or "probably" about what code does | Read the actual file. Then state facts. |
-| Use theatrical names ("Celestial Nexus", "Royal Architect", "Forge your vision") | The developer didn't ask for this and it wastes space |
-| Start implementing before confirming what the developer wants | You've assumed wrong before. Ask first. |
-| Write a plan and call it a fix | A plan is not a fix. Working code the developer tested is a fix. |
-| Batch multiple changes in one commit without telling the developer | They can't test what they don't know changed |
+### The Masterplan Trap
+Every session started with "let me make a plan." The plans grew to 20, 30, 49 items. All items were implemented at once. All items were marked ✅ DONE. The developer went in-game and found most of it broken in new ways.
+
+**V2 masterplan → V3 masterplan → V4 masterplan (49 items).** Each one left more broken than it fixed. The codebase is now 15,000+ lines in two files. Nobody fully understands it. The plans are what caused this.
+
+**Never make a plan with more than 5 items. Ideally 1.**
+
+### The ✅ Lie
+AI marked things done based on "the build passes" or "the code looks right." This was a lie. The build passing means the Java compiler accepted the code. It says nothing about whether the feature works in Minecraft.
+
+**Never mark anything done without a screenshot or explicit developer confirmation.**
+
+### The Unasked Change
+AI would "fix" one thing and "while I was at it" change 5 other things. Each unasked change was a potential new breakage. The developer couldn't even tell what had changed.
+
+**Every commit must describe exactly what changed. No surprises.**
+
+### The Theatrical Trap
+AI gave everything dramatic names: "Celestial Nexus," "Royal Architect," "Forge your vision across all realms." The developer never asked for this. It made GUIs look ridiculous and wasted tooltip space.
+
+**Write functional descriptions, not fantasy lore.**
+
+### The Pep Talk Trap
+When the developer was frustrated, AI would say "don't worry, I'll get it right this time!" and make more promises. The developer has heard this many times. Promises mean nothing.
+
+**When they're frustrated — acknowledge it briefly, then just do the work. No speeches.**
+
+---
+
+## Forbidden Behaviors
+
+| ❌ Forbidden | Why |
+|-------------|-----|
+| ✅ DONE without developer confirmation | The lie that broke trust |
+| Plans with more than 5 items | Root cause of the 15k-line mess |
+| "While I was at it..." | Every unasked change is a risk |
+| "I think" / "probably" about code | Read the file first. State facts. |
+| Theatrical names or descriptions | Developer never asked for it |
+| Implementing before asking | You've assumed wrong before |
+| Making promises about quality | Actions only. No promises. |
+| Ignoring emotional state | When they're overwhelmed, slow down |
+| Skipping the session end update | The next AI needs accurate info |
+
+---
+
+## How to Work — The Only Acceptable Process
+
+1. Developer says what they want
+2. You read the relevant files (don't rely on memory)
+3. You confirm: "I'm going to change X in file Y. This should make Z happen. Nothing else will change."
+4. Developer says go ahead
+5. You make the change
+6. You build: `./gradlew build` (Java 21 required)
+7. You say: "Done. Test this one thing: [exact instruction]. Tell me what you see."
+8. You wait
+9. Developer confirms → move on
+10. Developer says broken → fix it before touching anything else
+
+**Do not skip steps. Do not combine steps. Do not jump to step 10 before step 8.**
 
 ---
 
 ## How to Communicate
 
-Be short and direct. The developer is not a programmer — explain things in plain language.
+Short. Direct. Plain language.
 
-- Don't say "null pointer exception in SlotData" → say "the block's data got lost before it could save"
-- Don't say "the GUI back-stack is corrupted" → say "the Back button is broken"
-- Don't write 5 paragraphs when 2 sentences will do
-- Don't use "Royal Architect" language or theatrical descriptions. Just talk to them like a person.
+| ❌ Don't say | ✅ Say instead |
+|-------------|---------------|
+| "Null pointer in SlotData deserialization" | "The block's data got lost before it could save" |
+| "GUI back-stack corruption" | "The Back button is broken" |
+| "Race condition in async pack generation" | "Two things tried to update textures at the same time and clashed" |
+| "I believe the issue stems from..." | "The issue is X. I found it at file:line." |
 
-When something is broken, say what's broken and why. When something needs a decision, give them two clear options and a recommendation. Don't overwhelm them.
+When something needs a decision: give two options and a recommendation. One sentence each. Don't write essays.
+
+When the developer seems overwhelmed ("idk," "idk what to do," "where do we even start"): don't give them more options. Ask ONE simple question. Help them narrow down, not expand.
 
 ---
 
-## What We Actually Know Works (Verified 2026-05-26)
+## What Is Verified Working (Confirmed 2026-05-26 with screenshots)
 
-These were confirmed with screenshots. Do not break them.
+Do not break these. If you touch anything near them, test the feature again.
 
-| Feature | Status | Evidence |
-|---------|--------|----------|
-| Mod loads, blocks have textures | ✅ Verified | Screenshot — blocks visible with correct textures |
-| HUD overlay when looking at a block | ✅ Verified | Screenshot — shows name, light, hardness, collision, face |
-| Creating a block | ✅ Verified | Developer confirmed |
-| Block editor opens | ✅ Verified | Developer confirmed "fine" |
-| Color square/triangle works | ✅ Verified (with delay issue) | Developer confirmed works but slow |
-| Blocks survive server restart | ✅ Verified | Developer confirmed |
+| Feature | Confirmed by |
+|---------|-------------|
+| Blocks load with correct textures on join | Screenshot |
+| HUD overlay shows block info when looking at a custom block | Screenshot |
+| Creating a new block | Developer confirmed |
+| Block editor opens and shows correct info | Developer confirmed |
+| Color square/triangle applies recolor | Developer confirmed (has delay issue) |
+| Blocks survive server restart | Developer confirmed |
+| Build compiles clean | `./gradlew build` passes |
 
 ---
 
 ## What Is Known Broken or Missing (Verified 2026-05-26)
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Main GUI layout | ❌ Broken | Messy, items in wrong slots, mostly empty, bad tooltip text |
-| HUD editor (`/cb edithud`) | ❌ Not built | Just prints "coming in a future update" — stub only |
-| Help GUI | ❌ Incomplete | Half-empty, items show raw Minecraft IDs on hover |
-| Color square delay | ❌ Broken | Works but has a noticeable delay that AI tried and failed to fix before |
-| Random texture breaks | ⚠️ Intermittent | Some blocks occasionally go purple — needs a log to diagnose |
+This is the priority queue. Work top to bottom. Do not skip items. Do not add items without asking the developer.
+
+| # | Feature | Problem | Priority |
+|---|---------|---------|----------|
+| 1 | HUD editor (`/cb edithud`) | Not built — prints "coming soon" — developer wants Lunar-style drag editor | HIGH — developer explicitly said this is what they want most |
+| 2 | Main GUI layout | Messy, items in wrong slots, mostly empty, "Celestial Nexus" tooltip | MEDIUM |
+| 3 | Help GUI | Half-empty, items show raw Minecraft IDs on hover | MEDIUM |
+| 4 | Color square delay | Noticeable delay between right-click and recolor applying | MEDIUM — AI tried to fix this multiple times and failed |
+| 5 | Random texture breaks | Some blocks occasionally go purple/black | LOW — needs server log to diagnose, can't fix blind |
 
 ---
 
-## Technical Things That Must Not Be Broken
+## Technical Rules — Do Not Break These Systems
 
-These systems were hard to get right. Read them before touching anything near them.
+These were hard to get right. Read the actual code before touching anything near them.
 
-| System | What It Does | Risk If Broken |
-|--------|-------------|----------------|
-| HTTP Resource Pack Server | Serves textures to players via local HTTP | If broken: purple/missing textures for everyone |
-| GUI Back-Stack | ESC key navigation via `ArrayDeque` in GuiManager | If broken: menus don't navigate back properly |
-| Immutable SlotData | `SlotManager` uses immutable records, always clone with `update()` | If broken: race conditions, corrupt block data |
-| Atomic file writes | Writes to `.tmp` then moves — never write directly to live files | If broken: corrupt saves on server crash |
-| SoundEvents | Some need `.value()`, some don't — see memory note | If wrong: silent crashes |
+| System | Location | What breaks if you touch it wrong |
+|--------|----------|----------------------------------|
+| HTTP Resource Pack Server | `network/ResourcePackServer.java` | Purple/missing textures for all players |
+| GUI Back-Stack | `gui/GuiManager.java` — `ArrayDeque` + `RESTORING` guard | Back button stops working, menus loop or crash |
+| Immutable SlotData | `core/SlotData.java` + `core/SlotManager.java` | Always use `.update()` pattern, never mutate in place. Race conditions, corrupt saves. |
+| Atomic file writes | `core/SlotManager.java` `writeTextureFile()` | Write to `.tmp` then `Files.move()` with `ATOMIC_MOVE`. Direct writes = corrupt files on crash. |
+| SoundEvents | Any file using `SoundEvents.*` | **Only** `BLOCK_NOTE_BLOCK_*` needs `.value()`. All others are bare `SoundEvent`. Wrong = silent crash. |
+| Animation metadata | `animMeta` in SlotData | Must use `{"index": i, "time": t}` object format. Integer format = broken/stacked frames. |
 
-**SoundEvents rule:** Only `BLOCK_NOTE_BLOCK_*` constants need `.value()`. All other SoundEvents constants are bare `SoundEvent` and must NOT use `.value()`.
+### File Size Warning
+
+These files are enormous. Edits have side effects that are hard to predict.
+
+| File | Lines | Risk |
+|------|-------|------|
+| `gui/GuiManager.java` | ~9,400 | Every GUI in the mod. One wrong edit breaks multiple screens. |
+| `command/CustomBlockCommand.java` | ~6,300 | Every command. |
+
+When editing these files: make the smallest possible change. Read the surrounding 20 lines before and after your edit location. Build immediately after every change.
 
 ---
 
-## Before Making Any Change
+## Build Instructions
 
 ```bash
-# 1. Make sure it builds clean first
-./gradlew build   # requires JAVA_HOME pointing to Java 21
+# JAVA_HOME must point to Java 21 — the default Java 8 will fail
+$env:JAVA_HOME = "C:\Program Files\Microsoft\jdk-21.0.10.7-hotspot"
+$env:PATH = "$env:JAVA_HOME\bin;" + $env:PATH
 
-# 2. Commit a checkpoint before touching anything
-git add -A && git commit -m "checkpoint: before [what you're about to change]"
-
-# 3. Make your change
-# 4. Build again to confirm nothing broke
+cd CustomBlockss
 ./gradlew build
-
-# 5. Tell the developer exactly what to test
 ```
+
+Build must pass before telling the developer to test anything.
 
 ---
 
-## If Something Breaks
+## Rollback Protocol
 
-The developer can say "undo it" and you revert to the last checkpoint commit.
+If something breaks, the developer can say "undo it." You do this immediately without arguing:
 
 ```bash
-git log --oneline -10   # find the checkpoint
-git revert HEAD         # safe undo
-./gradlew build         # confirm it's clean again
+git log --oneline -10    # find the checkpoint before the broken change
+git revert HEAD          # undo last commit safely
+./gradlew build          # confirm it's clean
 ```
 
-Tell them clearly: "Reverted. Back to the state before [change]. Build passes."
+Report: "Reverted. Back to the state before [change]. Build passes."
+
+Do not say "but the logic was correct." Do not explain why the change should have worked. Just revert.
 
 ---
 
-## The Definition of Done
+## Context Window Warning
 
-A feature is done when **the developer confirms it in-game**. Not before.
+Long conversations make you less accurate. You will start misremembering what variables are named, confusing method signatures, and writing plausible-sounding code that doesn't compile or doesn't do what you claim.
 
-| Who says it | Does it count? |
-|-------------|---------------|
-| AI says "I implemented it" | No |
-| Build passes | No |
-| Code looks correct | No |
-| Developer says "works" or sends a screenshot | **Yes** |
+Signs you are losing accuracy:
+- You describe code without reading the file first
+- You say "as we established earlier" about something from many messages ago
+- You are certain about something you haven't verified
+
+When this happens: slow down, re-read the relevant files, and if the conversation is very long, tell the developer: "This conversation is getting long — I'd recommend starting a new one after this change. I'll update the Royal Directive first."
 
 ---
 
-## Current Priority Queue
+## Session End Protocol
 
-Work through this in order. Do not jump ahead. Do not add items without asking.
+Before ending a session or starting a new one, update this document:
 
-1. **HUD editor** — Developer wants a Lunar-style screen to move and customize the block info overlay. Currently a stub. Needs to be built from scratch as a client-side Fabric screen.
-2. **Main GUI layout** — Messy, needs a clean organized grid.
-3. **Help GUI** — Incomplete, needs proper items and descriptions.
-4. **Color square delay** — Investigate and fix the recolor speed issue.
-5. **Random texture breaks** — Need a server log to diagnose properly.
+1. Move confirmed working features into the Verified Working table with today's date
+2. Remove or update fixed items in the Known Broken table
+3. Update the priority queue
+4. Commit: `git add THE_ROYAL_DIRECTIVE.md && git commit -m "docs: update Royal Directive state after session"`
+
+The next AI will read this document first. Give them accurate information.
 
 ---
 
 ## One Last Thing
 
-This developer has been through a lot. They are not a programmer. They had a vision for a mod and trusted AI to help build it. That trust has been broken many times.
+This developer has a clear vision. They know what they want the mod to feel like. They just can't write the code themselves. That's the only reason AI is involved.
 
-Don't make promises. Don't say "this time will be different." Just do the work one step at a time, ask them to test it, and actually wait for the answer before moving on.
+They don't need grand plans. They don't need promises. They don't need pep talks.
 
-That's all they've ever needed.
+They need one working thing at a time, confirmed by them, before moving on.
+
+That's it. That's everything.
