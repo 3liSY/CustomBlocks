@@ -174,13 +174,16 @@ public class ColorTriangleItem extends Item {
         SlotData source = SlotManager.getBySlot(sb.getSlotKey());
         if (source == null) return ActionResult.PASS;
 
-        // ── 3.5 Shift+right-click → open block editor for inspection ─────────
-        // Phase 3.5 recolor-preview GUI is not yet implemented.
-        // For now, shift+right-click opens the full editor so the player can inspect the block
-        // before deciding to recolor it. When Phase 3.5 is built, replace openEditor() here
-        // with GuiManager.openRecolorPreviewGui(player, source, resolveColor(ctx.getStack())).
+        // ── 3.5 Shift+right-click → confirmation GUI before creating color variant ──
         if (player != null && player.isSneaking()) {
-            com.customblocks.gui.GuiManager.openEditor((net.minecraft.server.network.ServerPlayerEntity) player, source.customId, 0);
+            TriangleColor color = resolveColor(ctx.getStack());
+            String baseId  = stripColorSuffix(source.customId);
+            String newId   = baseId + "_" + color.key();
+            String newName = deriveDisplayName(source.displayName, color.label());
+            var job = new com.customblocks.gui.GuiManager.RecolorJob(
+                source.customId, newId, newName, color.r(), color.g(), color.b());
+            com.customblocks.gui.GuiManager.openRecolorConfirmGui(
+                (net.minecraft.server.network.ServerPlayerEntity) player, job);
             return ActionResult.SUCCESS;
         }
 
@@ -311,12 +314,6 @@ public class ColorTriangleItem extends Item {
      * Background colour sampled as 3×3 median in each corner for anti-aliasing.
      * Colour distance uses CIE-Lab delta-E (perceptual) instead of per-channel abs.
      */
-    private static byte[] recolourBackground(byte[] src, int newR, int newG, int newB,
-                                              boolean fillTrapped, int tolerance)
-            throws Exception {
-        return recolourBackground(src, newR, newG, newB, fillTrapped, tolerance, "edge");
-    }
-
     private static byte[] recolourBackground(byte[] src, int newR, int newG, int newB,
                                               boolean fillTrapped, int tolerance, String mode)
             throws Exception {

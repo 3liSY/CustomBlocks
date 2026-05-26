@@ -69,6 +69,10 @@ public class GuiManager {
     private record AnimParams(float fps, boolean interpolate, int frameCount) {}
     private record FaceImportPending(String blockId, String face, int returnPage, String importDir, long expiresAt) {}
 
+    /** Pending color-triangle recolor job stored between confirmation GUI open and Apply click. */
+    public record RecolorJob(String sourceId, String newId, String newName, int r, int g, int b) {}
+    private static final ConcurrentHashMap<UUID, RecolorJob> PENDING_RECOLORS = new ConcurrentHashMap<>();
+
     /** GuiMode names that have a full implementation (open method + restoreState + handleClick case). */
     private static final java.util.Set<String> IMPLEMENTED_MODES = java.util.Set.of(
         "MAIN", "PICKER", "PICKER_BROKEN", "EDITOR", "FACE_EDITOR",
@@ -90,14 +94,12 @@ public class GuiManager {
         "VOICE_PICKER", "FAVORITES_GUI", "RECENT_GUI", "SAFETY_CENTER",
         "HISTORY_GUI", "SCRIPT_GUI", "SCRIPT_SUMMARY", "CACHE_DASHBOARD",
         "AUDIT_GUI", "AI_GEN", "CUSTOM_COLOR_STUDIO", "ACHIEVEMENTS_GUI",
-        "SNAPSHOTS_GUI", "DELETED_BLOCKS_GUI", "BOX_NUDGE_EDITOR"
+        "SNAPSHOTS_GUI", "DELETED_BLOCKS_GUI", "BOX_NUDGE_EDITOR",
+        "RECOLOR_CONFIRM"
     );
 
     /** GuiMode names that are reserved for a planned phase but have no content yet. */
-    private static final java.util.Set<String> STUB_MODES = java.util.Set.of(
-        "FIND_PORT_GUI", "ASSISTANT_CONTROL", "DRESS_GUI", "GRADIENT_GUI",
-        "IMPORT_WIZARD", "RETEXTURE_WIZARD", "AI_PICKER", "DROP_CONFIG", "PERMISSIONS_SUMMARY"
-    );
+    private static final java.util.Set<String> STUB_MODES = java.util.Set.of();
 
     /** Returns the set of GuiMode names with full implementations. Used by DiagnosticsHelper. */
     public static java.util.Set<String> implementedModeNames() { return IMPLEMENTED_MODES; }
@@ -145,7 +147,9 @@ public class GuiManager {
         CREATE_CAT_BADGE,
         BULK_RECOLOR_SCOPE,
         BULK_RECOLOR_EXCLUDE,
-        SET_HOLOGRAM_TEXT
+        SET_HOLOGRAM_TEXT,
+        AI_CHAT_QUERY,
+        CONFIRM_SCRIPT_DELETE
     }
 
     public record PendingInput(InputAction action, String blockId, String face,
@@ -578,7 +582,32 @@ public class GuiManager {
         int total = sortedBlocks().size();
         int max   = total == 0 ? 0 : Math.max(0, (total - 1) / BLOCKS_PER_PAGE);
         page = Math.max(0, Math.min(page, max));
+        // Push the caller's state, then a TAB_ICON_MENU marker so handlePickerClick
+        // knows to apply the tab icon instead of opening the editor when a block is clicked.
+        pushBackStack(player.getUuid());
+        Deque<GuiState> bs = BACK_STACK.computeIfAbsent(player.getUuid(), k -> new ArrayDeque<>());
+        bs.push(GuiState.tabIconMenu());
+        while (bs.size() > MAX_BACK_STACK_DEPTH) bs.removeLast();
         openScreenFromGuiState(player, GuiState.picker(page), buildPicker(player.getUuid(), page, false), Text.translatable("customblocks.gui.tab_icon_picker.title"));
+    }
+
+    private static void applyTabIconFromBlock(ServerPlayerEntity player, String blockId) {
+        SlotData sel = SlotManager.getById(blockId);
+        if (sel == null || sel.texture == null) { send(player, "§c[CB] Block has no texture."); popBackStack(player); return; }
+        final byte[] bytes = sel.texture.clone();
+        MinecraftServer srv = player.getServer();
+        SlotManager.setTabIconTexture(bytes);
+        if (SlotManager.hasId("tab_icon")) {
+            SlotData ex = SlotManager.getById("tab_icon");
+            SlotManager.updateTexture("tab_icon", bytes); SlotManager.saveAll();
+            NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("retexture", ex.index, "tab_icon", null, bytes, ex.lightLevel, ex.hardness, ex.soundType));
+        } else if (SlotManager.freeSlots() > 0) {
+            SlotData iconSlot = SlotManager.assign("tab_icon", "Tab Icon", bytes);
+            if (iconSlot != null) { SlotManager.saveAll(); NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("add", iconSlot.index, "tab_icon", "Tab Icon", bytes, iconSlot.lightLevel, iconSlot.hardness, iconSlot.soundType)); }
+        }
+        NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("tabicon", -1, null, null, bytes, 0, 0, "stone"));
+        send(player, "Tab icon updated!");
+        popBackStack(player);
     }
 
     public static void openResourceHub(ServerPlayerEntity player) {
@@ -689,6 +718,7 @@ public class GuiManager {
     }
 
     public static void openAiGui(ServerPlayerEntity player) {
+        pushBackStack(player.getUuid());
         openScreenFromGuiState(player, GuiState.aiGen(null), buildAiHubGui(), Text.literal(normalizeFormattingCodes("§dAI Tools")));
     }
 
@@ -723,7 +753,7 @@ public class GuiManager {
         {"friendly",     "§a§lFriendly",     "EMERALD",        "§7Warm, encouraging messages."},
         {"professional", "§e§lProfessional", "GOLD_INGOT",     "§7Clean, no-fluff output."},
         {"royal",        "§d§lRoyal",        "NETHER_STAR",    "§7Formal and dramatic language."},
-        {"minimal",      "§7§lMinimal",      "GRAY_DYE",       "§7Shortest possible messages."},
+        {"minimal",      "§7§lMinimal",      "COAL",           "§7Shortest possible messages."},
         {"arabic",       "§6§lArabic",       "HEART_OF_THE_SEA","§7Messages displayed in Arabic."},
         {"silly",        "§c§lSilly",        "SLIME_BALL",     "§7Playful and fun responses."},
     };
@@ -746,7 +776,7 @@ public class GuiManager {
                 case "EMERALD"         -> Items.EMERALD;
                 case "GOLD_INGOT"      -> Items.GOLD_INGOT;
                 case "NETHER_STAR"     -> Items.NETHER_STAR;
-                case "GRAY_DYE"        -> Items.GRAY_DYE;
+                case "COAL"            -> Items.COAL;
                 case "HEART_OF_THE_SEA"-> Items.HEART_OF_THE_SEA;
                 default                -> Items.SLIME_BALL;
             };
@@ -1169,7 +1199,9 @@ public class GuiManager {
                 case PICKER_BROKEN -> openBrokenBlocks(player, state.page());
                 case PROPERTIES_MENU -> openPropertiesGui(player, state.editingId(), state.page());
                 case SOUND_MENU -> openSoundMenu(player, state.editingId(), state.page());
-                case TAB_ICON_MENU -> openTabIconPicker(player, state.page());
+                // TAB_ICON_MENU is used as a back-stack marker, not a real screen.
+                // When popped via ESC, pop again to restore the caller's screen instead.
+                case TAB_ICON_MENU -> popBackStack(player);
                 case RESOURCE_CENTER -> openResourceHub(player);
                 case ANIM_GUI -> openAnimGui(player, state.editingId(), state.page());
                 case BULK_DELETE -> openBulkDelete(player, state.page());
@@ -1208,6 +1240,7 @@ public class GuiManager {
                 case SNAPSHOTS_GUI -> openSnapshotsGui(player, state.page());
                 case DELETED_BLOCKS_GUI -> openDeletedBlocksGui(player, state.page());
                 case BOX_NUDGE_EDITOR -> openBoxNudgeEditor(player, state.editingId(), state.shapeBoxPage(), state.page());
+                case RECOLOR_CONFIRM -> openMain(player, 0); // transient — job not serialised across reconnect
                 case SCRIPT_GUI -> openScriptGui(player, state.page());
                 case SCRIPT_SUMMARY -> {
                     com.customblocks.core.MacroManager.ScriptRunResult result = LAST_SCRIPT_RESULTS.get(player.getUuid());
@@ -1319,7 +1352,8 @@ public class GuiManager {
                 case SNAPSHOTS_GUI -> handleSnapshotsGuiClick(player, state, slot);
                 case DELETED_BLOCKS_GUI -> handleDeletedBlocksGuiClick(player, state, slot, button);
                 case BOX_NUDGE_EDITOR -> handleBoxNudgeClick(player, state, slot, button);
-                case SCRIPT_GUI -> handleScriptGuiClick(player, state, slot);
+                case RECOLOR_CONFIRM -> handleRecolorConfirmClick(player, state, slot);
+                case SCRIPT_GUI -> handleScriptGuiClick(player, state, slot, button);
                 case SCRIPT_SUMMARY -> handleScriptSummaryClick(player, state, slot);
                 case CACHE_DASHBOARD -> handleCacheDashboardClick(player, state, slot);
                 case AUDIT_GUI -> handleAuditGuiClick(player, state, slot);
@@ -1533,7 +1567,7 @@ public class GuiManager {
                                 NetworkManager.broadcastUpdate(srv, new SlotUpdatePayload("setface", fresh.index, varId, null, fe.getValue(), fresh.lightLevel, fresh.hardness, fresh.soundType, fe.getKey()));
                         }
                         com.customblocks.block.SlotBlock.SlotItem nbItem = CustomBlocksMod.safeSlotItem(nb.index);
-                        player.getInventory().insertStack(nbItem != null ? new ItemStack(nbItem, 1) : ItemStack.EMPTY);
+                        if (nbItem != null) { ItemStack giveStack = new ItemStack(nbItem, 1); if (!player.getInventory().insertStack(giveStack)) player.dropStack(giveStack); }
                         send(player, "Variant '§f" + varId + "§a' created & given!");
                         openFaceEditor(player, varId, rp);
                     });
@@ -1572,6 +1606,26 @@ public class GuiManager {
                     net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME,
                     net.minecraft.sound.SoundCategory.MASTER, 1f, 1.2f);
                 openEditor(player, blockId, rp); return true;
+            }
+            case AI_CHAT_QUERY -> {
+                if ("cancel".equalsIgnoreCase(text)) { return true; }
+                postAiQuery(player, text);
+                return true;
+            }
+            case CONFIRM_SCRIPT_DELETE -> {
+                if ("confirm".equalsIgnoreCase(text) && blockId != null) {
+                    boolean deleted = com.customblocks.core.MacroManager.deleteMacro(blockId);
+                    if (deleted) {
+                        LAST_SCRIPT_RESULTS.remove(player.getUuid());
+                        send(player, "§a[Script] Deleted §f" + blockId + "§a.");
+                    } else {
+                        send(player, "§c[Script] Could not delete §f" + blockId + "§c.");
+                    }
+                } else {
+                    send(player, "§7[Script] Delete cancelled.");
+                }
+                openScriptGui(player, 0);
+                return true;
             }
             case SETTABICON_URL -> {
                 if ("cancel".equalsIgnoreCase(text)) { openMain(player, rp); return true; }
@@ -1732,7 +1786,8 @@ public class GuiManager {
                         case "resourcePackPort" -> CustomBlocksConfig.resourcePackPort = Math.max(0, Math.min(65535, Integer.parseInt(text)));
                         case "reloadDebounceMs" -> CustomBlocksConfig.reloadDebounceMs = Math.max(500, Math.min(10000, Long.parseLong(text)));
                         // cloudShareUrl is now a hardcoded constant — not editable via GUI
-                        case "aiName" -> CustomBlocksConfig.aiName = text.replace("&", "§");
+                        case "aiWorkerUrl" -> CustomBlocksConfig.aiWorkerUrl = text.trim();
+                        case "aiServerToken" -> CustomBlocksConfig.aiServerToken = text.trim();
                         case "triangleGreenHex" -> {
                             String normalized = normalizeHexInput(text);
                             if (normalized == null) {
@@ -1953,7 +2008,7 @@ public class GuiManager {
     }
 
     public static boolean hasPending(ServerPlayerEntity player)  { return PENDING.containsKey(player.getUuid()); }
-    public static void clearState(ServerPlayerEntity player) { STATES.remove(player.getUuid()); PENDING.remove(player.getUuid()); FACE_IMPORTS.remove(player.getUuid()); FACE_CHANGE_SELECTIONS.remove(player.getUuid()); FACE_CHANGE_RETURN_PAGES.remove(player.getUuid()); BACK_STACK.remove(player.getUuid()); }
+    public static void clearState(ServerPlayerEntity player) { STATES.remove(player.getUuid()); PENDING.remove(player.getUuid()); FACE_IMPORTS.remove(player.getUuid()); FACE_CHANGE_SELECTIONS.remove(player.getUuid()); FACE_CHANGE_RETURN_PAGES.remove(player.getUuid()); BACK_STACK.remove(player.getUuid()); PENDING_RECOLORS.remove(player.getUuid()); }
 
     public static void checkPendingFaceImports(MinecraftServer server) {
         if (FACE_IMPORTS.isEmpty()) {
@@ -2045,17 +2100,17 @@ public class GuiManager {
         // Row 1: Header
         inv.setStack(4, uiGlint(Items.NETHER_STAR, "§6§l✦ §r§fMagic Items Arsenal", "§7Your legendary toolkit", "§8Click any item to receive it"));
         // Row 2: Color Squares
-        inv.setStack(9, ui(Items.ORANGE_STAINED_GLASS_PANE, "§6── Colour Squares ──", "§7Swap block colours instantly"));
+        inv.setStack(9, ui(Items.NETHER_STAR, "§6── Colour Squares ──", "§7Swap block colours instantly"));
         inv.setStack(10, uiGlint(Items.GREEN_CONCRETE, "§a§lGreen Square", "§7Click to receive"));
         inv.setStack(11, uiGlint(Items.YELLOW_CONCRETE, "§e§lYellow Square", "§7Click to receive"));
         inv.setStack(12, uiGlint(Items.BLACK_CONCRETE, "§8§lBlack Square", "§7Click to receive"));
         // Row 2: Color Triangles
-        inv.setStack(14, ui(Items.PURPLE_STAINED_GLASS_PANE, "§5── Colour Triangles ──", "§7Paint backgrounds onto blocks"));
+        inv.setStack(14, ui(Items.AMETHYST_CLUSTER, "§5── Colour Triangles ──", "§7Paint backgrounds onto blocks"));
         inv.setStack(15, uiGlint(Items.GREEN_TERRACOTTA, "§a§lGreen Triangle", "§7Click to receive"));
         inv.setStack(16, uiGlint(Items.YELLOW_TERRACOTTA, "§e§lYellow Triangle", "§7Click to receive"));
         inv.setStack(17, uiGlint(Items.BLACK_TERRACOTTA, "§8§lBlack Triangle", "§7Click to receive"));
         // Row 3: Premium Tools
-        inv.setStack(18, ui(Items.LIGHT_BLUE_STAINED_GLASS_PANE, "§b── Premium Tools ──", "§7Legendary instruments of creation"));
+        inv.setStack(18, ui(Items.ECHO_SHARD, "§b── Premium Tools ──", "§7Legendary instruments of creation"));
         inv.setStack(19, uiGlint(Items.PAINTING, "§6§lRainbow Rectangle", "§7Face-painting wand", "§8Right-click a block face → paste URL"));
         inv.setStack(20, uiGlint(Items.GOLDEN_APPLE, "§6§lGolden Hexagon", "§7UV face rotator & flipper", "§8Right-click = rotate 90°", "§8Sneak+click = flip horizontally"));
         inv.setStack(21, uiGlint(Items.BLAZE_ROD, "§b§lLumina Brush", "§7Property painter", "§8Right-click any block → light & hardness sliders"));
@@ -2136,10 +2191,10 @@ public class GuiManager {
         inv.setStack(10, toggleItem("YCbCr Math", CustomBlocksConfig.bgRemovalUseYcbcr,
             "Separates brightness from colour to reduce light edge halos"));
         inv.setStack(13, enabled
-            ? uiGlint(Items.LIME_DYE, "§a§l✔ Background Removal: §lON",
+            ? uiGlint(Items.EMERALD, "§a§l✔ Background Removal: §lON",
                 "§7Currently §atrimming §7white/transparent edges",
                 "§8Click to disable")
-            : uiGlint(Items.GRAY_DYE, "§7§l✖ Background Removal: §lOFF",
+            : uiGlint(Items.FLINT, "§7§l✖ Background Removal: §lOFF",
                 "§7Imports keep their full original image",
                 "§8Click to enable"));
 
@@ -2190,11 +2245,11 @@ public class GuiManager {
         inv.setStack(30, ui(Items.GLOWSTONE_DUST, "§a▶ More §8(+5)", "§7Current: §e" + tol));
 
         // Quick presets (row 4: slots 36-40)
-        inv.setStack(36, ui(Items.LIGHT_GRAY_DYE, "§7Preset: §lOff", "§70 — keep originals"));
-        inv.setStack(37, ui(Items.GREEN_DYE,      "§aPreset: §lLight",  "§720 — only pure white"));
-        inv.setStack(38, ui(Items.YELLOW_DYE,     "§ePreset: §lBalanced","§730 — default, recommended"));
-        inv.setStack(39, ui(Items.ORANGE_DYE,     "§6Preset: §lStrong", "§750 — catches off-white"));
-        inv.setStack(40, ui(Items.RED_DYE,        "§cPreset: §lAggressive","§775 — removes most light tones"));
+        inv.setStack(36, ui(Items.COBBLESTONE,    "§7Preset: §lOff", "§70 — keep originals"));
+        inv.setStack(37, ui(Items.OAK_SAPLING,    "§aPreset: §lLight",  "§720 — only pure white"));
+        inv.setStack(38, ui(Items.GOLD_NUGGET,    "§ePreset: §lBalanced","§730 — default, recommended"));
+        inv.setStack(39, ui(Items.BLAZE_POWDER,   "§6Preset: §lStrong", "§750 — catches off-white"));
+        inv.setStack(40, ui(Items.REDSTONE,       "§cPreset: §lAggressive","§775 — removes most light tones"));
 
         // Triangle Factory
         inv.setStack(42, uiGlint(Items.PRISMARINE_SHARD, "§b§lTriangle Factory",
@@ -2488,8 +2543,8 @@ public class GuiManager {
         SimpleInventory inv = new SimpleInventory(54);
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
         // Row 1: Toggles
-        inv.setStack(11, toggleItem("AI System Ready", CustomBlocksConfig.aiEnabled, "Keep the AI assistant system enabled"));
-        inv.setStack(12, toggleItem("AI Status Halo", CustomBlocksConfig.aiHologram, "Show a floating status label above the assistant"));
+        inv.setStack(11, strItem("AI Worker URL", CustomBlocksConfig.aiWorkerUrl.isEmpty() ? "(not set)" : CustomBlocksConfig.aiWorkerUrl, "Cloudflare Worker URL for AI chat"));
+        inv.setStack(12, strItem("AI Server Token", CustomBlocksConfig.aiServerToken.isEmpty() ? "(not set)" : "••••••••", "Server identity token sent to the AI Worker"));
         inv.setStack(13, toggleItem("Cloud Share", CustomBlocksConfig.cloudShareEnabled, "Upload and fetch share codes from the Cloud Vault"));
         // 1.29 — Hologram toggle
         inv.setStack(14, uiGlint(CustomBlocksConfig.hologramEnabled ? Items.LANTERN : Items.SOUL_LANTERN,
@@ -2510,7 +2565,7 @@ public class GuiManager {
         inv.setStack(25, numItem("Communication Door", CustomBlocksConfig.resourcePackPort, "Port used by the local texture server (0 disables it)"));
         inv.setStack(26, numItem("Pack Rebuild Delay", CustomBlocksConfig.reloadDebounceMs, "How long to wait before rebuilding the pack again"));
         // Row 3: Strings
-        inv.setStack(28, strItem("AI Display Name", CustomBlocksConfig.aiName, "The name shown above your assistant"));
+        inv.setStack(28, glass());
         inv.setStack(29, strItem("History Mode", CustomBlocksConfig.undoMode, "Choose whether undo history is shared or per-player"));
         inv.setStack(30, colorFillModeButton(CustomBlocksConfig.colorToolBackgroundMode));
         inv.setStack(31, strItem("Green Shade", CustomBlocksConfig.triangleGreenHex, "Edit the built-in Green triangle/square shade"));
@@ -2642,18 +2697,8 @@ public class GuiManager {
     private static void handleConfigGuiClick(ServerPlayerEntity player, GuiState state, int slot) {
         switch (slot) {
             // Toggles
-            case 11 -> {
-                CustomBlocksConfig.aiEnabled = !CustomBlocksConfig.aiEnabled;
-                CustomBlocksConfig.save();
-                send(player, "§a[Config] aiEnabled = " + CustomBlocksConfig.aiEnabled);
-                openConfigGui(player, false);
-            }
-            case 12 -> {
-                CustomBlocksConfig.aiHologram = !CustomBlocksConfig.aiHologram;
-                CustomBlocksConfig.save();
-                send(player, "§a[Config] aiHologram = " + CustomBlocksConfig.aiHologram);
-                openConfigGui(player, false);
-            }
+            case 11 -> configPrompt(player, "aiWorkerUrl", "AI Worker URL (Cloudflare Worker):");
+            case 12 -> configPrompt(player, "aiServerToken", "AI Server Token (server password):");
             case 13 -> {
                 CustomBlocksConfig.cloudShareEnabled = !CustomBlocksConfig.cloudShareEnabled;
                 CustomBlocksConfig.save();
@@ -2687,7 +2732,7 @@ public class GuiManager {
             case 25 -> configPrompt(player, "resourcePackPort", "Communication Door (0 disables it):");
             case 26 -> configPrompt(player, "reloadDebounceMs", "Pack Rebuild Delay (500-10000 ms):");
             // Strings
-            case 28 -> configPrompt(player, "aiName", "AI Display Name:");
+            case 28 -> {} // slot reserved
             case 29 -> configPrompt(player, "undoMode", "History Mode (global / per_player / both):");
             case 30 -> openColorFillModeGui(player);
             case 31 -> configPrompt(player, "triangleGreenHex", "Green Shade Hex (#RRGGBB):");
@@ -2753,7 +2798,7 @@ public class GuiManager {
                 int absPos = offset + i + 1;
                 String label = e.wasDeleted() ? "§cRestore §f" + e.customId() : "§6Undo §f" + e.description() + " §7on §f" + e.customId();
                 inv.setStack(10 + i, uiGlint(e.wasDeleted() ? Items.CHEST : Items.PAPER,
-                    label, "§8History position #" + absPos, i == 0 && page == 0 ? "§aClick to apply" : "§8Apply in order from #1"));
+                    label, "§8History position #" + absPos, (offset + i) == 0 ? "§aClick to apply" : "§eClick to apply #1–#" + (offset + i + 1)));
             }
         }
 
@@ -2766,7 +2811,7 @@ public class GuiManager {
                 int absPos = offset + i + 1;
                 String label = e.wasDeleted() ? "§cRe-delete §f" + e.customId() : "§bRedo §f" + e.description() + " §7on §f" + e.customId();
                 inv.setStack(28 + i, uiGlint(e.wasDeleted() ? Items.BARRIER : Items.MAP,
-                    label, "§8History position #" + absPos, i == 0 && page == 0 ? "§aClick to apply" : "§8Apply in order from #1"));
+                    label, "§8History position #" + absPos, (offset + i) == 0 ? "§aClick to apply" : "§eClick to apply #1–#" + (offset + i + 1)));
             }
         }
 
@@ -2792,30 +2837,40 @@ public class GuiManager {
             openScreenFromGuiState(player, GuiState.undoPicker(page + 1), buildUndoPicker(player, page + 1), Text.translatable("customblocks.gui.undo.title"));
             return;
         }
-        // Undo: only first entry on page 0 is directly actionable
-        if (slot == 10 && page == 0) {
-            UndoManager.UndoEntry entry = UndoManager.popUndo(uuid);
-            if (entry != null) {
-                applyUndoEntry(player, entry);
-                FeedbackHelper.actionBar(player, "§6§l↩ §r§eUndo: §f" + entry.customId());
-                send(player, "§a[Undo] Applied: " + entry.description() + " on " + entry.customId());
-            } else {
-                send(player, "§7Nothing to undo.");
+        // Undo: clicking entry N applies entries 1..N in sequence (GUI-8 — all 8 entries clickable)
+        int perPage = 8;
+        int offset = page * perPage;
+        if (slot >= 10 && slot <= 17) {
+            int relIdx = slot - 10;
+            int absIdx = offset + relIdx;
+            if (absIdx >= UndoManager.undoSize(uuid)) return;
+            int count = absIdx + 1; // undo #1 through clicked entry
+            int done = 0;
+            for (int i = 0; i < count && UndoManager.undoSize(uuid) > 0; i++) {
+                UndoManager.UndoEntry e = UndoManager.popUndo(uuid);
+                if (e != null) { applyUndoEntry(player, e); done++; }
             }
+            if (done > 1) FeedbackHelper.actionBar(player, "§6§l↩ §r§eUndid §f" + done + " §eactions.");
+            else if (done == 1) FeedbackHelper.actionBar(player, "§6§l↩ §r§eUndo applied.");
+            else send(player, "§7Nothing to undo.");
             refreshScreen(player, buildUndoPicker(player, 0));
             STATES.put(uuid, GuiState.undoPicker(0));
             return;
         }
-        // Redo: only first entry on page 0 is directly actionable
-        if (slot == 28 && page == 0) {
-            UndoManager.UndoEntry entry = UndoManager.popRedo(uuid);
-            if (entry != null) {
-                applyRedoEntry(player, entry);
-                FeedbackHelper.actionBar(player, "§6§l↪ §r§eRedo: §f" + entry.customId());
-                send(player, "§a[Redo] Applied: " + entry.description() + " on " + entry.customId());
-            } else {
-                send(player, "§7Nothing to redo.");
+        // Redo: clicking entry N applies entries 1..N in sequence
+        if (slot >= 28 && slot <= 35) {
+            int relIdx = slot - 28;
+            int absIdx = offset + relIdx;
+            if (absIdx >= UndoManager.redoSize(uuid)) return;
+            int count = absIdx + 1;
+            int done = 0;
+            for (int i = 0; i < count && UndoManager.redoSize(uuid) > 0; i++) {
+                UndoManager.UndoEntry e = UndoManager.popRedo(uuid);
+                if (e != null) { applyRedoEntry(player, e); done++; }
             }
+            if (done > 1) FeedbackHelper.actionBar(player, "§b§l↪ §r§eRedid §f" + done + " §eactions.");
+            else if (done == 1) FeedbackHelper.actionBar(player, "§b§l↪ §r§eRedo applied.");
+            else send(player, "§7Nothing to redo.");
             refreshScreen(player, buildUndoPicker(player, 0));
             STATES.put(uuid, GuiState.undoPicker(0));
             return;
@@ -2948,7 +3003,13 @@ public class GuiManager {
                 if (assign) {
                     openAssignmentDecision(player, targetId, page);
                 } else {
-                    openEditor(player, targetId, page);
+                    Deque<GuiState> _bs = BACK_STACK.get(player.getUuid());
+                    if (_bs != null && !_bs.isEmpty() && _bs.peek().mode() == GuiMode.TAB_ICON_MENU) {
+                        _bs.pop(); // consume the marker
+                        applyTabIconFromBlock(player, targetId);
+                    } else {
+                        openEditor(player, targetId, page);
+                    }
                 }
             }
         }
@@ -3004,7 +3065,7 @@ public class GuiManager {
             // Row 4: diagnostics + exit
             case 37 -> openBrokenBlocks(player, 0);
             case 39 -> openDeletedBlocksGui(player, 0);
-            case 41 -> send(player, "§6[CB] §fAI Assistant coming soon.");
+            case 41 -> { playSuccess(player); openAiGui(player); }
             case 43 -> player.closeHandledScreen();
             default -> {}
         }
@@ -3095,7 +3156,7 @@ public class GuiManager {
         }
         switch (slot) {
             case 0, 45 -> openEditorPicker(player, rp);
-            case 2  -> { player.getInventory().insertStack(CustomBlocksMod.safeSlotItem(d.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(d.index),1):ItemStack.EMPTY); send(player,"§a[GUI] Given 1x §f"+d.displayName); openEditor(player,id,rp); }
+            case 2  -> { var giveItem = CustomBlocksMod.safeSlotItem(d.index); if (giveItem != null) { ItemStack giveStack = new ItemStack(giveItem, 1); if (!player.getInventory().insertStack(giveStack)) { player.dropItem(giveStack, false); send(player,"§e[CB] Inventory full — item dropped at your feet."); } else { send(player,"§a[GUI] Given 1x §f"+d.displayName); } } openEditor(player,id,rp); }
             case 8  -> { PENDING.put(uuid,new PendingInput(InputAction.RETEXTURE_URL,id,null,null,null,rp)); closeForPrompt(player); send(player,"§6[GUI] §ePaste image URL for ALL faces of '§f"+id+"§e' (or §ccancel§e):"); }
             case 11 -> openAiSuggestGui(player, id);  // J2 — Smart Suggest
             case 17 -> { PENDING.put(uuid, new PendingInput(InputAction.WEB_LINK_CAST, id, null, null, null, rp)); closeForPrompt(player); send(player, "§ePaste the §fWeb-Link URL§e to cast onto this block (or §ccancel§e):"); }
@@ -3327,6 +3388,8 @@ public class GuiManager {
         if(slot == 19) openTabIconPicker(player, 0);
         else if(slot == 21) openBrokenBlocks(player, 0);
         else if(slot == 23) openResourceHub(player);
+        else if(slot == 25) { playSuccess(player); openAiGui(player); }
+        else if(slot == 33) { playClick(player); openResourceHub(player); }
         else if(slot == 16) { player.closeHandledScreen(); player.getServer().getCommandManager().executeWithPrefix(player.getCommandSource(), "cb export"); }
         else if(slot == 22) {
             // Friend Test — fetch external IP and display shareable URL
@@ -3487,7 +3550,7 @@ public class GuiManager {
                 openFaceEditor(player,id,rp);
             }
             case 47 -> { UndoManager.pushUndoMutation(id, d, "clearallfaces", uuid); SlotManager.clearAllFaces(id); SlotManager.saveAll(); broadcastClearAllFaces(player,d); send(player,"§a[GUI] All face overrides cleared."); openFaceEditor(player,id,rp); }
-            case 53 -> { player.getInventory().insertStack(CustomBlocksMod.safeSlotItem(d.index)!=null?new ItemStack(CustomBlocksMod.safeSlotItem(d.index),1):ItemStack.EMPTY); send(player,"§a[GUI] Given 1x §f"+d.displayName); openFaceEditor(player,id,rp); }
+            case 53 -> { var giveItem = CustomBlocksMod.safeSlotItem(d.index); if (giveItem != null) { ItemStack giveStack = new ItemStack(giveItem, 1); if (!player.getInventory().insertStack(giveStack)) { player.dropItem(giveStack, false); send(player,"§e[CB] Inventory full — item dropped at your feet."); } else { send(player,"§a[GUI] Given 1x §f"+d.displayName); } } openFaceEditor(player,id,rp); }
             default -> {}
         }
     }
@@ -4296,16 +4359,197 @@ public class GuiManager {
     }
 
     // ── Phase 3.1: Color Library Picker ──────────────────────────────────────
-    // Phase 3.1 (browse-and-apply gallery distinct from the editor) is not yet built.
-    // COLOR_PICKER routes to Color Studio so the entry point is wired and
-    // restoreState() reaches it safely. Replace both methods below when Phase 3.1 is built.
 
-    public static void openColorPicker(ServerPlayerEntity player, String context) {
-        openColorStudio(player, context);
+    /** Returns a §x-prefixed MC hex color code string for use in item names. */
+    private static String mcHexColor(int rgb) {
+        String h = String.format("%06X", rgb);
+        return "§x§" + h.charAt(0) + "§" + h.charAt(1) + "§" + h.charAt(2)
+             + "§" + h.charAt(3) + "§" + h.charAt(4) + "§" + h.charAt(5);
+    }
+
+    private static ItemStack colorSwatchItem(ColorLibrary.LibColor color, String contextDesc) {
+        String nameColor = mcHexColor(color.rgb());
+        String loreLine = contextDesc != null
+            ? "§aLeft-click §7to apply to §f" + contextDesc
+            : "§7Browse only — no block selected";
+        return named(Items.PAPER,
+            nameColor + "§l■ §r§f" + color.name(),
+            color.rgbLabel(),
+            "§7Hex: §f" + color.hex(),
+            loreLine);
+    }
+
+    public static void openColorPicker(ServerPlayerEntity player, String blockId) {
+        openScreenFromGuiState(player, GuiState.colorPicker(blockId),
+            buildColorPickerGui(player, blockId), Text.literal("§9Color Library"));
+    }
+
+    private static SimpleInventory buildColorPickerGui(ServerPlayerEntity player, String blockId) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+
+        SlotData target = blockId != null ? SlotManager.getById(blockId) : null;
+        String contextDesc = target != null ? target.displayName : null;
+
+        List<ColorLibrary.LibColor> colors = ColorLibrary.ALL;
+        for (int i = 0; i < colors.size() && i < 45; i++) {
+            inv.setStack(i, colorSwatchItem(colors.get(i), contextDesc));
+        }
+
+        inv.setStack(46, named(Items.AMETHYST_SHARD, "§5Open Color Studio", "§7Advanced HSB / hex editor"));
+        inv.setStack(49, named(Items.ECHO_SHARD, "§c◀ Back"));
+        return inv;
     }
 
     private static void handleColorPickerClick(ServerPlayerEntity player, GuiState state, int slot) {
-        handleColorStudioClick(player, state, slot);
+        if (slot == 49) { popBackStack(player); return; }
+        if (slot == 46) { openColorStudio(player, state.editingId()); return; }
+
+        List<ColorLibrary.LibColor> colors = ColorLibrary.ALL;
+        if (slot < 0 || slot >= colors.size()) return;
+
+        ColorLibrary.LibColor color = colors.get(slot);
+        String blockId = state.editingId();
+        if (blockId == null) {
+            // Browse-only mode — open Color Studio for this color
+            openColorStudio(player, null);
+            return;
+        }
+
+        SlotData d = SlotManager.getById(blockId);
+        if (d == null) { playError(player); openMain(player, 0); return; }
+        byte[] tex = d.texture;
+        if (tex == null || tex.length == 0) {
+            send(player, "§c[CB] That block has no texture to recolor.");
+            playError(player);
+            return;
+        }
+
+        // Recolor the block's texture in-place (background color replacement)
+        MinecraftServer server = player.getServer();
+        UUID uuid = player.getUuid();
+        int fR = color.rgb() >> 16 & 0xFF, fG = color.rgb() >> 8 & 0xFF, fB = color.rgb() & 0xFF;
+        Thread t = new Thread(() -> {
+            try {
+                byte[] newTex = com.customblocks.item.ColorTriangleItem.recolourTextureForPlayer(
+                    tex, fR, fG, fB, CustomBlocksConfig.useTrappedHoleFill(), uuid);
+                if (server != null) server.execute(() -> {
+                    UndoManager.pushUndoMutation(blockId, d, "recolor:" + color.name(), uuid);
+                    SlotManager.updateTexture(blockId, newTex);
+                    SlotManager.saveAll();
+                    NetworkManager.broadcastUpdate(server,
+                        new SlotUpdatePayload("retexture", d.index, blockId, null, newTex, d.lightLevel, d.hardness, d.soundType));
+                    playSuccess(player);
+                    send(player, "§a[CB] Applied §f" + color.name() + "§a to §f" + d.displayName + "§a.");
+                    openEditor(player, blockId, 0);
+                });
+            } catch (Exception e) {
+                if (server != null) server.execute(() -> {
+                    send(player, "§c[CB] Recolor failed: " + e.getMessage());
+                    playError(player);
+                });
+            }
+        }, "CB-ColorPicker-Recolor");
+        t.setDaemon(true);
+        t.start();
+        player.closeHandledScreen();
+        send(player, "§7[CB] Applying §f" + color.name() + "§7...");
+    }
+
+    // ── Phase 3.5: Recolor Confirm GUI (Color Triangle shift+right-click) ────
+
+    public static void openRecolorConfirmGui(ServerPlayerEntity player, RecolorJob job) {
+        PENDING_RECOLORS.put(player.getUuid(), job);
+        openScreenFromGuiState(player, new GuiState(GuiMode.RECOLOR_CONFIRM, job.sourceId(), 0, false, 0, false),
+            buildRecolorConfirmGui(player, job), Text.literal("§6Confirm Recolor"));
+    }
+
+    private static SimpleInventory buildRecolorConfirmGui(ServerPlayerEntity player, RecolorJob job) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+
+        SlotData src = SlotManager.getById(job.sourceId());
+        String srcName = src != null ? src.displayName : job.sourceId();
+
+        String colorHex = String.format("#%02X%02X%02X", job.r(), job.g(), job.b());
+        String nameColor = mcHexColor((job.r() << 16) | (job.g() << 8) | job.b());
+
+        // Center: color preview
+        inv.setStack(22, named(Items.PAPER,
+            nameColor + "§l■ §r§f" + colorHex,
+            "§7New color: §f" + colorHex,
+            "§8RGB: §7" + job.r() + ", " + job.g() + ", " + job.b()));
+
+        // Block info
+        inv.setStack(13, named(Items.NETHER_STAR,
+            "§f" + srcName,
+            "§7This block will get a new color variant:",
+            "§f" + job.newName()));
+
+        // Apply
+        inv.setStack(30, uiGlint(Items.EMERALD,
+            "§a§l✔ Apply Recolor",
+            "§7Creates new block: §f" + job.newName(),
+            "§8Source kept unchanged."));
+
+        // Cancel
+        inv.setStack(32, named(Items.BARRIER,
+            "§c§l✘ Cancel",
+            "§7No changes will be made."));
+
+        return inv;
+    }
+
+    private static void handleRecolorConfirmClick(ServerPlayerEntity player, GuiState state, int slot) {
+        RecolorJob job = PENDING_RECOLORS.remove(player.getUuid());
+        if (slot == 30 && job != null) {
+            SlotData src = SlotManager.getById(job.sourceId());
+            if (src == null) { send(player, "§c[CB] Source block no longer exists."); openMain(player, 0); return; }
+            byte[] tex = src.texture;
+            if (tex == null || tex.length == 0) { send(player, "§c[CB] Source block has no texture."); openMain(player, 0); return; }
+            if (SlotManager.freeSlots() == 0) { send(player, "§c[CB] No free slots available."); openMain(player, 0); return; }
+
+            MinecraftServer server = player.getServer();
+            UUID uuid = player.getUuid();
+            int fR = job.r(), fG = job.g(), fB = job.b();
+            String newId = job.newId(), newName = job.newName();
+            Thread t = new Thread(() -> {
+                try {
+                    byte[] newTex = com.customblocks.item.ColorTriangleItem.recolourTextureForPlayer(
+                        tex, fR, fG, fB, CustomBlocksConfig.useTrappedHoleFill(), uuid);
+                    if (server != null) server.execute(() -> {
+                        if (SlotManager.freeSlots() == 0) { send(player, "§c[CB] No free slots."); return; }
+                        SlotData newD = SlotManager.assign(newId, newName, newTex);
+                        if (newD == null) { send(player, "§c[CB] Could not allocate slot."); return; }
+                        SlotManager.setLightLevel(newId, src.lightLevel);
+                        SlotManager.setHardness(newId, src.hardness);
+                        SlotManager.setSoundType(newId, src.soundType);
+                        UndoManager.pushUndoCreate(newId, uuid);
+                        SlotManager.saveAll();
+                        NetworkManager.broadcastUpdate(server,
+                            new SlotUpdatePayload("add", newD.index, newId, newName, newTex, src.lightLevel, src.hardness, src.soundType));
+                        net.minecraft.item.Item item = com.customblocks.CustomBlocksMod.safeSlotItem(newD.index);
+                        if (item != null) { ItemStack giveStack = new ItemStack(item, 1); if (!player.getInventory().insertStack(giveStack)) player.dropStack(giveStack); }
+                        playSuccess(player);
+                        send(player, "§a[CB] Created §f" + newName + "§a.");
+                        openEditor(player, newId, 0);
+                    });
+                } catch (Exception e) {
+                    if (server != null) server.execute(() -> {
+                        send(player, "§c[CB] Recolor failed: " + e.getMessage());
+                        playError(player);
+                        openMain(player, 0);
+                    });
+                }
+            }, "CB-Recolour-Confirm");
+            t.setDaemon(true);
+            t.start();
+            send(player, "§7[CB] Processing recolor...");
+            player.closeHandledScreen();
+        } else {
+            // Cancel or any other slot
+            openMain(player, 0);
+        }
     }
 
     // ── G1: Color Studio ─────────────────────────────────────────────────────
@@ -4742,10 +4986,6 @@ public class GuiManager {
             LOGGER.warn("[Market] Failed to fetch listing: {}", e.getMessage());
             return java.util.List.of();
         }
-    }
-
-    private static SimpleInventory buildMarketGui(java.util.List<JsonObject> items, int page) {
-        return buildMarketGui(null, items, page);
     }
 
     private static SimpleInventory buildMarketGui(UUID uuid, java.util.List<JsonObject> rawItems, int page) {
@@ -6016,17 +6256,27 @@ public class GuiManager {
         SimpleInventory inv = new SimpleInventory(54);
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
         java.util.List<String> scripts = com.customblocks.core.MacroManager.listMacros();
+        int start = page * 28;
+        int end   = Math.min(scripts.size(), start + 28);
         inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
-        inv.setStack(49, uiGlint(Items.WRITABLE_BOOK, "§b§lScripts", "§7Saved: §f" + scripts.size()));
-        for (int i = 0, invSlot = 10; i < scripts.size() && i < 28; i++, invSlot++) {
+        inv.setStack(49, uiGlint(Items.WRITABLE_BOOK, "§b§lScripts", "§7Total: §f" + scripts.size()));
+        if (page > 0)             inv.setStack(47, uiGlint(Items.ARROW, "§7◀ Previous"));
+        if (end < scripts.size()) inv.setStack(51, uiGlint(Items.ARROW, "§7Next ▶"));
+        for (int i = start, invSlot = 10; i < end; i++, invSlot++) {
             if (invSlot == 17) invSlot = 19;
             if (invSlot == 26) invSlot = 28;
             if (invSlot > 34) break;
             String name = scripts.get(i);
             long lastRun = com.customblocks.core.MacroManager.lastRunTime(name);
+            java.util.List<String> steps = com.customblocks.core.MacroManager.loadMacro(name);
+            int stepCount = steps != null ? steps.size() : 0;
+            String lastRunStr = lastRun > 0
+                ? new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").format(new java.util.Date(lastRun))
+                : "Never";
             inv.setStack(invSlot, ui(Items.BOOK, "§f" + name,
-                "§7Click to run: §f/cb script run " + name,
-                "§7Last run: §f" + (lastRun > 0 ? new java.util.Date(lastRun) : "Never")));
+                "§7Steps: §f" + stepCount,
+                "§7Last run: §f" + lastRunStr,
+                "§aLeft-click §7to run  §cRight-click §7to view steps"));
         }
         return inv;
     }
@@ -6034,10 +6284,13 @@ public class GuiManager {
     private static SimpleInventory buildScriptSummaryGui(com.customblocks.core.MacroManager.ScriptRunResult result) {
         SimpleInventory inv = new SimpleInventory(54);
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
-        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
-        inv.setStack(49, uiGlint(Items.NETHER_STAR, "§a§l" + result.name(),
-            "§7Passed: §f" + result.ran() + "§7/§f" + result.steps().size(),
-            "§7Failed: §f" + result.failed()));
+        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back to scripts"));
+        inv.setStack(4, uiGlint(result.failed() == 0 ? Items.EMERALD : Items.REDSTONE,
+            (result.failed() == 0 ? "§a§l✔ " : "§c§l✘ ") + result.name(),
+            "§7Ran: §f" + result.ran() + "§7/§f" + result.steps().size() + " steps",
+            result.failed() > 0 ? "§cFailed: §f" + result.failed() : "§aAll steps passed"));
+        inv.setStack(49, uiGlint(Items.WRITABLE_BOOK, "§e▶ Run Again", "§7Re-run this script"));
+        inv.setStack(51, uiGlint(Items.BARRIER, "§c🗑 Delete Script", "§7Permanently removes §f" + result.name(), "§8This cannot be undone."));
         for (int i = 0, invSlot = 10; i < result.steps().size() && i < 28; i++, invSlot++) {
             if (invSlot == 17) invSlot = 19;
             if (invSlot == 26) invSlot = 28;
@@ -6053,49 +6306,87 @@ public class GuiManager {
     private static SimpleInventory buildAiHubGui() {
         SimpleInventory inv = new SimpleInventory(54);
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        inv.setStack(0,  uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
         inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
 
-        // Title
-        inv.setStack(4, uiGlint(Items.NETHER_STAR, "§d§lAI Command Hub",
-            "§7Type commands in chat via §f/cb ai \"...\"",
-            "§7Provider: §f" + CustomBlocksConfig.aiApiProvider));
+        boolean workerReady = !CustomBlocksConfig.aiWorkerUrl.isEmpty() && !CustomBlocksConfig.aiServerToken.isEmpty();
 
-        // Command examples — row 2 (slots 10-16)
-        inv.setStack(10, ui(Items.BARRIER, "§cDelete Commands",
+        // Header
+        inv.setStack(4, uiGlint(Items.AMETHYST_CLUSTER, "§d§l✦ AI Chat",
+            workerReady ? "§aGroq AI is connected and ready." : "§cAI Worker not configured. Set aiWorkerUrl + aiServerToken in config.",
+            "§7Ask anything about your custom blocks."));
+
+        // Ask button
+        inv.setStack(22, workerReady
+            ? uiGlint(Items.BOOK, "§e§l✎ Ask AI",
+                "§7Close GUI, type your question in chat.",
+                "§8Example: §fHow do I create a glowing block?",
+                "§8Example: §fList my blocks with fire in the name.")
+            : ui(Items.BARRIER, "§cNot configured",
+                "§7Set §faiWorkerUrl §7and §faiServerToken §7in config.",
+                "§8Open the Config GUI to enter values."));
+
+        // Tips row
+        inv.setStack(10, ui(Items.BARRIER, "§cBlock Commands",
             "§f/cb ai \"delete blocks starting with mob_\"",
-            "§f/cb ai \"delete all broken blocks\"",
-            "§f/cb ai \"remove block oak_plank\"",
-            "§8Supports: prefix, name, containing, broken"));
-
-        inv.setStack(13, ui(Items.SPYGLASS, "§bFind Commands",
             "§f/cb ai \"list all blocks\"",
-            "§f/cb ai \"find blocks containing gem\"",
-            "§f/cb ai \"show blocks starting with ice\"",
-            "§f/cb ai \"how many blocks\"",
-            "§8Returns matching block IDs in chat"));
-
-        inv.setStack(16, ui(Items.GLOWSTONE_DUST, "§eGlow Commands",
-            "§f/cb ai \"set glow 10 on block volcano\"",
-            "§f/cb ai \"set glow level 5 on all blocks with fire\"",
-            "§8Level 0-15  ·  Supports prefix & name match"));
-
-        // Row 3 (slots 19-25)
-        inv.setStack(19, ui(Items.NAME_TAG, "§aRename Command",
-            "§f/cb ai \"rename oak_plank to Oak Plank\"",
-            "§8Underscores in new name become spaces"));
-
-        inv.setStack(22, ui(Items.BOOK, "§7Tips",
-            "§7All AI commands support §f/cb undo §7to reverse.",
-            "§7Use §f'starting with X' §7for prefix match.",
-            "§7Use §f'containing X' §7to match any part of ID.",
-            "§7Use §f'named X' §7for exact ID match."));
-
-        inv.setStack(25, uiGlint(Items.BRUSH, "§bPer-Block AI",
-            "§7Open any block editor with §f/cb editor <id>",
-            "§7Use the §fAI Suggest §7button for smart suggestions",
-            "§7on name, textures, sounds, and more."));
+            "§f/cb ai \"set glow 10 on block X\"",
+            "§8These run without needing the AI worker."));
+        inv.setStack(13, ui(Items.SPYGLASS, "§bAI Chat",
+            "§7Ask open questions, get advice,",
+            "§7or describe what you want to build.",
+            "§8Powered by Groq · responses in chat."));
+        inv.setStack(16, ui(Items.BOOK, "§7Tips",
+            "§7Commands like delete/rename/glow work offline.",
+            "§7Freeform questions need the Worker.",
+            "§7/cb undo §7reverses command actions."));
 
         return inv;
+    }
+
+    public static void postAiQuery(ServerPlayerEntity player, String question) {
+        String url = CustomBlocksConfig.aiWorkerUrl;
+        String token = CustomBlocksConfig.aiServerToken;
+        if (url.isEmpty() || token.isEmpty()) {
+            send(player, "§c[AI] Worker not configured. Set aiWorkerUrl and aiServerToken in config.");
+            return;
+        }
+        send(player, "§d[AI] Thinking…");
+        MinecraftServer srv = player.getServer();
+        UUID uuid = player.getUuid();
+        EXECUTOR.submit(() -> {
+            try {
+                String body = "{\"question\":" + new com.google.gson.JsonPrimitive(question).toString()
+                        + ",\"playerUuid\":\"" + uuid + "\"}";
+                java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
+                        .connectTimeout(java.time.Duration.ofSeconds(10)).build();
+                java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder()
+                        .uri(java.net.URI.create(url.endsWith("/") ? url + "ai" : url + "/ai"))
+                        .timeout(java.time.Duration.ofSeconds(30))
+                        .header("Content-Type", "application/json")
+                        .header("x-cb-token", token)
+                        .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body))
+                        .build();
+                java.net.http.HttpResponse<String> resp = client.send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+                String reply;
+                try {
+                    com.google.gson.JsonObject jo = com.google.gson.JsonParser.parseString(resp.body()).getAsJsonObject();
+                    reply = jo.has("reply") ? jo.get("reply").getAsString() : resp.body();
+                } catch (Exception pe) { reply = resp.body(); }
+                final String finalReply = reply;
+                srv.execute(() -> {
+                    ServerPlayerEntity p = srv.getPlayerManager().getPlayer(uuid);
+                    if (p != null) {
+                        p.sendMessage(net.minecraft.text.Text.literal("§d[AI] §f" + finalReply), false);
+                    }
+                });
+            } catch (Exception e) {
+                srv.execute(() -> {
+                    ServerPlayerEntity p = srv.getPlayerManager().getPlayer(uuid);
+                    if (p != null) send(p, "§c[AI] Request failed: " + e.getMessage());
+                });
+            }
+        });
     }
 
     private static SimpleInventory buildCustomColorStudioGui(ServerPlayerEntity player, String initialHex) {
@@ -6229,22 +6520,51 @@ public class GuiManager {
         handleSimpleBackOnly(player, slot);
     }
 
-    private static void handleScriptGuiClick(ServerPlayerEntity player, GuiState state, int slot) {
+    private static void handleScriptGuiClick(ServerPlayerEntity player, GuiState state, int slot, int button) {
+        int page = state.page();
         if (slot == 45 || slot == 49) { handleEscBack(player); return; }
+        if (slot == 47 && page > 0)   { openScriptGui(player, page - 1); return; }
+        if (slot == 51)               { openScriptGui(player, page + 1); return; }
         java.util.List<String> scripts = com.customblocks.core.MacroManager.listMacros();
         int idx = gridIndex(slot);
-        if (idx >= 0 && idx < scripts.size()) {
-            com.customblocks.core.MacroManager.ScriptRunResult result = com.customblocks.core.MacroManager.runScript(player, scripts.get(idx));
+        int actual = page * 28 + idx;
+        if (idx < 0 || actual >= scripts.size()) return;
+        String name = scripts.get(actual);
+        if (button == 1) {
+            // Right-click → show script steps without running
+            java.util.List<String> steps = com.customblocks.core.MacroManager.loadMacro(name);
+            if (steps == null || steps.isEmpty()) { send(player, "§c[Script] No steps found for §f" + name); return; }
+            send(player, "§b[Script] §f" + name + " §7(" + steps.size() + " steps):");
+            for (int i = 0; i < steps.size(); i++) send(player, "  §7" + (i + 1) + ". §f" + steps.get(i));
+        } else {
+            // Left-click → run and show summary
+            com.customblocks.core.MacroManager.ScriptRunResult result = com.customblocks.core.MacroManager.runScript(player, name);
             if (result != null) openScriptSummary(player, result);
         }
     }
 
     private static void handleScriptSummaryClick(ServerPlayerEntity player, GuiState state, int slot) {
-        if (slot == 45 || slot == 49) openScriptGui(player, 0);
+        if (slot == 45) { openScriptGui(player, 0); return; }
+        com.customblocks.core.MacroManager.ScriptRunResult last = LAST_SCRIPT_RESULTS.get(player.getUuid());
+        if (slot == 49 && last != null) {
+            // Run Again
+            com.customblocks.core.MacroManager.ScriptRunResult result = com.customblocks.core.MacroManager.runScript(player, last.name());
+            if (result != null) openScriptSummary(player, result);
+        } else if (slot == 51 && last != null) {
+            // Delete — use pending input for confirmation
+            PENDING.put(player.getUuid(), new PendingInput(InputAction.CONFIRM_SCRIPT_DELETE, last.name(), null, null, null, 0));
+            closeForPrompt(player);
+            send(player, "§c[Script] Type §fconfirm §cto permanently delete §f" + last.name() + "§c, or anything else to cancel:");
+        }
     }
 
     private static void handleAiHubClick(ServerPlayerEntity player, GuiState state, int slot) {
-        handleSimpleBackOnly(player, slot);
+        if (slot == 0 || slot == 45) { handleEscBack(player); return; }
+        if (slot == 22 && !CustomBlocksConfig.aiWorkerUrl.isEmpty() && !CustomBlocksConfig.aiServerToken.isEmpty()) {
+            PENDING.put(player.getUuid(), new PendingInput(InputAction.AI_CHAT_QUERY, null, null, null, null, 0));
+            closeForPrompt(player);
+            send(player, "§d[AI] Type your question in chat (or §ccancel§d to abort):");
+        }
     }
 
     private static void handleCustomColorStudioClick(ServerPlayerEntity player, GuiState state, int slot) {
@@ -6336,7 +6656,8 @@ public class GuiManager {
             case "resourcePackPort" -> String.valueOf(CustomBlocksConfig.resourcePackPort);
             case "reloadDebounceMs" -> String.valueOf(CustomBlocksConfig.reloadDebounceMs);
             // cloudShareUrl removed from GUI — hardcoded constant
-            case "aiName" -> stripFormattingCodes(CustomBlocksConfig.aiName);
+            case "aiWorkerUrl" -> CustomBlocksConfig.aiWorkerUrl;
+            case "aiServerToken" -> CustomBlocksConfig.aiServerToken;
             case "undoMode" -> CustomBlocksConfig.undoMode;
             case "colorToolBackgroundMode" -> CustomBlocksConfig.colorToolBackgroundMode;
             case "triangleGreenHex" -> CustomBlocksConfig.triangleGreenHex;

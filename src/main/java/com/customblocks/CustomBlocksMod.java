@@ -521,6 +521,19 @@ public class CustomBlocksMod implements ModInitializer {
 
 
 
+        // ── Guard: cancel unauthorized custom-block breaks ───────────────────
+
+        PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, be) -> {
+            if (world.isClient()) return true;
+            if (!(state.getBlock() instanceof SlotBlock)) return true;
+            if (com.customblocks.command.PermissionHelper.canDelete(player.getCommandSource())) return true;
+            player.sendMessage(com.customblocks.command.PermissionHelper.toolPermissionDeniedMessage(), true);
+            if (player instanceof net.minecraft.server.network.ServerPlayerEntity sp) {
+                com.customblocks.gui.GuiManager.playError(sp);
+            }
+            return false;
+        });
+
         // ── Block drop in survival ───────────────────────────────────────────
 
         PlayerBlockBreakEvents.AFTER.register((world, player, pos, state, be) -> {
@@ -542,6 +555,7 @@ public class CustomBlocksMod implements ModInitializer {
         // ── Player join → full sync via NetworkManager ───────────────────────
 
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            UndoManager.loadPlayer(handler.player.getUuid());
             try {
                 NetworkManager.onPlayerJoin(handler.player);
                 com.customblocks.core.WelcomeManager.checkAndWelcome(handler.player);
@@ -571,7 +585,8 @@ public class CustomBlocksMod implements ModInitializer {
 
             NetworkManager.onPlayerDisconnect(handler.player);
 
-            UndoManager.clearPlayer(handler.player.getUuid());
+            UndoManager.savePlayer(handler.player.getUuid());
+            UndoManager.releasePlayer(handler.player.getUuid());
 
             RectangleToolItem.onPlayerDisconnect(handler.player.getUuid());
 
@@ -613,6 +628,7 @@ public class CustomBlocksMod implements ModInitializer {
 
 
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            UndoManager.saveGlobal();
             SlotManager.flushSave();
             com.customblocks.core.PlacementStats.save(); // K1
             com.customblocks.core.AchievementManager.save(); // R1
@@ -630,6 +646,7 @@ public class CustomBlocksMod implements ModInitializer {
         });
 
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+            UndoManager.loadGlobal();
             // Phase 9.1 — register action-bar flash + 80% warning callback for undo pushes
             com.customblocks.core.UndoManager.onUndoPushed = (uuid, description) -> {
                 ServerPlayerEntity p = server.getPlayerManager().getPlayer(uuid);

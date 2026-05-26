@@ -108,6 +108,8 @@ public final class CustomBlocksConfig {
     public static volatile long maxGifStripBytes = 4_000_000L;
     /** Internal HTTP server port for resource pack hosting (0 = disabled/auto). */
     public static volatile int resourcePackPort = 8080;
+    /** RP-2 — If non-empty, overrides the external IP lookup for the resource-pack URL (e.g. your Docker host IP). */
+    public static volatile String serverIpOverride = "";
     /** Debounce time for live-edit resource pack reloads (ms). */
     public static volatile long reloadDebounceMs = 2000;
     // joinDebounceMs removed in 1.20 — replaced by count-verified SyncCompletePayload.
@@ -119,20 +121,18 @@ public final class CustomBlocksConfig {
     public static volatile String cloudPackSecret = "";
 
 
-    // ── Assistant NPC (The Helper) ───────────────────────────────────────────
-    /** Whether the assistant AI is currently active in the world. */
-    public static volatile boolean aiEnabled = false;
-    /** The assistant AI display name. */
-    public static volatile String aiName = "CustomBlocks AI";
+    // ── AI / Voice ───────────────────────────────────────────────────────────
     /** Branded chat voice (Phase B2 phrases); migrated from legacy {@code aiStyle}. */
     public static volatile String voiceMode = "friendly";
 
     public static final Set<String> VOICE_MODES =
         Set.of("friendly", "professional", "royal", "minimal", "arabic", "silly");
-    /** Whether the live status hologram is visible. */
-    public static volatile boolean aiHologram = true;
     /** Phase 11.1 — AI image provider: "openai" or "stability". Empty = procedural only. */
     public static volatile String aiApiProvider = "";
+    /** Cloudflare Worker URL for AI chat (publicly known; security comes from aiServerToken). */
+    public static volatile String aiWorkerUrl = "";
+    /** Server identity token sent to the Cloudflare Worker to prove authenticity. */
+    public static volatile String aiServerToken = "";
     /** Phase 11.1 — API key for the AI image provider. Empty = procedural fallback. */
     public static volatile String aiApiKey = "";
     /** Phase 11.1 — Maximum number of AI texture variations to generate (1–3). */
@@ -318,12 +318,11 @@ public final class CustomBlocksConfig {
             texturePayloadsPerTick= getInt(root, "texturePayloadsPerTick", texturePayloadsPerTick);
             maxGifStripBytes      = getLong(root, "maxGifStripBytes", maxGifStripBytes);
             resourcePackPort      = getInt(root, "resourcePackPort", resourcePackPort);
+            serverIpOverride      = getString(root, "serverIpOverride", serverIpOverride);
             reloadDebounceMs      = getLong(root, "reloadDebounceMs", reloadDebounceMs);
             // joinDebounceMs removed in 1.20
             cloudShareEnabled     = getBool(root, "cloudShareEnabled", cloudShareEnabled);
             cloudPackSecret       = getString(root, "cloudPackSecret", cloudPackSecret);
-            aiEnabled             = getBool(root, "aiEnabled", getBool(root, "helperEnabled", aiEnabled));
-            aiName                = getString(root, "aiName", getString(root, "helperName", aiName));
             if (root.has("voiceMode")) {
                 voiceMode = normalizeVoiceMode(getString(root, "voiceMode", voiceMode));
             } else if (root.has("aiStyle")) {
@@ -332,9 +331,10 @@ public final class CustomBlocksConfig {
             } else {
                 voiceMode = normalizeVoiceMode(voiceMode);
             }
-            aiHologram            = getBool(root, "aiHologram", getBool(root, "helperHologram", aiHologram));
             aiApiProvider         = normalizeAiProvider(getString(root, "aiApiProvider", aiApiProvider));
             aiApiKey              = getString(root, "aiApiKey", aiApiKey);
+            aiWorkerUrl           = getString(root, "aiWorkerUrl", aiWorkerUrl);
+            aiServerToken         = getString(root, "aiServerToken", aiServerToken);
             aiMaxVariations       = Math.max(1, Math.min(8, getInt(root, "aiMaxVariations", aiMaxVariations)));
             aiTextureStyle        = normalizeAiTextureStyle(getString(root, "aiTextureStyle", aiTextureStyle));
             didYouMeanMode         = normalizeDidYouMeanMode(getString(root, "didYouMeanMode", didYouMeanMode));
@@ -498,16 +498,16 @@ public final class CustomBlocksConfig {
             root.addProperty("texturePayloadsPerTick", texturePayloadsPerTick);
             root.addProperty("maxGifStripBytes", maxGifStripBytes);
             root.addProperty("resourcePackPort", resourcePackPort);
+            root.addProperty("serverIpOverride", serverIpOverride);
             root.addProperty("reloadDebounceMs", reloadDebounceMs);
             root.addProperty("cloudShareEnabled", cloudShareEnabled);
             root.addProperty("cloudPackSecret", cloudPackSecret);
-            root.addProperty("aiEnabled", aiEnabled);
-            root.addProperty("aiName", aiName);
             root.addProperty("voiceMode", voiceMode);
             root.addProperty("didYouMeanMode", didYouMeanMode);
-            root.addProperty("aiHologram", aiHologram);
             root.addProperty("aiApiProvider", aiApiProvider);
             root.addProperty("aiApiKey", aiApiKey); // config.json only — never rendered in GUI
+            root.addProperty("aiWorkerUrl", aiWorkerUrl);
+            root.addProperty("aiServerToken", aiServerToken);
             root.addProperty("aiMaxVariations", aiMaxVariations);
             root.addProperty("aiTextureStyle", aiTextureStyle);
             root.addProperty("hideCustomBlockText", hideCustomBlockText);
@@ -574,12 +574,11 @@ public final class CustomBlocksConfig {
             || !root.has("reloadDebounceMs")
             || !root.has("cloudShareEnabled")
             || !root.has("cloudPackSecret")
-            || !root.has("aiEnabled")
-            || !root.has("aiName")
             || !root.has("voiceMode")
             || !root.has("didYouMeanMode")
-            || !root.has("aiHologram")
             || !root.has("aiApiProvider")
+            || !root.has("aiWorkerUrl")
+            || !root.has("aiServerToken")
             || !root.has("aiApiKey")
             || !root.has("aiMaxVariations")
             || !root.has("aiTextureStyle")

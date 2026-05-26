@@ -33,7 +33,7 @@ public final class TrashManager {
         Path file = Path.of(TRASH_FILE);
         if (!Files.exists(file)) return;
         try (GZIPInputStream gz = new GZIPInputStream(new BufferedInputStream(Files.newInputStream(file)));
-             InputStreamReader ir = new InputStreamReader(gz)) {
+             InputStreamReader ir = new InputStreamReader(gz, java.nio.charset.StandardCharsets.UTF_8)) {
             JsonArray arr = JsonParser.parseReader(ir).getAsJsonArray();
             ENTRIES.clear();
             long cutoff = retentionCutoff();
@@ -47,12 +47,12 @@ public final class TrashManager {
                     String oid = obj.has("originalId") ? obj.get("originalId").getAsString() : d.customId;
                     String dn  = obj.has("displayName") ? obj.get("displayName").getAsString() : d.displayName;
                     ENTRIES.add(new TrashEntry(oid, dn, ts, d));
-                } catch (Exception e) {
+                } catch (RuntimeException e) {
                     LOGGER.warn("[Trash] Skipping corrupt entry: {}", e.getMessage());
                 }
             }
             LOGGER.info("[Trash] Loaded {} trash entries.", ENTRIES.size());
-        } catch (Exception e) {
+        } catch (java.io.IOException | RuntimeException e) {
             LOGGER.warn("[Trash] Could not load {}: {}", TRASH_FILE, e.getMessage());
         }
     }
@@ -131,7 +131,7 @@ public final class TrashManager {
                     arr.add(obj);
                 }
                 try (GZIPOutputStream gz = new GZIPOutputStream(new BufferedOutputStream(Files.newOutputStream(tmp)));
-                     OutputStreamWriter ow = new OutputStreamWriter(gz)) {
+                     OutputStreamWriter ow = new OutputStreamWriter(gz, java.nio.charset.StandardCharsets.UTF_8)) {
                     GSON.toJson(arr, ow);
                 }
                 Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);

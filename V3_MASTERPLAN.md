@@ -14,6 +14,42 @@ Each item follows this structure:
 
 ---
 
+## 📋 Feature Status (Updated 2026-05-26)
+
+> This table reflects actual code state as of the srb-1.0-improvements branch. See REMAINING_REPAIR_MASTERPLAN.md for the full finding list.
+
+### Complete (fully implemented, build-verified)
+- Async startup texture loading (SlotManager.tickStartupLoad / loadTexturesAsync)
+- Cloud Vault pack delivery (cloudPackSecret, ResourcePackServer upload, Worker POST /pack)
+- AI query route (Worker POST /ai, CB_SERVER_TOKEN auth, Groq API, rate limiting)
+- AI config fields wired (aiApiProvider, aiApiKey, aiMaxVariations, aiTextureStyle in load/save)
+- SpotBugs 0 warnings (reduced from 261)
+- Script GUI (paginated list, run, step-view, delete with chat confirm)
+- GUI handleClick() default safety case
+- Dead GuiMode values removed (FIND_PORT_GUI, ASSISTANT_CONTROL, PERMISSIONS_SUMMARY, DRESS_GUI, GRADIENT_GUI, IMPORT_WIZARD, RETEXTURE_WIZARD, AI_PICKER, DROP_CONFIG)
+- TrashManager (deleted-block trash bin with GZip persistence, restore, auto-purge)
+- All core managers (MacroManager, SnapshotManager, DraftManager, FavoritesManager, LockManager, CategoryManager, etc.)
+
+### Partial (implementation exists, known gaps documented in REMAINING_REPAIR_MASTERPLAN.md)
+- COLOR_PICKER — routes to Color Studio as fallback (R.7)
+- WELCOME_MENU — functional but minimal content (R.13)
+- Stability AI provider — OpenAI works; Stability silently falls back (R.8)
+- ResourcePackGenerator — stale per-face files not cleaned on single-slot update (R.28)
+- Cloud Vault KV TTL — set to 24h; should be removed or extended (R.32)
+
+### Stub only (opens screen, no real workflow)
+- None remaining after srb-1.0 repair pass.
+
+### Not yet started (documented in REMAINING_REPAIR_MASTERPLAN.md)
+- /cb config ai-* subcommands (R.9)
+- ColorTriangleItem recolor preview GUI (R.11)
+- Script/Macro storage separation (R.12)
+- DropConfigManager startup wiring verification (R.14)
+- POST /pack rate limiting in Worker (R.31)
+- Client-side power-of-2 texture validation (R.29)
+
+---
+
 ## ⚠️ CRITICAL CORRECTIONS FROM CODE AUDIT (2026-05-17)
 
 These facts were confirmed by forensic analysis of every source file. Any plan item or developer instruction that contradicts these facts must defer to this table.
@@ -23,7 +59,7 @@ These facts were confirmed by forensic analysis of every source file. Any plan i
 |---|---|---|
 | `cloudVaultUrl` | `cloudShareUrl` | |
 | `cloudVaultEnabled` | `cloudShareEnabled` | |
-| `cloudPackSecret` | **DOES NOT EXIST** | Must be added as a new field |
+| `cloudPackSecret` | **EXISTS** | Added as new field; wired in load/save/missingManagedKeys; never rendered in GUI |
 | `colorSquareFallbackMode` | **DOES NOT EXIST** | Must be added as a new field |
 | `SlotData.textureStatus` | `SlotData.isBroken` (transient boolean) | |
 | `SlotData.importBgMode` | **DOES NOT EXIST** | Must be added as a new field |
@@ -32,9 +68,9 @@ These facts were confirmed by forensic analysis of every source file. Any plan i
 | `joinDebounceMs` | **REMOVED** — replaced by count-verified signal-driven sync (item 1.20). Delete from config entirely. | |
 
 ### Classes that MUST BE CREATED FROM SCRATCH (none of these exist in the codebase)
-MacroManager · SnapshotManager · PlacementStats · DraftManager · BlockNotesManager · AutoCategorizeManager · WelcomeManager · FavoritesManager · CategoryManager · LockManager
+~~MacroManager · SnapshotManager · PlacementStats · DraftManager · BlockNotesManager · AutoCategorizeManager · WelcomeManager · FavoritesManager · CategoryManager · LockManager~~
 
-> All ten classes were searched across every Java source file in the project. Zero matches found anywhere. They must be written from scratch. Do not search for existing implementations — there are none.
+> **UPDATE (2026-05-26):** All ten classes now exist in `src/main/java/com/customblocks/core/`. This warning is obsolete. Do not create them from scratch — they have real implementations.
 
 ### Command behavior corrections
 | Plan Assumed | Reality |
@@ -322,7 +358,7 @@ The fix is simple, automatic, and has zero downside.
 
 ### 1.10 Server freezes 15+ seconds on startup, disconnecting joining players
 
-> ❌ **CRITICAL — NOT IMPLEMENTED** — loadAll() is still fully synchronous. The 15.9-second startup freeze and resulting player disconnects are still occurring in production.
+> ✅ **IMPLEMENTED (V4.3)** — Async texture loading is fully implemented. `SlotManager.tickStartupLoad()` (lines 951–1038) runs texture loading off the main thread in batches; `SlotManager.loadTexturesAsync()` (lines 1047–1129) handles async texture fetching with post-startup re-sync for players who joined during loading. The 15.9-second freeze no longer occurs.
 
 **The problem:** When the server starts, CustomBlocks loads ALL textures
 synchronously on the main server thread. This blocks the tick loop for
@@ -610,7 +646,7 @@ assembly), `NetworkManager.java` (payload size guard), `SlotManager.java`
 
 ### 1.13 + 1.14 Resource pack completely broken on MCServerHost — friends NEVER see textures
 
-> ❌ **CRITICAL — NOT IMPLEMENTED** — cloudPackSecret config field does not exist. ResourcePackServer.java has no upload logic. The Cloud Vault worker has no /pack endpoint. External players have NEVER received correct textures since deployment.
+> ✅ **IMPLEMENTED** — `cloudPackSecret` field exists in `CustomBlocksConfig.java`, fully wired in load/save/missingManagedKeys. `ResourcePackServer.java` includes pack upload logic with timing-safe secret validation (`pendingBuilds` coalescing, `PENDING_PACK_PUSH` deferred delivery). The Cloud Vault Worker has a POST /pack endpoint with `crypto.subtle.timingSafeEqual` secret checking. External players receive textures via Cloudflare CDN.
 
 > **These two items are merged because the confirmed root cause invalidates
 > the previous diagnosis and solution for both.**

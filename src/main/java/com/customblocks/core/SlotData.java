@@ -89,9 +89,12 @@ public final class SlotData {
             float x2 = clamp(Float.parseFloat(p[3].trim()));
             float y2 = clamp(Float.parseFloat(p[4].trim()));
             float z2 = clamp(Float.parseFloat(p[5].trim()));
-            return new ShapeBox(
-                    Math.min(x1, x2), Math.min(y1, y2), Math.min(z1, z2),
-                    Math.max(x1, x2), Math.max(y1, y2), Math.max(z1, z2));
+            float rx1 = Math.min(x1, x2), rx2 = Math.max(x1, x2);
+            float ry1 = Math.min(y1, y2), ry2 = Math.max(y1, y2);
+            float rz1 = Math.min(z1, z2), rz2 = Math.max(z1, z2);
+            if (rx1 == rx2 || ry1 == ry2 || rz1 == rz2)
+                throw new IllegalArgumentException("Zero-volume shape box is not allowed: " + input);
+            return new ShapeBox(rx1, ry1, rz1, rx2, ry2, rz2);
         }
 
         private static float clamp(float v) { return Math.max(0f, Math.min(16f, v)); }
@@ -189,7 +192,7 @@ public final class SlotData {
      *  where texture bytes come from trusted storage, not user upload. */
     static SlotData createTrusted(int index, String customId, String displayName, byte[] texture) {
         return new SlotData(index, customId, displayName, texture, 0, 1.5f, "stone",
-                null, null, null, false, computeHealth(false, texture), null, null, 0L);
+                null, null, null, false, computeHealth(texture != null && com.customblocks.ImageProcessor.isBrokenTexture(texture), texture), null, null, 0L);
     }
 
     /** Trusted factory — full fields, skips isBrokenTexture(). For deserialization from JSON. */
@@ -198,7 +201,7 @@ public final class SlotData {
                                       Map<String, byte[]> faceTextures, String animMeta,
                                       List<ShapeBox> shapeBoxes, boolean noCollision) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness, soundType,
-                faceTextures, animMeta, shapeBoxes, noCollision, computeHealth(false, texture), null, null, 0L);
+                faceTextures, animMeta, shapeBoxes, noCollision, computeHealth(texture != null && com.customblocks.ImageProcessor.isBrokenTexture(texture), texture), null, null, 0L);
     }
 
     /** Trusted factory — full fields + variant textures, skips isBrokenTexture(). */
@@ -208,7 +211,7 @@ public final class SlotData {
                                       List<ShapeBox> shapeBoxes, boolean noCollision,
                                       List<byte[]> variantTextures) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness, soundType,
-                faceTextures, animMeta, shapeBoxes, noCollision, computeHealth(false, texture), variantTextures, null, 0L);
+                faceTextures, animMeta, shapeBoxes, noCollision, computeHealth(texture != null && com.customblocks.ImageProcessor.isBrokenTexture(texture), texture), variantTextures, null, 0L);
     }
 
     /** Trusted factory — full fields + variant textures + hologramText. */
@@ -218,7 +221,7 @@ public final class SlotData {
                                       List<ShapeBox> shapeBoxes, boolean noCollision,
                                       List<byte[]> variantTextures, String hologramText) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness, soundType,
-                faceTextures, animMeta, shapeBoxes, noCollision, computeHealth(false, texture), variantTextures, hologramText, 0L);
+                faceTextures, animMeta, shapeBoxes, noCollision, computeHealth(texture != null && com.customblocks.ImageProcessor.isBrokenTexture(texture), texture), variantTextures, hologramText, 0L);
     }
 
     /** Trusted factory — full fields + variant textures + hologramText + lastEditedAt. For deserialization. */
@@ -228,7 +231,7 @@ public final class SlotData {
                                       List<ShapeBox> shapeBoxes, boolean noCollision,
                                       List<byte[]> variantTextures, String hologramText, long lastEditedAt) {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness, soundType,
-                faceTextures, animMeta, shapeBoxes, noCollision, computeHealth(false, texture), variantTextures, hologramText, lastEditedAt);
+                faceTextures, animMeta, shapeBoxes, noCollision, computeHealth(texture != null && com.customblocks.ImageProcessor.isBrokenTexture(texture), texture), variantTextures, hologramText, lastEditedAt);
     }
 
     // ── Query helpers ────────────────────────────────────────────────────────

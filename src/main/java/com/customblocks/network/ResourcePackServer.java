@@ -23,6 +23,8 @@ public class ResourcePackServer {
     private static volatile java.io.File currentPackFile;
     private static volatile String currentHash;
     private static volatile int activePort = -1;
+    // RP-1 — debounce: at most one pending notify thread at a time
+    private static final java.util.concurrent.atomic.AtomicBoolean NOTIFY_PENDING = new java.util.concurrent.atomic.AtomicBoolean(false);
     // Single-thread executor: only ONE ZIP build runs at a time.
     // AtomicInteger tracks pending builds — if > 1, we skip because
     // the already-queued build will pick up the latest snapshot.
@@ -297,6 +299,9 @@ public class ResourcePackServer {
     private static final long      IP_CACHE_TTL_MS  = 300_000L; // 5 minutes
 
     public static String getExternalIp() {
+        // RP-2 — admin-configured override (e.g. Docker host IP) skips the HTTP lookup entirely
+        String override = com.customblocks.CustomBlocksConfig.serverIpOverride;
+        if (override != null && !override.isBlank()) return override.trim();
         long now = System.currentTimeMillis();
         if (cachedExternalIp != null && (now - ipCacheTime) < IP_CACHE_TTL_MS) {
             return cachedExternalIp; // instant — no network call
@@ -315,6 +320,8 @@ public class ResourcePackServer {
                         cachedExternalIp = ip.trim();
                         ipCacheTime = System.currentTimeMillis();
                     }
+                } finally {
+                    conn.disconnect();
                 }
             } catch (IOException | RuntimeException ignored) {}
         }, "CustomBlocks-IpLookup");
@@ -376,12 +383,15 @@ public class ResourcePackServer {
      */
     public static void sendUpdateToAllPlayers() {
         if (serverInstance == null || !isRunning() || activePort() <= 0) return;
-
+        // RP-1 — debounce: skip if a notify thread is already queued
+        if (!NOTIFY_PENDING.compareAndSet(false, true)) return;
         new Thread(() -> {
-            try { Thread.sleep(1000); }
+            try { Thread.sleep(2000); }
             catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
                 return;
+            } finally {
+                NOTIFY_PENDING.set(false);
             }
             serverInstance.execute(() -> {
                 for (net.minecraft.server.network.ServerPlayerEntity player : serverInstance.getPlayerManager().getPlayerList()) {

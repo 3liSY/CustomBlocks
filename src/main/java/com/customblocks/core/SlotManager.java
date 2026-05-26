@@ -128,7 +128,7 @@ public final class SlotManager {
 
         m.put("thin",      List.of(new SlotData.ShapeBox(0,0,0,16,4,16)));
 
-        m.put("carpet",    List.of(new SlotData.ShapeBox(0,0,0,16,1,16)));
+        m.put("carpet",    List.of(new SlotData.ShapeBox(0,0,0,16,3,16)));
 
         m.put("pillar",    List.of(new SlotData.ShapeBox(4,0,4,12,16,12)));
 
@@ -608,6 +608,10 @@ public final class SlotManager {
         byId.clear();
 
         bySlot.clear();
+
+        freeSlotIndices.clear();
+        for (int i = 0; i < CustomBlocksConfig.maxSlots; i++) freeSlotIndices.add(i);
+        cachedSortedSlots = null;
 
         SearchIndex.invalidate();
 
@@ -1342,7 +1346,7 @@ public final class SlotManager {
 
                     if (diskTextured >= 0) {
                         int lost = diskTextured - newTextured;
-                        if (lost > 10) {
+                        if (lost > Math.max(50, diskTextured / 4)) {
                             Path bakFile = dir.resolve(DATA_FILE + ".bak");
                             if (!Files.exists(bakFile)) {
                                 try { Files.copy(file, bakFile); } catch (Exception e) { LOGGER.warn("[CustomBlocks] Could not write backup file {}: {}", bakFile, e.getMessage()); }

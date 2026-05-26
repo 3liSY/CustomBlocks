@@ -13,6 +13,9 @@ const PACK_RL_MAX       = 20;   // max pack uploads per window (generous for leg
 const PACK_RL_WIN       = 60;   // seconds
 const MARKET_PAGE_SIZE  = 20;
 const PACK_TTL          = 7 * 86400; // R.32: 7-day TTL so idle servers keep delivering
+const AI_RL_PREFIX      = "rl-ai:";
+const AI_RL_MAX         = 5;   // max AI requests per player per window
+const AI_RL_WIN         = 60;  // seconds
 
 function json(data, status = 200, extra = {}) {
   return new Response(JSON.stringify(data), {
@@ -231,6 +234,81 @@ export default {
         nextCursor: listed.list_complete ? null : listed.cursor,
         total: items.length,
       });
+    }
+
+    // POST /ai — Groq chat proxy; authenticated by CB_SERVER_TOKEN, rate-limited per playerUuid
+    if (request.method === "POST" && url.pathname === "/ai") {
+      // Timing-safe token validation (same pattern as /pack)
+      const authHeader = request.headers.get("x-cb-token");
+      if (!authHeader || !env.CB_SERVER_TOKEN) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+      const encoder = new TextEncoder();
+      const authBytes   = encoder.encode(authHeader);
+      const secretBytes = encoder.encode(env.CB_SERVER_TOKEN);
+      const authed = authBytes.byteLength === secretBytes.byteLength
+        && crypto.subtle.timingSafeEqual(authBytes, secretBytes);
+      if (!authed) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+
+      let body;
+      try { body = await request.json(); } catch {
+        return json({ error: "Invalid JSON body" }, 400);
+      }
+
+      const question   = typeof body.question   === "string" ? body.question.trim()   : "";
+      const playerUuid = typeof body.playerUuid === "string" ? body.playerUuid.trim() : "";
+      if (!question)   return json({ error: "Missing question" }, 400);
+      if (!playerUuid) return json({ error: "Missing playerUuid" }, 400);
+
+      // Per-player rate limit (5 req / 60 s)
+      const limited = await checkRateLimit(env, AI_RL_PREFIX + playerUuid, AI_RL_MAX, AI_RL_WIN);
+      if (limited) {
+        return json(
+          { error: "Rate limit exceeded", retryAfter: AI_RL_WIN },
+          429,
+          { "retry-after": String(AI_RL_WIN) }
+        );
+      }
+
+      // Forward to Groq — GROQ_API_KEY is exclusively an encrypted Cloudflare secret
+      let groqResp;
+      try {
+        groqResp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "authorization": "Bearer " + env.GROQ_API_KEY,
+          },
+          body: JSON.stringify({
+            model: "llama3-8b-8192",
+            messages: [
+              {
+                role: "system",
+                content: "You are a helpful assistant for a Minecraft server mod called CustomBlocks. Answer concisely in plain text (no markdown).",
+              },
+              { role: "user", content: question },
+            ],
+            max_tokens: 300,
+          }),
+        });
+      } catch (e) {
+        return json({ error: "AI service unreachable: " + e.message }, 502);
+      }
+
+      if (!groqResp.ok) {
+        const errText = await groqResp.text().catch(() => "");
+        return json({ error: "Groq error " + groqResp.status, detail: errText }, 502);
+      }
+
+      let groqData;
+      try { groqData = await groqResp.json(); } catch {
+        return json({ error: "Invalid response from Groq" }, 502);
+      }
+
+      const reply = groqData?.choices?.[0]?.message?.content?.trim() || "(no response)";
+      return json({ reply });
     }
 
     return json({ error: "Not found" }, 404);

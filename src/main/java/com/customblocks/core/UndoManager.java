@@ -428,6 +428,180 @@ public final class UndoManager {
         CATEGORY_PLAYER_REDO.remove(playerUuid);
     }
 
+    // ── FIX-6: Disk persistence for undo stacks ──────────────────────────────
+
+    /** Save global undo/redo stacks to disk (call on server shutdown). */
+    public static synchronized void saveGlobal() {
+        Path dir = Path.of(SNAPSHOT_DIR);
+        try { Files.createDirectories(dir); } catch (IOException e) { LOGGER.warn("[CB-Undo] Cannot create undo dir: {}", e.getMessage()); return; }
+        if (!GLOBAL_UNDO.isEmpty()) saveStack(GLOBAL_UNDO, dir.resolve("global_undo.json"));
+        if (!GLOBAL_REDO.isEmpty()) saveStack(GLOBAL_REDO, dir.resolve("global_redo.json"));
+    }
+
+    /** Load global undo/redo stacks from disk (call on server start). */
+    public static synchronized void loadGlobal() {
+        Path dir = Path.of(SNAPSHOT_DIR);
+        loadStack(dir.resolve("global_undo.json"), GLOBAL_UNDO);
+        loadStack(dir.resolve("global_redo.json"), GLOBAL_REDO);
+    }
+
+    /** Serialize a player's undo/redo stacks to disk (call before releasePlayer on disconnect). */
+    public static synchronized void savePlayer(UUID playerUuid) {
+        Path dir = Path.of(SNAPSHOT_DIR, "players");
+        try { Files.createDirectories(dir); } catch (IOException e) { LOGGER.warn("[CB-Undo] Cannot create player undo dir: {}", e.getMessage()); return; }
+        Deque<UndoDelta> pu = PLAYER_UNDO.get(playerUuid);
+        Deque<UndoDelta> pr = PLAYER_REDO.get(playerUuid);
+        if (pu != null && !pu.isEmpty()) saveStack(pu, dir.resolve(playerUuid + "_undo.json"));
+        if (pr != null && !pr.isEmpty()) saveStack(pr, dir.resolve(playerUuid + "_redo.json"));
+    }
+
+    /** Remove a player's stacks from memory WITHOUT deleting snapshot files (used after savePlayer). */
+    public static synchronized void releasePlayer(UUID playerUuid) {
+        PLAYER_UNDO.remove(playerUuid);
+        PLAYER_REDO.remove(playerUuid);
+        CATEGORY_PLAYER_UNDO.remove(playerUuid);
+        CATEGORY_PLAYER_REDO.remove(playerUuid);
+    }
+
+    /** Load a player's undo/redo stacks from disk (call on player join). */
+    public static synchronized void loadPlayer(UUID playerUuid) {
+        Path dir = Path.of(SNAPSHOT_DIR, "players");
+        Deque<UndoDelta> pu = PLAYER_UNDO.computeIfAbsent(playerUuid, k -> new ArrayDeque<>());
+        Deque<UndoDelta> pr = PLAYER_REDO.computeIfAbsent(playerUuid, k -> new ArrayDeque<>());
+        loadStack(dir.resolve(playerUuid + "_undo.json"), pu);
+        loadStack(dir.resolve(playerUuid + "_redo.json"), pr);
+    }
+
+    private static void saveStack(Deque<UndoDelta> stack, Path file) {
+        com.google.gson.JsonArray arr = new com.google.gson.JsonArray();
+        for (UndoDelta d : stack) arr.add(serializeDelta(d));
+        try { Files.writeString(file, arr.toString(), StandardCharsets.UTF_8); }
+        catch (IOException e) { LOGGER.warn("[CB-Undo] Failed to save stack {}: {}", file.getFileName(), e.getMessage()); }
+    }
+
+    private static void loadStack(Path file, Deque<UndoDelta> stack) {
+        if (!Files.exists(file)) return;
+        try {
+            String json = Files.readString(file, StandardCharsets.UTF_8);
+            com.google.gson.JsonArray arr = com.google.gson.JsonParser.parseString(json).getAsJsonArray();
+            for (com.google.gson.JsonElement e : arr) {
+                try { stack.addLast(deserializeDelta(e.getAsJsonObject())); }
+                catch (Exception ex) { LOGGER.warn("[CB-Undo] Skipping corrupt delta: {}", ex.getMessage()); }
+            }
+            Files.deleteIfExists(file);
+        } catch (IOException e) { LOGGER.warn("[CB-Undo] Failed to load stack {}: {}", file.getFileName(), e.getMessage()); }
+    }
+
+    private static com.google.gson.JsonObject serializeDelta(UndoDelta d) {
+        com.google.gson.JsonObject o = new com.google.gson.JsonObject();
+        o.addProperty("customId", d.customId());
+        if (d.playerUuid() != null) o.addProperty("playerUuid", d.playerUuid().toString());
+        switch (d) {
+            case MetaDelta md -> {
+                o.addProperty("type", "meta");
+                if (md.prevName() != null) o.addProperty("prevName", md.prevName());
+                o.addProperty("prevHardness", md.prevHardness());
+                o.addProperty("prevLight", md.prevLight());
+                if (md.prevSound() != null) o.addProperty("prevSound", md.prevSound());
+                o.addProperty("prevNoCollision", md.prevNoCollision());
+                if (md.prevHologramText() != null) o.addProperty("prevHologramText", md.prevHologramText());
+                if (md.prevAnimMeta() != null) o.addProperty("prevAnimMeta", md.prevAnimMeta());
+                if (md.prevShapeBoxes() != null && !md.prevShapeBoxes().isEmpty()) {
+                    com.google.gson.JsonArray ba = new com.google.gson.JsonArray();
+                    for (SlotData.ShapeBox b : md.prevShapeBoxes()) {
+                        com.google.gson.JsonObject bj = new com.google.gson.JsonObject();
+                        bj.addProperty("x1", b.x1()); bj.addProperty("y1", b.y1()); bj.addProperty("z1", b.z1());
+                        bj.addProperty("x2", b.x2()); bj.addProperty("y2", b.y2()); bj.addProperty("z2", b.z2());
+                        ba.add(bj);
+                    }
+                    o.add("prevShapeBoxes", ba);
+                }
+            }
+            case TextureDelta td -> {
+                o.addProperty("type", "texture");
+                if (td.snapshotPath() != null) o.addProperty("snapshotPath", td.snapshotPath());
+                o.addProperty("descLabel", td.descLabel());
+            }
+            case FaceDelta fd -> {
+                o.addProperty("type", "face");
+                o.addProperty("face", fd.face());
+                if (fd.snapshotPath() != null) o.addProperty("snapshotPath", fd.snapshotPath());
+                o.addProperty("descLabel", fd.descLabel());
+            }
+            case SlotCreated sc -> o.addProperty("type", "create");
+            case SlotDeleted sd -> {
+                o.addProperty("type", "delete");
+                if (sd.snapshotPath() != null) o.addProperty("snapshotPath", sd.snapshotPath());
+            }
+            case AnimDelta ad -> {
+                o.addProperty("type", "anim");
+                if (ad.prevMcmeta() != null) o.addProperty("prevMcmeta", ad.prevMcmeta());
+            }
+            case ShapeDelta shd -> {
+                o.addProperty("type", "shape");
+                if (shd.prevBoxes() != null && !shd.prevBoxes().isEmpty()) {
+                    com.google.gson.JsonArray ba = new com.google.gson.JsonArray();
+                    for (SlotData.ShapeBox b : shd.prevBoxes()) {
+                        com.google.gson.JsonObject bj = new com.google.gson.JsonObject();
+                        bj.addProperty("x1", b.x1()); bj.addProperty("y1", b.y1()); bj.addProperty("z1", b.z1());
+                        bj.addProperty("x2", b.x2()); bj.addProperty("y2", b.y2()); bj.addProperty("z2", b.z2());
+                        ba.add(bj);
+                    }
+                    o.add("prevBoxes", ba);
+                }
+            }
+        }
+        return o;
+    }
+
+    private static UndoDelta deserializeDelta(com.google.gson.JsonObject o) {
+        String customId = o.has("customId") ? o.get("customId").getAsString() : "";
+        UUID playerUuid = o.has("playerUuid") ? UUID.fromString(o.get("playerUuid").getAsString()) : null;
+        String type = o.has("type") ? o.get("type").getAsString() : "meta";
+        return switch (type) {
+            case "texture" -> new TextureDelta(customId, playerUuid,
+                    o.has("snapshotPath") ? o.get("snapshotPath").getAsString() : null,
+                    o.has("descLabel") ? o.get("descLabel").getAsString() : "retexture");
+            case "face" -> new FaceDelta(customId, playerUuid,
+                    o.has("face") ? o.get("face").getAsString() : "top",
+                    o.has("snapshotPath") ? o.get("snapshotPath").getAsString() : null,
+                    o.has("descLabel") ? o.get("descLabel").getAsString() : "setface");
+            case "create" -> new SlotCreated(customId, playerUuid);
+            case "delete" -> new SlotDeleted(customId, playerUuid,
+                    o.has("snapshotPath") ? o.get("snapshotPath").getAsString() : null);
+            case "anim" -> new AnimDelta(customId, playerUuid,
+                    o.has("prevMcmeta") ? o.get("prevMcmeta").getAsString() : null);
+            case "shape" -> {
+                List<SlotData.ShapeBox> boxes = new ArrayList<>();
+                if (o.has("prevBoxes"))
+                    for (com.google.gson.JsonElement e : o.getAsJsonArray("prevBoxes")) {
+                        com.google.gson.JsonObject b = e.getAsJsonObject();
+                        boxes.add(new SlotData.ShapeBox(b.get("x1").getAsFloat(), b.get("y1").getAsFloat(), b.get("z1").getAsFloat(),
+                                b.get("x2").getAsFloat(), b.get("y2").getAsFloat(), b.get("z2").getAsFloat()));
+                    }
+                yield new ShapeDelta(customId, playerUuid, boxes);
+            }
+            default -> { // "meta"
+                List<SlotData.ShapeBox> boxes = new ArrayList<>();
+                if (o.has("prevShapeBoxes"))
+                    for (com.google.gson.JsonElement e : o.getAsJsonArray("prevShapeBoxes")) {
+                        com.google.gson.JsonObject b = e.getAsJsonObject();
+                        boxes.add(new SlotData.ShapeBox(b.get("x1").getAsFloat(), b.get("y1").getAsFloat(), b.get("z1").getAsFloat(),
+                                b.get("x2").getAsFloat(), b.get("y2").getAsFloat(), b.get("z2").getAsFloat()));
+                    }
+                yield new MetaDelta(customId, playerUuid,
+                        o.has("prevName") ? o.get("prevName").getAsString() : null,
+                        o.has("prevHardness") ? o.get("prevHardness").getAsFloat() : 1.5f,
+                        o.has("prevLight") ? o.get("prevLight").getAsInt() : 0,
+                        o.has("prevSound") ? o.get("prevSound").getAsString() : "stone",
+                        o.has("prevNoCollision") && o.get("prevNoCollision").getAsBoolean(),
+                        o.has("prevHologramText") ? o.get("prevHologramText").getAsString() : null,
+                        o.has("prevAnimMeta") ? o.get("prevAnimMeta").getAsString() : null,
+                        boxes);
+            }
+        };
+    }
+
     /** Lightweight display-only UndoEntry — no disk I/O, no previousState loaded. */
     private static UndoEntry deltaToDisplay(UndoDelta d) {
         return new UndoEntry(d.customId(), null, d.description(), d instanceof SlotDeleted, d.playerUuid());

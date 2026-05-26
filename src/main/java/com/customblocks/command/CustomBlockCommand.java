@@ -745,6 +745,7 @@ public class CustomBlockCommand {
 
                 // ── showbrokenblocks ────────────────────────────────────────
                 .then(CommandManager.literal("showbrokenblocks")
+                    .requires(PermissionHelper::canUse)
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
                         if (p != null) GuiManager.openBrokenBlocks(p);
@@ -1817,7 +1818,7 @@ public class CustomBlockCommand {
 
                 // ── /cb ai (Phase 11.1) ────────────────────────────────────────
                 tree.then(CommandManager.literal("ai")
-                    .requires(PermissionHelper::canUse)
+                    .requires(PermissionHelper::canAi)
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
                         if (p == null) { ChatHelper.error(ctx.getSource(), "Player only."); return 0; }
@@ -1832,6 +1833,11 @@ public class CustomBlockCommand {
                             com.customblocks.assistant.AiCommandParser.ParseResult r =
                                 com.customblocks.assistant.AiCommandParser.parse(text);
                             if (r == null) {
+                                if (p != null && !com.customblocks.CustomBlocksConfig.aiWorkerUrl.isEmpty()
+                                        && !com.customblocks.CustomBlocksConfig.aiServerToken.isEmpty()) {
+                                    com.customblocks.gui.GuiManager.postAiQuery(p, text);
+                                    return 1;
+                                }
                                 ChatHelper.info(src, "§7AI: I didn't understand that. Try: §f'list all blocks'§7, §f'delete blocks starting with X'§7, §f'set glow 5 on block X'§7.");
                                 return 0;
                             }
@@ -2094,6 +2100,14 @@ public class CustomBlockCommand {
         NetworkManager.broadcastUpdate(src.getServer(),
             new SlotUpdatePayload("add", d.index, newId, finalName, texCopy,
                     d.lightLevel, d.hardness, d.soundType, null, null, d.animMeta));
+        for (var faceEntry : d.faceTextures.entrySet()) {
+            NetworkManager.broadcastUpdate(src.getServer(), new SlotUpdatePayload(
+                "setface", d.index, newId, null, faceEntry.getValue(),
+                d.lightLevel, d.hardness, d.soundType, faceEntry.getKey(), null, d.animMeta));
+        }
+        if (d.isShaped()) broadcastShape(src.getServer(), d);
+        if (d.noCollision) NetworkManager.broadcastUpdate(src.getServer(), new SlotUpdatePayload(
+                "setcollision", d.index, newId, null, null, 0, 0, "stone", null, "false"));
         ChatHelper.success(src, ChatHelper.formattedKey("cmd.duplicate_done", sourceId, newId, d.index));
         return 1;
     }
@@ -2556,9 +2570,10 @@ public class CustomBlockCommand {
             // V4-06: push undo so /cb undo can remove the imported block
             UndoManager.pushUndoCreate(id, getPlayerUuid(src));
 
-            int light = obj.has("light") ? obj.get("light").getAsInt() : 0;
-            float hard = obj.has("hard") ? obj.get("hard").getAsFloat() : 1.5f;
-            String sound = obj.has("sound") ? obj.get("sound").getAsString() : "stone";
+            int light = Math.max(0, Math.min(15, obj.has("light") ? obj.get("light").getAsInt() : 0));
+            float hard = Math.max(0f, Math.min(100f, obj.has("hard") ? obj.get("hard").getAsFloat() : 1.5f));
+            String rawSound = obj.has("sound") ? obj.get("sound").getAsString() : "stone";
+            String sound = java.util.Arrays.asList(VALID_SOUNDS).contains(rawSound) ? rawSound : "stone";
             SlotManager.setProperties(id, light, hard, sound);
             if (obj.has("anim")) SlotManager.setAnimMeta(id, obj.get("anim").getAsString());
             if (obj.has("ncol") && obj.get("ncol").getAsBoolean()) SlotManager.setCollision(id, false);
@@ -2829,7 +2844,13 @@ public class CustomBlockCommand {
 
     private static int cmdRemoveShape(ServerCommandSource src, String id, int index) {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
-        UndoManager.pushUndoMutation(id, SlotManager.getById(id), "removeshape", getPlayerUuid(src));
+        SlotData pre = SlotManager.getById(id);
+        int boxCount = (pre != null && pre.shapeBoxes != null) ? pre.shapeBoxes.size() : 0;
+        if (pre == null || boxCount == 0 || index >= boxCount) {
+            ChatHelper.error(src, "Box index " + index + " is out of range (block has " + boxCount + " box(es)).");
+            return 0;
+        }
+        UndoManager.pushUndoMutation(id, pre, "removeshape", getPlayerUuid(src));
         SlotManager.removeBox(id, index);
         SlotManager.saveAll();
         SlotData d = SlotManager.getById(id);
@@ -2931,8 +2952,8 @@ public class CustomBlockCommand {
                     // 1.12 — relay any trim/resize warning to the player
                     if (fWarn != null) src.sendMessage(net.minecraft.text.Text.literal(fWarn));
                     SlotData d = SlotManager.getById(id);
-        UndoManager.pushUndoMutation(id, d, "retexture", getPlayerUuid(src));
                     if (d == null) { src.sendMessage(notFound(id)); return; }
+                    UndoManager.pushUndoMutation(id, d, "retexture", getPlayerUuid(src));
                     SlotManager.updateTexture(id, fb);
                     if (fa != null) SlotManager.setAnimMeta(id, fa);
                     SlotManager.saveAll();
@@ -3319,8 +3340,8 @@ public class CustomBlockCommand {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
         if (!SlotData.FACE_KEYS.contains(face)) { ChatHelper.error(src, ChatHelper.formattedKey("cmd.valid_faces")); return 0; }
         SlotData d = SlotManager.getById(id);
-        UndoManager.pushUndoMutation(id, d, "clearface " + face, getPlayerUuid(src));
         if (d == null) { src.sendError(notFound(id)); return 0; }
+        UndoManager.pushUndoMutation(id, d, "clearface " + face, getPlayerUuid(src));
         SlotManager.clearFaceTexture(id, face);
         SlotManager.saveAll();
         // Broadcast clearface so clients revert that face to default
@@ -3334,8 +3355,8 @@ public class CustomBlockCommand {
     private static int cmdClearAllFaces(ServerCommandSource src, String id) {
         if (!SlotManager.hasId(id)) { src.sendError(notFound(id)); return 0; }
         SlotData d = SlotManager.getById(id);
-        UndoManager.pushUndoMutation(id, d, "clearallfaces", getPlayerUuid(src));
         if (d == null) { src.sendError(notFound(id)); return 0; }
+        UndoManager.pushUndoMutation(id, d, "clearallfaces", getPlayerUuid(src));
         SlotManager.clearAllFaces(id);
         SlotManager.saveAll();
         NetworkManager.broadcastUpdate(src.getServer(),
@@ -3355,13 +3376,14 @@ public class CustomBlockCommand {
     }
 
     /** Undo the last block modification (retexture, setface, setglow, delete, create, …). */
-    private static int cmdUndo(ServerCommandSource src) {
+    private static int cmdUndo(ServerCommandSource src) { return cmdUndo(src, false); }
+    private static int cmdUndo(ServerCommandSource src, boolean silent) {
         if (UndoManager.undoSize(getPlayerUuid(src)) == 0) {
-            ChatHelper.info(src, ChatHelper.formattedKey("cmd.undo_nothing"));
+            if (!silent) ChatHelper.info(src, ChatHelper.formattedKey("cmd.undo_nothing"));
             return 1;
         }
         UndoManager.UndoEntry entry = UndoManager.popUndo(getPlayerUuid(src));
-        if (entry == null) { ChatHelper.info(src, ChatHelper.formattedKey("cmd.undo_nothing")); return 1; }
+        if (entry == null) { if (!silent) ChatHelper.info(src, ChatHelper.formattedKey("cmd.undo_nothing")); return 1; }
 
         MinecraftServer server = src.getServer();
 
@@ -3380,11 +3402,13 @@ public class CustomBlockCommand {
             SlotManager.saveAll();
             NetworkManager.broadcastUpdate(server,
                 new SlotUpdatePayload("remove", idx, entry.customId(), null, null, 0, 0, "stone"));
-            ChatHelper.success(src, ChatHelper.formattedKey("cmd.undo_create_done", entry.customId(),
-                UndoManager.undoSize(getPlayerUuid(src))));
-            if (UndoManager.undoSize(getPlayerUuid(src)) > 0)
-                ChatHelper.info(src, ChatHelper.formattedKey("cmd.undo_next_hint", UndoManager.peekUndoDescription(getPlayerUuid(src))));
-            { ServerPlayerEntity _up = src.getPlayer(); if (_up != null) { String _h = FirstUseHints.hint(_up.getUuid(), "first_undo"); if (_h != null) _up.sendMessage(Text.literal(_h), false); } }
+            if (!silent) {
+                ChatHelper.success(src, ChatHelper.formattedKey("cmd.undo_create_done", entry.customId(),
+                    UndoManager.undoSize(getPlayerUuid(src))));
+                if (UndoManager.undoSize(getPlayerUuid(src)) > 0)
+                    ChatHelper.info(src, ChatHelper.formattedKey("cmd.undo_next_hint", UndoManager.peekUndoDescription(getPlayerUuid(src))));
+                { ServerPlayerEntity _up = src.getPlayer(); if (_up != null) { String _h = FirstUseHints.hint(_up.getUuid(), "first_undo"); if (_h != null) _up.sendMessage(Text.literal(_h), false); } }
+            }
             return 1;
         }
 
@@ -3413,6 +3437,9 @@ public class CustomBlockCommand {
                     NetworkManager.broadcastUpdate(server,
                         new SlotUpdatePayload("setface", d.index, d.customId, null, fe.getValue(),
                                 d.lightLevel, d.hardness, d.soundType, fe.getKey()));
+                if (d.isShaped()) broadcastShape(server, d);
+                if (d.noCollision) NetworkManager.broadcastUpdate(server, new SlotUpdatePayload(
+                        "setcollision", d.index, d.customId, null, null, 0, 0, "stone", null, "false"));
             } else {
                 if (d.texture != null)
                     NetworkManager.broadcastUpdate(server,
@@ -3432,11 +3459,13 @@ public class CustomBlockCommand {
                     new SlotUpdatePayload("rename", d.index, d.customId, d.displayName, null, 0, 0, "stone"));
             }
         }
-        ChatHelper.success(src, ChatHelper.formattedKey("cmd.undo_mutation_done", entry.description(), entry.customId(),
-            UndoManager.undoSize(getPlayerUuid(src)), UndoManager.redoSize(getPlayerUuid(src))));
-        if (UndoManager.undoSize(getPlayerUuid(src)) > 0)
-            ChatHelper.info(src, ChatHelper.formattedKey("cmd.undo_next_hint", UndoManager.peekUndoDescription(getPlayerUuid(src))));
-        { ServerPlayerEntity _up = src.getPlayer(); if (_up != null) { String _h = FirstUseHints.hint(_up.getUuid(), "first_undo"); if (_h != null) _up.sendMessage(Text.literal(_h), false); } }
+        if (!silent) {
+            ChatHelper.success(src, ChatHelper.formattedKey("cmd.undo_mutation_done", entry.description(), entry.customId(),
+                UndoManager.undoSize(getPlayerUuid(src)), UndoManager.redoSize(getPlayerUuid(src))));
+            if (UndoManager.undoSize(getPlayerUuid(src)) > 0)
+                ChatHelper.info(src, ChatHelper.formattedKey("cmd.undo_next_hint", UndoManager.peekUndoDescription(getPlayerUuid(src))));
+            { ServerPlayerEntity _up = src.getPlayer(); if (_up != null) { String _h = FirstUseHints.hint(_up.getUuid(), "first_undo"); if (_h != null) _up.sendMessage(Text.literal(_h), false); } }
+        }
         return 1;
     }
 
@@ -3515,16 +3544,24 @@ public class CustomBlockCommand {
         return 1;
     }
 
-    /** Undo N times in a loop. */
+    /** Undo N times in a loop, sending one summary message at the end. */
     private static int cmdUndoN(ServerCommandSource src, int count) {
         int done = 0;
+        int skipped = 0;
         for (int i = 0; i < count; i++) {
-            if (UndoManager.undoSize(getPlayerUuid(src)) == 0) break;
-            int r = cmdUndo(src);
+            if (UndoManager.undoSize(getPlayerUuid(src)) == 0) { skipped = count - i; break; }
+            int r = cmdUndo(src, true);
             if (r == 0) break;
             done++;
         }
-        if (done > 1) ChatHelper.success(src, ChatHelper.formattedKey("cmd.undo_batch_done", done));
+        if (done == 0) {
+            ChatHelper.info(src, ChatHelper.formattedKey("cmd.undo_nothing"));
+        } else if (skipped > 0) {
+            ChatHelper.success(src, ChatHelper.formattedKey("cmd.undo_batch_done", done) +
+                " §7(" + skipped + " skipped — nothing more to undo)");
+        } else {
+            ChatHelper.success(src, ChatHelper.formattedKey("cmd.undo_batch_done", done));
+        }
         return done > 0 ? 1 : 0;
     }
 
@@ -4076,7 +4113,7 @@ public class CustomBlockCommand {
             String disp = Character.toUpperCase(c.charAt(0)) + c.substring(1);
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.give_square_done", disp));
             { ServerPlayerEntity _sp = src.getPlayer(); if (_sp != null) { String _h = FirstUseHints.hint(_sp.getUuid(), "hold_square"); if (_h != null) _sp.sendMessage(Text.literal(_h), false); } }
-        } catch (Exception ex) { ex.printStackTrace(); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
+        } catch (Exception ex) { CustomBlocksMod.LOGGER.error("[CB] cmdGiveSquare failed", ex); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
         return 1;
     }
 
@@ -4097,7 +4134,7 @@ public class CustomBlockCommand {
             String disp = Character.toUpperCase(c.charAt(0)) + c.substring(1);
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.give_triangle_done", disp));
             { ServerPlayerEntity _tp = src.getPlayer(); if (_tp != null) { String _h = FirstUseHints.hint(_tp.getUuid(), "hold_triangle"); if (_h != null) _tp.sendMessage(Text.literal(_h), false); } }
-        } catch (Exception ex) { ex.printStackTrace(); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
+        } catch (Exception ex) { CustomBlocksMod.LOGGER.error("[CB] cmdGiveTriangle failed", ex); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
         return 1;
     }
 
@@ -4112,7 +4149,7 @@ public class CustomBlockCommand {
                 "§7Right-click two corners of a flat surface to §efill it§7 with custom blocks.",
                 "§8Left-click to clear placed blocks. Works on any flat face."));
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.give_rainbow_rectangle_done"));
-        } catch (Exception ex) { ex.printStackTrace(); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
+        } catch (Exception ex) { CustomBlocksMod.LOGGER.error("[CB] cmdGiveRectangle failed", ex); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
         return 1;
     }
 
@@ -4127,7 +4164,7 @@ public class CustomBlockCommand {
                 "§7Air-click: §etoggle Single-Face / All-Faces mode",
                 "§8Auto-detects which face you're aiming at."));
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.give_golden_hexagon_done"));
-        } catch (Exception ex) { ex.printStackTrace(); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
+        } catch (Exception ex) { CustomBlocksMod.LOGGER.error("[CB] cmdGiveHexagon failed", ex); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
         return 1;
     }
 
@@ -4142,7 +4179,7 @@ public class CustomBlockCommand {
                 "§7Right-click with clipboard: §epaste all properties onto block",
                 "§7Air-click: §eopen block picker"));
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.give_lumina_brush_done"));
-        } catch (Exception ex) { ex.printStackTrace(); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
+        } catch (Exception ex) { CustomBlocksMod.LOGGER.error("[CB] cmdGiveBrush failed", ex); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
         return 1;
     }
 
@@ -4157,7 +4194,7 @@ public class CustomBlockCommand {
                 "§7Right-click with clipboard: §epaste hitbox onto block",
                 "§7Air-click: §eopen block picker"));
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.give_amethyst_chisel_done"));
-        } catch (Exception ex) { ex.printStackTrace(); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
+        } catch (Exception ex) { CustomBlocksMod.LOGGER.error("[CB] cmdGiveChisel failed", ex); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
         return 1;
     }
 
@@ -4168,7 +4205,7 @@ public class CustomBlockCommand {
         try {
             src.getPlayerOrThrow().getInventory().insertStack(new ItemStack(item, 1));
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.give_diamond_triangle_done"));
-        } catch (Exception ex) { ex.printStackTrace(); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
+        } catch (Exception ex) { CustomBlocksMod.LOGGER.error("[CB] cmdGiveDiamond failed", ex); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
         return 1;
     }
 
@@ -4196,7 +4233,7 @@ public class CustomBlockCommand {
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.give_custom_tools_done",
                 String.format(java.util.Locale.ROOT, "%06X", rgb & 0xFFFFFF)));
         } catch (Exception ex) {
-            ex.printStackTrace();
+            CustomBlocksMod.LOGGER.error("[CB] cmdGiveCustomColorTools failed", ex);
             ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage()));
             return 0;
         }
@@ -4611,10 +4648,10 @@ public class CustomBlockCommand {
         try {
             ServerPlayerEntity player = src.getPlayerOrThrow();
             GuiManager.openEditorPicker(player);
-        } catch (Exception ex) { 
-            ex.printStackTrace(); 
+        } catch (Exception ex) {
+            CustomBlocksMod.LOGGER.error("[CB] cmdEditorPicker failed", ex);
             com.customblocks.gui.GuiManager.logError();
-            ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); 
+            ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage()));
         }
         return 1;
     }
@@ -4629,7 +4666,7 @@ public class CustomBlockCommand {
                 GuiManager.openFeatureMenu(player, 0);
             }
         } catch (Exception ex) {
-            ex.printStackTrace();
+            CustomBlocksMod.LOGGER.error("[CB] cmdGui failed", ex);
             com.customblocks.gui.GuiManager.logError();
             ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage()));
         }
@@ -4641,10 +4678,10 @@ public class CustomBlockCommand {
         try {
             ServerPlayerEntity player = src.getPlayerOrThrow();
             GuiManager.openEditor(player, id, 0, true);  // fromCommand = true → 1-press ESC exits
-        } catch (Exception ex) { 
-            ex.printStackTrace(); 
+        } catch (Exception ex) {
+            CustomBlocksMod.LOGGER.error("[CB] cmdEditor failed", ex);
             com.customblocks.gui.GuiManager.logError();
-            ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); 
+            ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage()));
         }
         return 1;
     }

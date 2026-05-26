@@ -20,9 +20,7 @@ public enum GuiMode {
     SOUND_MENU,
     ANIM_GUI,
     TAB_ICON_MENU,
-    FIND_PORT_GUI,
     RESOURCE_CENTER,
-    ASSISTANT_CONTROL,
     BULK_DELETE,
     SEARCH_PICKER,
     MAGIC_ITEMS,
@@ -53,8 +51,6 @@ public enum GuiMode {
     COLOR_FILL_MODE,
     RECOVER_GUI,
     FEATURE_MENU,
-    /** Read-only LuckPerms node list (Phase A6). */
-    PERMISSIONS_SUMMARY,
     COLOR_PICKER,
     /** K2 — usage dashboard (top placements, activity). */
     STATS_GUI,
@@ -78,14 +74,6 @@ public enum GuiMode {
     FAVORITES_GUI,
     /** Feature Menu shortcut — up to 3 recently-edited blocks, no pagination. */
     RECENT_GUI,
-    /** Phase 3.3 — Dress & Effects overlay GUI for a single block. editingId = customId. */
-    DRESS_GUI,
-    /** Phase 3.4 — Gradient Generator GUI. editingId = blockId for Block A. */
-    GRADIENT_GUI,
-    /** Phase 4A.6 — Import wizard: preview + background/fringe/size settings before creating a block. */
-    IMPORT_WIZARD,
-    /** Phase 4A.6 — Retexture wizard: same as import wizard but updating an existing block. */
-    RETEXTURE_WIZARD,
     /** Phase 9.2 — Safety Center: snapshot, panic, undo, backup summary. */
     SAFETY_CENTER,
     /** Phase 9.3 — History GUI: paginated mutation log with filter. */
@@ -100,20 +88,18 @@ public enum GuiMode {
     AUDIT_GUI,
     /** Phase 11.1 — AI description prompt: player enters block description, then picks variation. */
     AI_GEN,
-    /** Phase 11.1 — AI variation picker: shows generated texture previews to select from. */
-    AI_PICKER,
     /** Phase 11.2 — Custom Color Studio: hex picker + HSB sliders for /cb customcolor GUI. */
     CUSTOM_COLOR_STUDIO,
     /** Phase 12.1 — Achievements GUI: shows all achievements, locked/unlocked with progress. */
     ACHIEVEMENTS_GUI,
-    /** Phase 12.2 — Drop Config GUI: configure what a custom block drops when broken. */
-    DROP_CONFIG,
     /** V4-43 — Snapshots GUI: paginated list of server snapshots with restore support. */
     SNAPSHOTS_GUI,
     /** V4-18 — Deleted Blocks GUI: browse and restore the trash bin. */
     DELETED_BLOCKS_GUI,
     /** V4-13 — Box Nudge Editor: fine-tune a single shape box with + / − buttons. */
-    BOX_NUDGE_EDITOR
+    BOX_NUDGE_EDITOR,
+    /** Phase 3.5 — Color Triangle confirm dialog: preview color + block before applying. */
+    RECOLOR_CONFIRM
 }
 
 
