@@ -344,6 +344,35 @@ Enter each of the 10 screens. Press ESC. Should return to the previous screen, n
 
 ---
 
+## Fix #6 — Image Import: Auto-Detect Tolerance + Download Headers
+**Status: BUILT — needs in-game confirmation**
+
+### What changed
+
+**Change A — Download now sends real browser headers (`ImageProcessor.java` line ~360)**
+- User-Agent changed from `CustomBlocksMod/2.0` to real Chrome string
+- Added `Accept` and `Referer` headers
+- Effect: WixMP, DeviantArt, and most CDN hotlink blocks should now succeed instead of returning 403
+
+**Change B — Better 401/403 error message (`ImageProcessor.java` line ~388)**
+- Old: generic "try Imgur or Discord"
+- New: step-by-step — "open in browser → right-click → Copy image address → paste that"
+
+**Change C — Auto-Detect tolerance (`ImageProcessor.java`, `CustomBlocksConfig.java`, `GuiManager.java`)**
+- New config field: `bgRemovalAutoDetect` (default `false`)
+- New method `autoTolerance(BufferedImage)`: samples all border pixels, finds the 90th-percentile whiteness score, returns calibrated tolerance (5–45) that matches the actual background tightness
+- When Auto-Detect is ON: `replaceBackground()` computes tolerance per-image instead of using a fixed value. The slider becomes a max cap — auto cannot go above it.
+- BG Studio GUI: new slot 11 toggle `Auto-Detect ON/OFF`. When ON, slot 18 label changes to "Max Cap" instead of "Tolerance".
+
+### Test
+1. Try a WixMP or DeviantArt image URL — should download instead of "No permission"
+2. Enable Auto-Detect in BG Studio (slot 11 toggle)
+3. Import the cow image (or any detailed image with a white background) — cow's eyes and dark details should remain, only the white outer background is removed
+4. Toggle Auto-Detect off — import the same image — compare (should be more aggressive without auto)
+5. Set the slider to 15 with Auto-Detect ON — auto cannot use more than 15 even if it wants to
+
+---
+
 ## Work Order
 
 Do NOT start the next fix until the developer confirms the previous one works in-game.
@@ -351,6 +380,7 @@ Do NOT start the next fix until the developer confirms the previous one works in
 | # | Fix | Status |
 |---|-----|--------|
 | 1a | HUD Editor Phase 1 — basic drag, toggles, position save | ✅ Confirmed working in-game |
+| 6 | Image import: download headers + auto-detect tolerance | BUILT — needs test |
 | 1b | HUD Editor Phase 2 — full rework (styles, templates, guides, presets, keybind, pause menu) | NOT STARTED |
 | 2 | Help GUI redesign | NOT STARTED |
 | 3 | Color square delay | NOT STARTED |

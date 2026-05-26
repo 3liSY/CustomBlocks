@@ -280,7 +280,7 @@ public class CustomBlocksClient implements ClientModInitializer {
     @SuppressFBWarnings("ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
     public void onInitializeClient() {
 
-        HudConfig.load();
+        HudConfig.load(); // also calls HudConfig.loadPresets()
 
         devConsoleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.customblocks.devconsole",
@@ -295,6 +295,20 @@ public class CustomBlocksClient implements ClientModInitializer {
             GLFW.GLFW_KEY_H,
             "category.customblocks"
         ));
+
+        // ── Pause menu HUD Editor button ────────────────────────────────────
+        net.fabricmc.fabric.api.client.screen.v1.ScreenEvents.AFTER_INIT.register(
+                (client2, screen, scaledWidth, scaledHeight) -> {
+            if (screen instanceof net.minecraft.client.gui.screen.GameMenuScreen) {
+                net.fabricmc.fabric.api.client.screen.v1.Screens.getButtons(screen).add(
+                    net.minecraft.client.gui.widget.ButtonWidget
+                        .builder(net.minecraft.text.Text.literal("§b✦ HUD Editor"), btn ->
+                            client2.setScreen(new com.customblocks.client.gui.HudEditorScreen()))
+                        .dimensions(scaledWidth / 2 - 100, scaledHeight / 4 + 80, 200, 20)
+                        .build()
+                );
+            }
+        });
 
         // Tint custom_square and custom_triangle icons with their NBT hex color.
         // The texture PNGs are white so the tint becomes the full displayed color.
@@ -350,21 +364,32 @@ public class CustomBlocksClient implements ClientModInitializer {
             }
 
             // Fade alpha update — runs every tick (20/sec)
-            // Target: 1.0 if looking at a custom block AND hud is visible, else 0.0
+            // Auto-hide when any screen (inventory, chat, etc.) is open
             float fadeTarget = 0f;
-            if (HudConfig.hudVisible && client.world != null && client.player != null) {
+            if (HudConfig.hudVisible && client.currentScreen == null
+                    && client.world != null && client.player != null) {
+                boolean lookingAtBlock = false;
                 if (client.crosshairTarget instanceof net.minecraft.util.hit.BlockHitResult bhr) {
                     var bs = client.world.getBlockState(bhr.getBlockPos());
                     if (bs.getBlock() instanceof com.customblocks.block.SlotBlock sb2) {
                         if (com.customblocks.core.SlotManager.getBySlot(sb2.getSlotKey()) != null) {
-                            fadeTarget = 1f;
+                            lookingAtBlock = true;
+                            HudConfig.lastSawBlockMs = System.currentTimeMillis();
                         }
                     }
                 }
+                // Sticky mode — keep showing for N seconds after looking away
+                if (!lookingAtBlock && HudConfig.stickyMode) {
+                    long elapsed = System.currentTimeMillis() - HudConfig.lastSawBlockMs;
+                    if (elapsed < (long)(HudConfig.stickySeconds * 1000L)) {
+                        lookingAtBlock = true;
+                    }
+                }
+                fadeTarget = lookingAtBlock ? 1f : 0f;
             }
 
             if (HudConfig.fadeEnabled) {
-                float step = 0.08f; // ~12 ticks to fully appear/disappear
+                float step = 0.08f;
                 if (fadeTarget > HudConfig.currentAlpha) {
                     HudConfig.currentAlpha = Math.min(HudConfig.currentAlpha + step, fadeTarget);
                 } else {
@@ -1032,29 +1057,36 @@ public class CustomBlocksClient implements ClientModInitializer {
             SlotData data = SlotManager.getBySlot(sb.getSlotKey());
             if (data == null) return;
 
-            // Build text lines
-            java.util.List<String> lines = new java.util.ArrayList<>();
-            if (HudConfig.showName || HudConfig.showId) {
-                StringBuilder nameSb = new StringBuilder();
-                if (HudConfig.showName) nameSb.append("§f✦ ").append(data.displayName).append(" ");
-                if (HudConfig.showId)   nameSb.append("§8[").append(data.customId).append("]");
-                lines.add(nameSb.toString().trim());
-            }
-            StringBuilder detail = new StringBuilder();
-            if (HudConfig.showLight)    detail.append("§7Light: §f").append(data.lightLevel).append("  ");
-            if (HudConfig.showHardness) detail.append("§7Hard: §f").append(data.hardness).append("  ");
-            if (HudConfig.showSound)    detail.append("§7🔊 §f").append(data.soundType);
-            String detailStr = detail.toString().trim();
-            if (!detailStr.isEmpty()) lines.add(detailStr);
+            // Build text lines — template mode or chip mode
             String faceName = bhr.getSide().getName();
-            StringBuilder status = new StringBuilder();
-            if (HudConfig.showCollision) status.append("§7Collision: ").append(data.noCollision ? "§cOFF" : "§aON").append("  ");
-            if (HudConfig.showFace)      status.append("§7Face: §f").append(faceName);
-            String statusStr = status.toString().trim();
-            if (!statusStr.isEmpty()) lines.add(statusStr);
-            boolean broken = data.blockHealth == com.customblocks.core.SlotData.BlockHealth.CORRUPT
-                          || data.blockHealth == com.customblocks.core.SlotData.BlockHealth.LOAD_FAILURE;
-            if (broken) lines.add("§c⚠ " + data.blockHealth.name());
+            String categoryName = getCategoryName(data.customId);
+            java.util.List<String> lines;
+            if (HudConfig.contentMode == 1) {
+                // Template mode
+                String line = HudConfig.template
+                    .replace("{name}",      data.displayName)
+                    .replace("{id}",        data.customId)
+                    .replace("{light}",     String.valueOf(data.lightLevel))
+                    .replace("{hardness}",  String.valueOf(data.hardness))
+                    .replace("{sound}",     data.soundType != null ? data.soundType : "none")
+                    .replace("{collision}", data.noCollision ? "OFF" : "ON")
+                    .replace("{face}",      faceName)
+                    .replace("{health}",    data.blockHealth.name())
+                    .replace("{anim}",      data.isAnimated() ? "Animated" : "Static")
+                    .replace("{category}", categoryName);
+                lines = line.isBlank() ? java.util.List.of() : java.util.List.of(line);
+            } else {
+                // Chip mode — respect chipOrder
+                java.util.List<String> tokens = new java.util.ArrayList<>();
+                for (int fieldIdx : HudConfig.chipOrder) {
+                    if (!HudConfig.isChipEnabled(fieldIdx)) continue;
+                    tokens.add(buildHudToken(fieldIdx, data, faceName, categoryName));
+                }
+                boolean broken = data.blockHealth == com.customblocks.core.SlotData.BlockHealth.CORRUPT
+                              || data.blockHealth == com.customblocks.core.SlotData.BlockHealth.LOAD_FAILURE;
+                if (broken) tokens.add("§c⚠ " + data.blockHealth.name());
+                lines = packTokens(tokens, client.textRenderer, 240);
+            }
             if (lines.isEmpty()) return;
 
             // Layout
@@ -1124,6 +1156,49 @@ public class CustomBlocksClient implements ClientModInitializer {
     }
 
 
+
+    private static String getCategoryName(String blockId) {
+        java.util.Set<String> cats = com.customblocks.core.CategoryManager.getCategoriesForBlock(blockId);
+        if (cats == null || cats.isEmpty()) return "None";
+        String key = cats.iterator().next();
+        com.customblocks.core.Category cat = com.customblocks.core.CategoryManager.getCategory(key);
+        return cat != null ? cat.displayName() : key;
+    }
+
+    private static String buildHudToken(int fieldIdx, com.customblocks.core.SlotData data,
+                                        String faceName, String categoryName) {
+        return switch (fieldIdx) {
+            case 0 -> "§f❖ " + data.displayName;
+            case 1 -> "§8[" + data.customId + "]";
+            case 2 -> "§7Light:§f" + data.lightLevel;
+            case 3 -> "§7Hard:§f" + data.hardness;
+            case 4 -> "§7🔊§f" + (data.soundType != null ? data.soundType : "none");
+            case 5 -> "§7Coll:" + (data.noCollision ? "§cOFF" : "§aON");
+            case 6 -> "§7Face:§f" + faceName;
+            default -> "";
+        };
+    }
+
+    private static java.util.List<String> packTokens(java.util.List<String> tokens,
+                                                     net.minecraft.client.font.TextRenderer tr,
+                                                     int maxPx) {
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        StringBuilder cur = new StringBuilder();
+        int curW = 0;
+        for (String tok : tokens) {
+            int tokW = tr.getWidth(net.minecraft.text.Text.literal(tok));
+            if (!cur.isEmpty() && curW + 16 + tokW > maxPx) {
+                lines.add(cur.toString().trim());
+                cur.setLength(0);
+                curW = 0;
+            }
+            if (!cur.isEmpty()) { cur.append("  "); curW += 16; }
+            cur.append(tok);
+            curW += tokW;
+        }
+        if (!cur.isEmpty()) lines.add(cur.toString().trim());
+        return lines;
+    }
 
     private static void bustItemGroupIconCache() {
 

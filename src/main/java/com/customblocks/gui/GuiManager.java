@@ -2190,6 +2190,16 @@ public class GuiManager {
         inv.setStack(0, uiGlint(Items.ECHO_SHARD, "§c◀ Back", "§8Return to main menu")); // Royal Directive
         inv.setStack(10, toggleItem("YCbCr Math", CustomBlocksConfig.bgRemovalUseYcbcr,
             "Separates brightness from colour to reduce light edge halos"));
+        boolean autoOn = CustomBlocksConfig.bgRemovalAutoDetect;
+        inv.setStack(11, autoOn
+            ? uiGlint(Items.RECOVERY_COMPASS, "§a§l✔ Auto-Detect: §lON",
+                "§7Analyses each image's border pixels to find",
+                "§7the right tolerance automatically.",
+                "§8Tolerance slider acts as an upper cap.",
+                "§8Click to turn off")
+            : ui(Items.COMPASS, "§7§l✖ Auto-Detect: §lOFF",
+                "§7Tolerance slider applies as a fixed value.",
+                "§8Click to enable smart per-image detection"));
         inv.setStack(13, enabled
             ? uiGlint(Items.EMERALD, "§a§l✔ Background Removal: §lON",
                 "§7Currently §atrimming §7white/transparent edges",
@@ -2200,9 +2210,11 @@ public class GuiManager {
 
         // ── Royal Tolerance Slider (Row 3) ─
         // Use 10 segments of 10 each for cleaner display: slots 18-27 (10 slots)
-        inv.setStack(18, uiGlint(Items.AMETHYST_CLUSTER, "§e✦ Tolerance: §f" + tol,
-            "§7Range: §f0-100",
-            "§80=OFF • 30=balanced • 60=aggressive • 100=max"));
+        boolean autoDetectOn = CustomBlocksConfig.bgRemovalAutoDetect;
+        inv.setStack(18, uiGlint(Items.AMETHYST_CLUSTER,
+            autoDetectOn ? "§b✦ Max Cap: §f" + tol : "§e✦ Tolerance: §f" + tol,
+            autoDetectOn ? "§7Auto-Detect is ON — this is the upper limit" : "§7Range: §f0-100",
+            autoDetectOn ? "§8Lower = auto cannot exceed this value" : "§80=OFF • 30=balanced • 60=aggressive • 100=max"));
         // 8 slider segments mapping 0-100 -> slots 19-26
         for (int seg = 0; seg < 8; seg++) {
             int slotIdx = 19 + seg;
@@ -2284,6 +2296,19 @@ public class GuiManager {
             CustomBlocksConfig.bgRemovalUseYcbcr = !CustomBlocksConfig.bgRemovalUseYcbcr;
             CustomBlocksConfig.save();
             send(player, "§a[BG Studio] Background math: §f" + (CustomBlocksConfig.bgRemovalUseYcbcr ? "YCbCr" : "CIE-Lab"));
+            refreshScreen(player, buildBgStudioGui());
+            return;
+        }
+
+        // Auto-detect toggle
+        if (slot == 11) {
+            CustomBlocksConfig.bgRemovalAutoDetect = !CustomBlocksConfig.bgRemovalAutoDetect;
+            CustomBlocksConfig.save();
+            if (CustomBlocksConfig.bgRemovalAutoDetect) {
+                send(player, "§a[BG Studio] Auto-Detect §aENABLED §7— tolerance is now calculated per image. Slider sets the max cap.");
+            } else {
+                send(player, "§a[BG Studio] Auto-Detect §cDISABLED §7— tolerance slider is now a fixed value.");
+            }
             refreshScreen(player, buildBgStudioGui());
             return;
         }
@@ -3022,6 +3047,10 @@ public class GuiManager {
     private static void handleMainClick(ServerPlayerEntity player, GuiState state, int slot) {
         UUID uuid = player.getUuid();
         switch (slot) {
+            // Row 0: HUD editor
+            case 8 -> net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(
+                    player, new com.customblocks.network.OpenHudEditorPayload());
+
             // Row 1: primary actions
             case 10 -> openShortInputPrompt(
                 player,
@@ -4050,7 +4079,10 @@ public class GuiManager {
 
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
 
-        // Row 0: title
+        // Row 0: title + HUD editor shortcut
+        inv.setStack(8, uiGlint(Items.ECHO_SHARD, "§e§lHUD Editor",
+            "§7Customize your block info overlay",
+            "§8Click to open the HUD editor"));
         inv.setStack(4, uiGlint(Items.DIAMOND, "§b§lCustomBlocks Dashboard",
             "§7Total blocks: §f" + blockCount,
             brokenCount > 0 ? "§cBroken: §f" + brokenCount : "§aAll textures OK",

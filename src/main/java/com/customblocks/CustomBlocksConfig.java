@@ -41,6 +41,8 @@ public final class CustomBlocksConfig {
     public static volatile int bgRemovalTolerance = 30;
     /** Use YCbCr luminance/chroma math for white-background cleanup; false falls back to CIE-Lab Delta-E. */
     public static volatile boolean bgRemovalUseYcbcr = true;
+    /** When true, tolerance is computed per-image from border pixel analysis instead of using bgRemovalTolerance directly. bgRemovalTolerance acts as an upper cap. */
+    public static volatile boolean bgRemovalAutoDetect = false;
     /** HTTP download timeout in seconds. */
     public static volatile int downloadTimeoutSeconds = 15;
     /**
@@ -266,6 +268,7 @@ public final class CustomBlocksConfig {
             defaultTextureSize    = getInt(root, "defaultTextureSize", defaultTextureSize);
             bgRemovalTolerance    = getInt(root, "bgRemovalTolerance", bgRemovalTolerance);
             bgRemovalUseYcbcr     = getBool(root, "bgRemovalUseYcbcr", bgRemovalUseYcbcr);
+            bgRemovalAutoDetect   = getBool(root, "bgRemovalAutoDetect", bgRemovalAutoDetect);
             downloadTimeoutSeconds= getInt(root, "downloadTimeoutSeconds", downloadTimeoutSeconds);
             maxGifSizeMb          = Math.max(1, getInt(root, "maxGifSizeMb", maxGifSizeMb)); // 1.25 — min 1
             sessionTimeoutSeconds = getInt(root, "sessionTimeoutSeconds", sessionTimeoutSeconds);
@@ -473,6 +476,7 @@ public final class CustomBlocksConfig {
             root.addProperty("defaultTextureSize", defaultTextureSize);
             root.addProperty("bgRemovalTolerance", bgRemovalTolerance);
             root.addProperty("bgRemovalUseYcbcr", bgRemovalUseYcbcr);
+            root.addProperty("bgRemovalAutoDetect", bgRemovalAutoDetect);
             root.addProperty("downloadTimeoutSeconds", downloadTimeoutSeconds);
             root.addProperty("maxGifSizeMb", maxGifSizeMb); // 1.25
             root.addProperty("sessionTimeoutSeconds", sessionTimeoutSeconds);
@@ -560,6 +564,7 @@ public final class CustomBlocksConfig {
             || !root.has("defaultTextureSize")
             || !root.has("bgRemovalTolerance")
             || !root.has("bgRemovalUseYcbcr")
+            || !root.has("bgRemovalAutoDetect")
             || !root.has("downloadTimeoutSeconds")
             || !root.has("maxGifSizeMb") // 1.25
             || !root.has("sessionTimeoutSeconds")

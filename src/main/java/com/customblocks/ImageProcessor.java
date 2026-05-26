@@ -355,11 +355,14 @@ public final class ImageProcessor {
 
         HttpRequest req;
         try {
-            req = HttpRequest.newBuilder()
+            HttpRequest.Builder rb = HttpRequest.newBuilder()
                     .uri(URI.create(fetchUrl))
-                    .header("User-Agent", "CustomBlocksMod/2.0")
-                    .timeout(Duration.ofSeconds(CustomBlocksConfig.downloadTimeoutSeconds))
-                    .build();
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                    .header("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+                    .header("Accept-Language", "en-US,en;q=0.9")
+                    .timeout(Duration.ofSeconds(CustomBlocksConfig.downloadTimeoutSeconds));
+            if (!domain.equals(url)) rb.header("Referer", "https://" + domain + "/");
+            req = rb.build();
         } catch (IllegalArgumentException e) {
             throw new IOException("§eThat doesn't look like a valid link! §7Make sure you copied the full URL — it should start with §fhttp:// §7or §fhttps://");
         }
@@ -385,7 +388,7 @@ public final class ImageProcessor {
             try { res.body().close(); } catch (IOException ignored) {}
             String hint = switch (code) {
                 case 400 -> "§eBad link! §7The URL has something weird in it. Try right-clicking the image → §fCopy image address §7and paste that instead.";
-                case 401, 403 -> "§eNo permission! §f" + domain + " §7won't let us download this image. It might be private. Try uploading it to §fImgur §7or §fDiscord §7instead.";
+                case 401, 403 -> "§eNo permission! §f" + domain + " §7blocked the download. To fix: open the image in your browser → right-click it → §fCopy image address §7→ paste that. Still failing? Upload it to §fimgur.com §7or §fDiscord §7and use that link.";
                 case 404 -> "§eImage not found! §7It was deleted or the link is broken. §fCheck if the link still works in your browser.";
                 case 410 -> "§eThis image was permanently deleted from §f" + domain + "§e. §7You'll need to upload a new one.";
                 case 429 -> "§eWhoah, slow down! §f" + domain + " §7says we're sending too many requests. Wait about a minute and try again.";
@@ -422,7 +425,7 @@ public final class ImageProcessor {
                 String proxyUrl = "https://wsrv.nl/?url=" + encoded + "&output=" + output;
                 HttpRequest proxyReq = HttpRequest.newBuilder()
                         .uri(URI.create(proxyUrl))
-                        .header("User-Agent", "CustomBlocksMod/2.0")
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                         .timeout(Duration.ofSeconds(CustomBlocksConfig.downloadTimeoutSeconds))
                         .build();
                 HttpResponse<byte[]> proxyRes = HTTP.send(proxyReq, HttpResponse.BodyHandlers.ofByteArray());
@@ -526,17 +529,27 @@ public final class ImageProcessor {
         final int[][] DIRS = {{1,0},{-1,0},{0,1},{0,-1}};
         boolean[][] isBg   = new boolean[w][h];
 
+        // Determine effective tolerance — auto-detect or config value
+        final int effectiveTol;
+        if (CustomBlocksConfig.bgRemovalAutoDetect) {
+            int autoTol = autoTolerance(argb);
+            int cfgTol  = CustomBlocksConfig.bgRemovalTolerance;
+            effectiveTol = (cfgTol > 0) ? Math.min(autoTol, cfgTol) : autoTol;
+        } else {
+            effectiveTol = CustomBlocksConfig.bgRemovalTolerance;
+        }
+
         // ── Stage 1: BFS flood-fill from ALL border pixels ───────────────────
         // Seed from every pixel on the 4 edges (not just corners) so that white
         // outlines touching any edge are caught, not just the 4 corner pixels.
         Queue<int[]> queue = new ArrayDeque<>();
         for (int x = 0; x < w; x++) {
-            if (!isBg[x][0]   && isBackground(argb.getRGB(x, 0)))   { isBg[x][0]   = true; queue.add(new int[]{x, 0});   }
-            if (!isBg[x][h-1] && isBackground(argb.getRGB(x, h-1))) { isBg[x][h-1] = true; queue.add(new int[]{x, h-1}); }
+            if (!isBg[x][0]   && isBackground(argb.getRGB(x, 0),   effectiveTol)) { isBg[x][0]   = true; queue.add(new int[]{x, 0});   }
+            if (!isBg[x][h-1] && isBackground(argb.getRGB(x, h-1), effectiveTol)) { isBg[x][h-1] = true; queue.add(new int[]{x, h-1}); }
         }
         for (int y = 1; y < h - 1; y++) {
-            if (!isBg[0][y]   && isBackground(argb.getRGB(0, y)))   { isBg[0][y]   = true; queue.add(new int[]{0, y});   }
-            if (!isBg[w-1][y] && isBackground(argb.getRGB(w-1, y))) { isBg[w-1][y] = true; queue.add(new int[]{w-1, y}); }
+            if (!isBg[0][y]   && isBackground(argb.getRGB(0, y),   effectiveTol)) { isBg[0][y]   = true; queue.add(new int[]{0, y});   }
+            if (!isBg[w-1][y] && isBackground(argb.getRGB(w-1, y), effectiveTol)) { isBg[w-1][y] = true; queue.add(new int[]{w-1, y}); }
         }
 
         if (!queue.isEmpty()) {
@@ -546,7 +559,7 @@ public final class ImageProcessor {
                 for (int[] d : DIRS) {
                     int nx = x + d[0], ny = y + d[1];
                     if (nx >= 0 && nx < w && ny >= 0 && ny < h
-                            && !isBg[nx][ny] && isBackground(argb.getRGB(nx, ny))) {
+                            && !isBg[nx][ny] && isBackground(argb.getRGB(nx, ny), effectiveTol)) {
                         isBg[nx][ny] = true;
                         queue.add(new int[]{nx, ny});
                     }
@@ -557,6 +570,7 @@ public final class ImageProcessor {
             // Any pixel directly adjacent to a filled background pixel that is
             // semi-transparent OR near-white is also marked background.
             // This eliminates the bright halo that anti-aliasing leaves at edges.
+            int fringeTol = effectiveTol + 15;
             boolean[][] fringe = new boolean[w][h];
             for (int y = 0; y < h; y++) {
                 for (int x = 0; x < w; x++) {
@@ -569,7 +583,7 @@ public final class ImageProcessor {
                             break;
                         }
                     }
-                    if (adjacentToBg && isFringe(argb.getRGB(x, y)))
+                    if (adjacentToBg && isFringe(argb.getRGB(x, y), fringeTol))
                         fringe[x][y] = true;
                 }
             }
@@ -684,6 +698,69 @@ public final class ImageProcessor {
         return CustomBlocksConfig.bgRemovalUseYcbcr
             ? isNearWhiteYcbcr(argb, tolerance)
             : deltaE(rgbToLab(argb), LAB_WHITE) <= tolerance;
+    }
+
+    /** Overload used by replaceBackground() when an explicit per-image tolerance is active. */
+    private static boolean isBackground(int argb, int tolerance) {
+        int a = (argb >> 24) & 0xFF;
+        if (a < OPAQUE_THRESHOLD) return true;
+        if (tolerance <= 0) return false;
+        return CustomBlocksConfig.bgRemovalUseYcbcr
+            ? isNearWhiteYcbcr(argb, tolerance)
+            : deltaE(rgbToLab(argb), LAB_WHITE) <= tolerance;
+    }
+
+    /** Fringe check with explicit tolerance (used when per-image tolerance is active). */
+    private static boolean isFringe(int argb, int tolerance) {
+        int a = (argb >> 24) & 0xFF;
+        if (a < OPAQUE_THRESHOLD) return true;
+        if (tolerance <= 0) return false;
+        return CustomBlocksConfig.bgRemovalUseYcbcr
+            ? isNearWhiteYcbcr(argb, tolerance)
+            : deltaE(rgbToLab(argb), LAB_WHITE) <= tolerance;
+    }
+
+    /**
+     * Compute how "not-white" a pixel is, using the same YCbCr math as isNearWhiteYcbcr.
+     * Returns the effective tolerance value needed to classify this pixel as background.
+     * Lower = more white/transparent. Fully transparent pixels return 0.
+     */
+    private static double whitenessScore(int argb) {
+        int a = (argb >> 24) & 0xFF;
+        if (a < OPAQUE_THRESHOLD) return 0.0;
+        int r = (argb >> 16) & 0xFF;
+        int g = (argb >>  8) & 0xFF;
+        int b =  argb        & 0xFF;
+        double y  = 0.299 * r + 0.587 * g + 0.114 * b;
+        double cb = 128.0 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+        double cr = 128.0 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+        double lumaGap = 255.0 - y;
+        double chromaDistance = Math.hypot(cb - 128.0, cr - 128.0);
+        return Math.max(lumaGap / 1.8, chromaDistance / 0.85);
+    }
+
+    /**
+     * Analyse border pixels to determine the optimal background removal tolerance for this image.
+     * Samples every pixel on the 4 edges, ranks them by whiteness score, and returns a value
+     * calibrated to remove only the background — not image content that happens to be near-white.
+     * Result is clamped to [5, 45].
+     */
+    static int autoTolerance(BufferedImage img) {
+        int w = img.getWidth(), h = img.getHeight();
+        java.util.ArrayList<Double> scores = new java.util.ArrayList<>((w + h) * 2);
+        for (int x = 0; x < w; x++) {
+            scores.add(whitenessScore(img.getRGB(x, 0)));
+            scores.add(whitenessScore(img.getRGB(x, h - 1)));
+        }
+        for (int y = 1; y < h - 1; y++) {
+            scores.add(whitenessScore(img.getRGB(0, y)));
+            scores.add(whitenessScore(img.getRGB(w - 1, y)));
+        }
+        if (scores.isEmpty()) return 20;
+        java.util.Collections.sort(scores);
+        int p90idx = Math.min((int) Math.round(scores.size() * 0.90), scores.size() - 1);
+        int autoTol = (int) Math.ceil(scores.get(p90idx)) + 5;
+        return Math.max(5, Math.min(45, autoTol));
     }
 
     // ── Phase 9: Video-to-texture (MP4/MOV) ────────────────────────────────────
