@@ -58,6 +58,7 @@ public class ColorTriangleItem extends Item {
     private static final String NBT_RGB = "cb_triangle_rgb";
     private static final String NBT_LABEL = "cb_triangle_label";
     private static final String NBT_KEY = "cb_triangle_key";
+    private static final String NBT_CUSTOM_NAME = "cb_triangle_custom_name";
 
     private final int    targetR, targetG, targetB;
     private final String colorName;
@@ -134,7 +135,9 @@ public class ColorTriangleItem extends Item {
         stack.set(DataComponentTypes.LORE, new LoreComponent(List.of(
             Text.literal("§7Recolours connected background pixels").styled(s -> s.withItalic(false)),
             Text.literal("§7Target colour: §f#" + hexForRgb(rgb)).styled(s -> s.withItalic(false)),
-            Text.literal("§8Right-click a CustomBlock to create a variant").styled(s -> s.withItalic(false)))));
+            Text.literal("§8Right-click a CustomBlock to create a variant").styled(s -> s.withItalic(false)),
+            Text.literal("§7Mode: §f" + formatModeForTooltip() + "  §7Tolerance: §f" + getToleranceForTooltip()).styled(s -> s.withItalic(false)),
+            Text.literal("§8Use §f/cb config §8to change").styled(s -> s.withItalic(false)))));
         stack.set(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE, true);
         return stack;
     }
@@ -144,6 +147,13 @@ public class ColorTriangleItem extends Item {
         if (selected && !world.isClient && world.getTime() % 10 == 0 && world instanceof ServerWorld sw) {
             sw.spawnParticles(net.minecraft.particle.ParticleTypes.SOUL_FIRE_FLAME, entity.getX(), entity.getY() + 1.2, entity.getZ(), 1, 0.1, 0.1, 0.1, 0.02);
             sw.spawnParticles(net.minecraft.particle.ParticleTypes.GLOW, entity.getX(), entity.getY() + 1.2, entity.getZ(), 1, 0.2, 0.2, 0.2, 0.01);
+        }
+        if (selected && !world.isClient && entity instanceof net.minecraft.server.network.ServerPlayerEntity sp) {
+            String h = com.customblocks.core.FirstUseHints.hint(sp.getUuid(), "color_triangle");
+            if (h != null) {
+                sp.sendMessage(Text.literal(h), false);
+                sp.sendMessage(Text.literal("§7Shift+right-click to preview first.  §8Mode: §f" + formatModeForTooltip()), false);
+            }
         }
     }
 
@@ -403,7 +413,7 @@ public class ColorTriangleItem extends Item {
         // Edge expansion: catch background-tinted anti-aliased pixels the BFS missed.
         // Expands the recolor zone by 1.5x tolerance. Dark shadow pixels are far from the
         // background color in Lab space and won't be touched.
-        double expandThreshold = labThreshold * 1.5;
+        double expandThreshold = labThreshold * 1.2;
         int[][] eDirs = {{1,0},{-1,0},{0,1},{0,-1}};
         for (int x = 0; x < w; x++) {
             for (int y = 0; y < h; y++) {
@@ -660,6 +670,11 @@ public class ColorTriangleItem extends Item {
                 NbtCompound nbt = custom.copyNbt();
                 if ("custom".equals(nbt.getString(NBT_KIND)) && nbt.contains(NBT_RGB)) {
                     int rgb = nbt.getInt(NBT_RGB) & 0xFFFFFF;
+                    if (nbt.contains(NBT_CUSTOM_NAME) && !nbt.getString(NBT_CUSTOM_NAME).isBlank()) {
+                        String customName = nbt.getString(NBT_CUSTOM_NAME);
+                        String k = customName.toLowerCase(Locale.ROOT).replace(" ", "_");
+                        return new TriangleColor((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF, customName, k);
+                    }
                     String label = nbt.contains(NBT_LABEL) ? nbt.getString(NBT_LABEL) : labelForRgb(rgb);
                     String key = nbt.contains(NBT_KEY) ? nbt.getString(NBT_KEY) : keyForRgb(rgb);
                     if (label == null || label.isBlank()) label = labelForRgb(rgb);
@@ -680,7 +695,23 @@ public class ColorTriangleItem extends Item {
     }
 
     private static String labelForRgb(int rgb) {
-        return "Hex #" + hexForRgb(rgb);
+        int r = (rgb >> 16) & 0xFF;
+        int g = (rgb >> 8)  & 0xFF;
+        int b =  rgb        & 0xFF;
+        String closest = null;
+        double bestDist = Double.MAX_VALUE;
+        for (com.customblocks.gui.ColorLibrary.LibColor c : com.customblocks.gui.ColorLibrary.ALL) {
+            int[] cr = com.customblocks.gui.ColorPickerHelper.hexToRgb(c.hex());
+            if (cr == null) continue;
+            double[] labA = rgbToLab(r, g, b);
+            double[] labB = rgbToLab(cr[0], cr[1], cr[2]);
+            double dE = Math.sqrt(
+                (labA[0]-labB[0])*(labA[0]-labB[0]) +
+                (labA[1]-labB[1])*(labA[1]-labB[1]) +
+                (labA[2]-labB[2])*(labA[2]-labB[2]));
+            if (dE < bestDist) { bestDist = dE; closest = c.name(); }
+        }
+        return (closest != null && bestDist < 25.0) ? closest : "Hex #" + hexForRgb(rgb);
     }
 
     private static String keyForRgb(int rgb) {
@@ -689,6 +720,18 @@ public class ColorTriangleItem extends Item {
 
     private static String hexForRgb(int rgb) {
         return String.format(Locale.ROOT, "%06X", rgb & 0xFFFFFF);
+    }
+
+    private static String formatModeForTooltip() {
+        String m = CustomBlocksConfig.colorToolBackgroundMode;
+        if ("corners_and_trapped".equals(m)) return "Background + Enclosed Areas";
+        if ("corners_only".equals(m))        return "Background Only";
+        return "Not Configured";
+    }
+
+    private static String getToleranceForTooltip() {
+        int t = CustomBlocksConfig.bgRemovalTolerance;
+        return t > 0 ? String.valueOf(t) : "35 (default)";
     }
 
     private record TriangleColor(int r, int g, int b, String label, String key) {}

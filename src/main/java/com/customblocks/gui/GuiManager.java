@@ -149,7 +149,9 @@ public class GuiManager {
         BULK_RECOLOR_EXCLUDE,
         SET_HOLOGRAM_TEXT,
         AI_CHAT_QUERY,
-        CONFIRM_SCRIPT_DELETE
+        CONFIRM_SCRIPT_DELETE,
+        TOOL_RENAME,
+        TOOL_RENAME_CONFIRM
     }
 
     public record PendingInput(InputAction action, String blockId, String face,
@@ -725,6 +727,18 @@ public class GuiManager {
     public static void openCustomColorStudio(ServerPlayerEntity player, String initialHex) {
         openScreenFromGuiState(player, GuiState.customColorStudio(initialHex), buildCustomColorStudioGui(player, initialHex),
             Text.literal(normalizeFormattingCodes("§dCustom Color Studio")));
+    }
+
+    public static void openColorsHub(ServerPlayerEntity player) {
+        pushBackStack(player.getUuid());
+        openScreenFromGuiState(player, GuiState.colorsHub(), buildColorsHubGui(player),
+            Text.literal(normalizeFormattingCodes("§dColor Tools Hub")));
+    }
+
+    private static void openRenameToolGui(ServerPlayerEntity player) {
+        pushBackStack(player.getUuid());
+        openScreenFromGuiState(player, GuiState.renameToolPicker(), buildRenameToolGui(player),
+            Text.literal(normalizeFormattingCodes("§6Rename a Tool")));
     }
 
     public static void openCacheDashboard(ServerPlayerEntity player, int tab) {
@@ -1365,6 +1379,8 @@ public class GuiManager {
                 case BULK_OP_PICKER -> handleBulkOpPickerClick(player, state, slot);
                 case COLOR_PICKER -> handleColorPickerClick(player, state, slot);
                 case VOICE_PICKER -> handleVoicePickerClick(player, slot); // 5.25
+                case COLORS_HUB -> handleColorsHubClick(player, state, slot);
+                case RENAME_TOOL_PICKER -> handleRenameToolPickerClick(player, state, slot);
                 default -> {
                     LOGGER.warn("[CustomBlocks] Unhandled GUI mode in handleClick: {} for player {}",
                             state.mode(), player.getName().getString());
@@ -1406,6 +1422,7 @@ public class GuiManager {
                 }
                 case SETTABICON_URL -> openTabIconPicker(player, rp);
                 case ANIM_CUSTOM_FPS -> reopenAnimGui(player, blockId, rp);
+                case TOOL_RENAME, TOOL_RENAME_CONFIRM -> openColorsHub(player);
                 default -> {
                     if (blockId != null && !blockId.startsWith("__") && SlotManager.hasId(blockId)) openEditor(player, blockId, rp);
                     else openMain(player, rp);
@@ -2001,6 +2018,56 @@ public class GuiManager {
                         openCategoryEditor(player, catKey, 0);
                     }
                 }
+                return true;
+            }
+            case TOOL_RENAME -> {
+                // blockId = "invSlot:HEXCOLOR"
+                String[] parts = blockId != null ? blockId.split(":", 2) : new String[0];
+                if (parts.length < 2) { openColorsHub(player); return true; }
+                String targetHex = parts[1].toUpperCase(java.util.Locale.ROOT);
+                String newName = text.replace("&", "§");
+                if (newName.isBlank() || newName.length() > 50) { send(player, "§cName must be 1–50 characters."); openColorsHub(player); return true; }
+                // Update BOTH triangle AND square tools that share this hex colour
+                net.minecraft.entity.player.PlayerInventory inv = player.getInventory();
+                int updatedTools = 0;
+                for (int i = 0; i < inv.size(); i++) {
+                    net.minecraft.item.ItemStack s = inv.getStack(i);
+                    if (s.isEmpty()) continue;
+                    net.minecraft.component.type.NbtComponent cn = s.get(DataComponentTypes.CUSTOM_DATA);
+                    if (cn == null) continue;
+                    net.minecraft.nbt.NbtCompound n = cn.copyNbt();
+                    boolean isT = "custom".equals(n.getString("cb_triangle")) && n.contains("cb_triangle_rgb");
+                    boolean isS = "custom".equals(n.getString("cb_square")) && n.contains("cb_square_rgb");
+                    if (!isT && !isS) continue;
+                    int rgb = isT ? n.getInt("cb_triangle_rgb") : n.getInt("cb_square_rgb");
+                    String hex = String.format(java.util.Locale.ROOT, "%06X", rgb & 0xFFFFFF);
+                    if (!hex.equalsIgnoreCase(targetHex)) continue;
+                    n.putString(isT ? "cb_triangle_custom_name" : "cb_square_custom_name", newName);
+                    s.set(DataComponentTypes.CUSTOM_DATA, net.minecraft.component.type.NbtComponent.of(n));
+                    updatedTools++;
+                }
+                if (updatedTools == 0) { send(player, "§cCould not find tool in inventory."); openColorsHub(player); return true; }
+                // Auto-rename all blocks created with this hex — no yes/no prompt
+                String oldKey = "hex_" + targetHex.toLowerCase(java.util.Locale.ROOT);
+                String hexDisplayLabel = "Hex #" + targetHex;
+                java.util.List<com.customblocks.core.SlotData> matching = new java.util.ArrayList<>();
+                for (com.customblocks.core.SlotData d : com.customblocks.core.SlotManager.allSlots()) {
+                    if (d.customId.endsWith("_" + oldKey)) matching.add(d);
+                }
+                int renamedBlocks = 0;
+                for (com.customblocks.core.SlotData d : matching) {
+                    String dn = d.displayName;
+                    String updated = dn.replace(hexDisplayLabel, newName);
+                    if (updated.equals(dn)) updated = dn.replaceAll("(?i)hex_[0-9a-fA-F]{6}", newName);
+                    if (!updated.equals(dn)) { com.customblocks.core.SlotManager.rename(d.customId, updated.trim()); renamedBlocks++; }
+                }
+                if (!matching.isEmpty()) com.customblocks.core.SlotManager.saveAll();
+                send(player, "§aRenamed to §f" + newName + "§a." + (renamedBlocks > 0 ? " §7(" + renamedBlocks + " block(s) updated)" : ""));
+                openColorsHub(player);
+                return true;
+            }
+            case TOOL_RENAME_CONFIRM -> {
+                openColorsHub(player);
                 return true;
             }
         }
@@ -2623,8 +2690,8 @@ public class GuiManager {
         Item icon;
         String head;
         switch (mode) {
-            case "corners_only" -> { icon = Items.LIME_DYE; head = "§a§lDefault: Fill corner only"; }
-            case "corners_and_trapped" -> { icon = Items.LIME_CONCRETE; head = "§a§lExtra: Fill corners + more"; }
+            case "corners_only" -> { icon = Items.LIME_DYE; head = "§a§lBackground Only"; }
+            case "corners_and_trapped" -> { icon = Items.LIME_CONCRETE; head = "§a§lBackground + Enclosed Areas"; }
             default -> { icon = Items.GRAY_DYE; head = "§e§lUnset (pick one)"; }
         }
         return uiGlint(icon,
@@ -2677,7 +2744,7 @@ public class GuiManager {
             isUnset ? "§e§lYou must pick a mode before colour tools work." : "§aCurrent: §f" + formatColorToolMode(mode)));
 
         inv.setStack(11, uiGlint(Items.LIME_DYE,
-            (isDefault ? "§a§l✦ " : "§7§l") + "Default: Fill corner only" + (isDefault ? " §a§l(active)" : ""),
+            (isDefault ? "§a§l✦ " : "§7§l") + "Background Only" + (isDefault ? " §a§l(active)" : ""),
             "§7Recolours only pixels reachable from the edges",
             "§7of the texture — the usual corner flood.",
             "§7Anything fully enclosed by your art (the inside",
@@ -2686,7 +2753,7 @@ public class GuiManager {
             "§eClick to select."));
 
         inv.setStack(15, uiGlint(Items.LIME_CONCRETE,
-            (isExtra ? "§a§l✦ " : "§7§l") + "Extra: Fill corners + more" + (isExtra ? " §a§l(active)" : ""),
+            (isExtra ? "§a§l✦ " : "§7§l") + "Background + Enclosed Areas" + (isExtra ? " §a§l(active)" : ""),
             "§7Runs the same corner flood as Default,",
             "§7then looks for small enclosed pockets that still",
             "§7look like leftover background (solid black or",
@@ -2705,14 +2772,14 @@ public class GuiManager {
             case 11 -> {
                 CustomBlocksConfig.colorToolBackgroundMode = "corners_only";
                 CustomBlocksConfig.save();
-                send(player, "§a[Config] §fColour Fill Mode §a= §eDefault: Fill corner only");
+                send(player, "§a[Config] §fColour Fill Mode §a= §eBackground Only");
                 playSuccess(player);
                 openColorFillModeGui(player);
             }
             case 15 -> {
                 CustomBlocksConfig.colorToolBackgroundMode = "corners_and_trapped";
                 CustomBlocksConfig.save();
-                send(player, "§a[Config] §fColour Fill Mode §a= §eExtra: Fill corners + more");
+                send(player, "§a[Config] §fColour Fill Mode §a= §eBackground + Enclosed Areas");
                 playSuccess(player);
                 openColorFillModeGui(player);
             }
@@ -6602,6 +6669,241 @@ public class GuiManager {
         }
     }
 
+    private static SimpleInventory buildColorsHubGui(ServerPlayerEntity player) {
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+        net.minecraft.entity.player.PlayerInventory playerInv = player.getInventory();
+
+        // Collect unique hex colors from custom tools in inventory (one entry per color)
+        java.util.LinkedHashMap<String, String> hexToName = new java.util.LinkedHashMap<>();
+        java.util.LinkedHashMap<String, Boolean> hexHasT = new java.util.LinkedHashMap<>();
+        java.util.LinkedHashMap<String, Boolean> hexHasS = new java.util.LinkedHashMap<>();
+        for (int i = 0; i < playerInv.size(); i++) {
+            net.minecraft.item.ItemStack s = playerInv.getStack(i);
+            if (s.isEmpty()) continue;
+            net.minecraft.component.type.NbtComponent cn = s.get(DataComponentTypes.CUSTOM_DATA);
+            if (cn == null) continue;
+            net.minecraft.nbt.NbtCompound n = cn.copyNbt();
+            boolean isT = "custom".equals(n.getString("cb_triangle")) && n.contains("cb_triangle_rgb");
+            boolean isS = "custom".equals(n.getString("cb_square")) && n.contains("cb_square_rgb");
+            if (!isT && !isS) continue;
+            int rgb = isT ? n.getInt("cb_triangle_rgb") : n.getInt("cb_square_rgb");
+            String hex = String.format(java.util.Locale.ROOT, "%06X", rgb & 0xFFFFFF);
+            String nameKey = isT ? "cb_triangle_custom_name" : "cb_square_custom_name";
+            String customName = n.contains(nameKey) ? n.getString(nameKey) : null;
+            hexToName.merge(hex, customName != null ? customName : "", (a, b) -> a.isEmpty() ? b : a);
+            if (isT) hexHasT.put(hex, true);
+            if (isS) hexHasS.put(hex, true);
+        }
+
+        // Header row
+        inv.setStack(0, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
+        inv.setStack(4, uiGlint(Items.MAGENTA_DYE, "§d§lColor Tools Hub",
+            "§7Your custom color tools, all in one place.",
+            "§7Click a color entry to rename both tools + all blocks.",
+            "§8/cb colors"));
+        inv.setStack(8, uiGlint(Items.AMETHYST_SHARD, "§b§lColor Library",
+            "§7Browse " + ColorLibrary.ALL.size() + " named colors.",
+            "§7Click any to receive matching triangle + square tools.",
+            "§8Opens Color Studio"));
+
+        // Slots 9–35: custom tool grid (grouped by hex, one entry per color)
+        int toolSlot = 9;
+        for (java.util.Map.Entry<String, String> entry : hexToName.entrySet()) {
+            if (toolSlot > 35) break;
+            String hex = entry.getKey();
+            String name = entry.getValue();
+            String displayName = name.isEmpty() ? "Hex #" + hex : name;
+            boolean hasT = hexHasT.getOrDefault(hex, false);
+            boolean hasS = hexHasS.getOrDefault(hex, false);
+            String tools = (hasT && hasS) ? "§7Triangle + Square" : (hasT ? "§7Triangle only" : "§7Square only");
+            Item icon = (hasT && hasS) ? Items.QUARTZ : (hasT ? Items.FLINT : Items.IRON_NUGGET);
+            inv.setStack(toolSlot++, uiGlint(icon,
+                "§f" + displayName,
+                "§8#" + hex,
+                tools,
+                "§eClick to rename both tools and update blocks"));
+        }
+        if (hexToName.isEmpty()) {
+            inv.setStack(22, uiGlint(Items.BOOK, "§eNo custom color tools in inventory",
+                "§7Click §fColor Library §7(top-right) to pick a color",
+                "§7and receive triangle + square tools.",
+                "§7Or run §f/cb customcolor <hex>§7."));
+        }
+
+        // Slot 36: create new color
+        inv.setStack(36, uiGlint(Items.LIME_DYE, "§a+ Create / Browse Colors",
+            "§7Opens the Color Studio.",
+            "§7Pick any named color or enter a custom hex.",
+            "§8Gives you matching triangle + square tools."));
+
+        // Settings footer (slots 45–53)
+        String mode = com.customblocks.CustomBlocksConfig.colorToolBackgroundMode;
+        boolean isTrapped = "corners_and_trapped".equals(mode);
+        inv.setStack(45, uiGlint(isTrapped ? Items.LIME_CONCRETE : Items.LIME_DYE,
+            "§7Fill Mode: §f" + formatColorToolMode(mode),
+            "§8Click to toggle.",
+            isTrapped ? "§aCurrent: Background + Enclosed Areas" : "§aCurrent: Background Only"));
+        int tol = com.customblocks.CustomBlocksConfig.bgRemovalTolerance;
+        inv.setStack(47, uiGlint(Items.REPEATER,
+            "§7Tolerance: §f" + (tol > 0 ? String.valueOf(tol) : "35 (default)"),
+            "§8Closeness threshold for background pixel detection.",
+            "§7Run §f/cb config §7to change."));
+        inv.setStack(53, uiGlint(Items.BOOK, "§7Help",
+            "§7Triangle: right-click a block to recolor its background.",
+            "§7Square: right-click to swap to an existing color variant.",
+            "§8Configure via §f/cb config§8."));
+        return inv;
+    }
+
+    private static java.util.LinkedHashSet<String> getInventoryCustomHexes(ServerPlayerEntity player) {
+        java.util.LinkedHashSet<String> hexes = new java.util.LinkedHashSet<>();
+        net.minecraft.entity.player.PlayerInventory playerInv = player.getInventory();
+        for (int i = 0; i < playerInv.size(); i++) {
+            net.minecraft.item.ItemStack s = playerInv.getStack(i);
+            if (s.isEmpty()) continue;
+            net.minecraft.component.type.NbtComponent cn = s.get(DataComponentTypes.CUSTOM_DATA);
+            if (cn == null) continue;
+            net.minecraft.nbt.NbtCompound n = cn.copyNbt();
+            boolean isT = "custom".equals(n.getString("cb_triangle")) && n.contains("cb_triangle_rgb");
+            boolean isS = "custom".equals(n.getString("cb_square")) && n.contains("cb_square_rgb");
+            if (!isT && !isS) continue;
+            int rgb = isT ? n.getInt("cb_triangle_rgb") : n.getInt("cb_square_rgb");
+            hexes.add(String.format(java.util.Locale.ROOT, "%06X", rgb & 0xFFFFFF));
+        }
+        return hexes;
+    }
+
+    private static SimpleInventory buildRenameToolGui(ServerPlayerEntity player) {
+        SimpleInventory inv = new SimpleInventory(27);
+        for (int i = 0; i < 27; i++) inv.setStack(i, glass());
+        inv.setStack(4, uiGlint(Items.NAME_TAG, "§6Rename a Color Tool",
+            "§7Click a tool to rename it.",
+            "§8The new name is used for all future block variants."));
+        int slot = 9;
+        net.minecraft.entity.player.PlayerInventory playerInv = player.getInventory();
+        for (int i = 0; i < playerInv.size() && slot < 18; i++) {
+            net.minecraft.item.ItemStack s = playerInv.getStack(i);
+            if (s.isEmpty()) continue;
+            net.minecraft.component.type.NbtComponent cn = s.get(DataComponentTypes.CUSTOM_DATA);
+            if (cn == null) continue;
+            net.minecraft.nbt.NbtCompound n = cn.copyNbt();
+            boolean isT = "custom".equals(n.getString("cb_triangle")) && n.contains("cb_triangle_rgb");
+            boolean isS = "custom".equals(n.getString("cb_square")) && n.contains("cb_square_rgb");
+            if (!isT && !isS) continue;
+            int rgb = isT ? n.getInt("cb_triangle_rgb") : n.getInt("cb_square_rgb");
+            String hex = String.format(java.util.Locale.ROOT, "%06X", rgb & 0xFFFFFF);
+            String curName = n.contains(isT ? "cb_triangle_custom_name" : "cb_square_custom_name")
+                ? n.getString(isT ? "cb_triangle_custom_name" : "cb_square_custom_name")
+                : "Hex #" + hex;
+            String type = isT ? "Triangle" : "Square";
+            inv.setStack(slot++, uiGlint(isT ? Items.FLINT : Items.IRON_NUGGET,
+                "§f" + curName + " " + type,
+                "§7Current name: §f" + curName,
+                "§7Color: §f#" + hex,
+                "§8Click to rename"));
+        }
+        if (slot == 9) {
+            inv.setStack(13, ui(Items.BARRIER, "§cNo custom tools in inventory",
+                "§7Get tools with §f/cb customcolor§7."));
+        }
+        inv.setStack(22, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
+        return inv;
+    }
+
+    private static void handleColorsHubClick(ServerPlayerEntity player, GuiState state, int slot) {
+        java.util.UUID uuid = player.getUuid();
+        if (slot == 0) { handleEscBack(player); return; }
+        if (slot == 8 || slot == 36) { openCustomColorStudio(player, null); return; }
+
+        // Tool grid (slots 9-35): nth entry = nth unique hex from inventory
+        if (slot >= 9 && slot <= 35) {
+            int n = slot - 9;
+            java.util.LinkedHashSet<String> hexes = getInventoryCustomHexes(player);
+            String[] hexArr = hexes.toArray(new String[0]);
+            if (n >= hexArr.length) return;
+            String hex = hexArr[n];
+            // Find first inventory slot with this hex (for PendingInput)
+            net.minecraft.entity.player.PlayerInventory playerInv = player.getInventory();
+            int foundInvSlot = 0;
+            String curName = "Hex #" + hex;
+            Item anvilIcon = Items.QUARTZ;
+            for (int i = 0; i < playerInv.size(); i++) {
+                net.minecraft.item.ItemStack s = playerInv.getStack(i);
+                if (s.isEmpty()) continue;
+                net.minecraft.component.type.NbtComponent cn = s.get(DataComponentTypes.CUSTOM_DATA);
+                if (cn == null) continue;
+                net.minecraft.nbt.NbtCompound nb = cn.copyNbt();
+                boolean isT = "custom".equals(nb.getString("cb_triangle")) && nb.contains("cb_triangle_rgb");
+                boolean isS = "custom".equals(nb.getString("cb_square")) && nb.contains("cb_square_rgb");
+                if (!isT && !isS) continue;
+                int rgb = isT ? nb.getInt("cb_triangle_rgb") : nb.getInt("cb_square_rgb");
+                String h = String.format(java.util.Locale.ROOT, "%06X", rgb & 0xFFFFFF);
+                if (!h.equalsIgnoreCase(hex)) continue;
+                foundInvSlot = i;
+                String nameKey = isT ? "cb_triangle_custom_name" : "cb_square_custom_name";
+                if (nb.contains(nameKey)) curName = nb.getString(nameKey);
+                anvilIcon = isT ? Items.FLINT : Items.IRON_NUGGET;
+                break;
+            }
+            PENDING.put(uuid, new PendingInput(InputAction.TOOL_RENAME, foundInvSlot + ":" + hex, null, null, null, 0));
+            AnvilPromptManager.open(player,
+                Text.literal(normalizeFormattingCodes("§6Rename Color")),
+                new net.minecraft.item.ItemStack(anvilIcon),
+                curName);
+            return;
+        }
+
+        // Fill mode toggle (slot 45)
+        if (slot == 45) {
+            String cur = com.customblocks.CustomBlocksConfig.colorToolBackgroundMode;
+            String next = "corners_and_trapped".equals(cur) ? "corners_only" : "corners_and_trapped";
+            com.customblocks.CustomBlocksConfig.colorToolBackgroundMode = next;
+            com.customblocks.CustomBlocksConfig.save();
+            send(player, "§aFill mode set to §f" + formatColorToolMode(next));
+            playSuccess(player);
+            openColorsHub(player);
+            return;
+        }
+        // Tolerance info (slot 47)
+        if (slot == 47) {
+            int tol = com.customblocks.CustomBlocksConfig.bgRemovalTolerance;
+            send(player, "§7Current tolerance: §f" + (tol > 0 ? tol : "35 (default)") + "§7. Use §f/cb config §7to change.");
+        }
+    }
+
+    private static void handleRenameToolPickerClick(ServerPlayerEntity player, GuiState state, int slot) {
+        if (slot == 22) { handleEscBack(player); return; }
+        if (slot < 9 || slot >= 18) return;
+        int n = slot - 9;
+        net.minecraft.entity.player.PlayerInventory playerInv = player.getInventory();
+        int count = 0;
+        for (int i = 0; i < playerInv.size(); i++) {
+            net.minecraft.item.ItemStack s = playerInv.getStack(i);
+            if (s.isEmpty()) continue;
+            net.minecraft.component.type.NbtComponent cn = s.get(DataComponentTypes.CUSTOM_DATA);
+            if (cn == null) continue;
+            net.minecraft.nbt.NbtCompound nb = cn.copyNbt();
+            boolean isT = "custom".equals(nb.getString("cb_triangle")) && nb.contains("cb_triangle_rgb");
+            boolean isS = "custom".equals(nb.getString("cb_square")) && nb.contains("cb_square_rgb");
+            if (!isT && !isS) continue;
+            if (count == n) {
+                int rgb = isT ? nb.getInt("cb_triangle_rgb") : nb.getInt("cb_square_rgb");
+                String hex = String.format(java.util.Locale.ROOT, "%06X", rgb & 0xFFFFFF);
+                String curName = nb.contains(isT ? "cb_triangle_custom_name" : "cb_square_custom_name")
+                    ? nb.getString(isT ? "cb_triangle_custom_name" : "cb_square_custom_name")
+                    : "Hex #" + hex;
+                PENDING.put(player.getUuid(), new PendingInput(InputAction.TOOL_RENAME, i + ":" + hex, null, null, null, 0));
+                AnvilPromptManager.open(player,
+                    Text.literal(normalizeFormattingCodes("§6Rename Tool")),
+                    new net.minecraft.item.ItemStack(isT ? Items.FLINT : Items.IRON_NUGGET),
+                    curName);
+                return;
+            }
+            count++;
+        }
+    }
+
     private static void handleCustomColorStudioClick(ServerPlayerEntity player, GuiState state, int slot) {
         if (slot == 0 || slot == 45 || slot == 49) { handleEscBack(player); return; }
 
@@ -6703,9 +7005,9 @@ public class GuiManager {
     }
 
     private static String formatColorToolMode(String mode) {
-        if ("corners_only".equals(mode)) return "Default: Fill corner only";
-        if ("corners_and_trapped".equals(mode)) return "Extra: Fill corners + more";
-        return "Unset (pick one)";
+        if ("corners_only".equals(mode)) return "Background Only";
+        if ("corners_and_trapped".equals(mode)) return "Background + Enclosed Areas";
+        return "Not Configured";
     }
 
     private static String normalizeHexInput(String text) {
