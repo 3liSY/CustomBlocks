@@ -2077,7 +2077,10 @@ public class GuiManager {
                     String dn = d.displayName;
                     String updated = dn.replace(hexDisplayLabel, newName);
                     if (updated.equals(dn)) updated = dn.replaceAll("(?i)hex_[0-9a-fA-F]{6}", newName);
-                    if (!updated.equals(dn)) { com.customblocks.core.SlotManager.rename(d.customId, updated.trim()); renamedBlocks++; }
+                    // Fallback: hex was never in the display name (null-label path) — use deriveDisplayName logic
+                    if (updated.equals(dn)) updated = com.customblocks.item.ColorTriangleItem.variantDisplayNameFor(dn, newName);
+                    com.customblocks.core.SlotManager.rename(d.customId, updated.trim());
+                    renamedBlocks++;
                 }
                 if (!matching.isEmpty()) com.customblocks.core.SlotManager.saveAll();
                 send(player, "§aRenamed to §f" + newName + "§a." + (renamedBlocks > 0 ? " §7(" + renamedBlocks + " block(s) updated)" : ""));

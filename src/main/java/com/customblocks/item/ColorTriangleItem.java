@@ -643,6 +643,7 @@ public class ColorTriangleItem extends Item {
      * Checks all 16 family names + all 40+ aliases (capitalised and lower-case).
      */
     private static String deriveDisplayName(String original, String newColorName) {
+        if (newColorName == null || newColorName.isBlank()) return original;
         // Check canonical family names first (most common case)
         for (String c : COLOR_NAMES) {
             String cap = Character.toUpperCase(c.charAt(0)) + c.substring(1);
@@ -711,7 +712,7 @@ public class ColorTriangleItem extends Item {
                 (labA[2]-labB[2])*(labA[2]-labB[2]));
             if (dE < bestDist) { bestDist = dE; closest = c.name(); }
         }
-        return (closest != null && bestDist < 25.0) ? closest : "Hex #" + hexForRgb(rgb);
+        return (closest != null && bestDist < 25.0) ? closest : "";
     }
 
     private static String keyForRgb(int rgb) {

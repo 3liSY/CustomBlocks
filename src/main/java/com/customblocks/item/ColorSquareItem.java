@@ -327,7 +327,7 @@ public class ColorSquareItem extends Item {
                 (labA[2]-labB[2])*(labA[2]-labB[2]));
             if (dE < bestDist) { bestDist = dE; closest = c.name(); }
         }
-        return (closest != null && bestDist < 25.0) ? closest : "Hex #" + hexForRgb(rgb);
+        return (closest != null && bestDist < 25.0) ? closest : "";
     }
 
     private static String keyForRgb(int rgb) {
