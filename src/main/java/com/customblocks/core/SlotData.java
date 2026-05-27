@@ -42,6 +42,8 @@ public final class SlotData {
     /** Backwards-compat shortcut: true when blockHealth == CORRUPT. */
     public final transient boolean isBroken;
     public final transient String displayNameLower;
+    /** Pre-computed dominant color family from pixel analysis. Null if not yet computed or no texture. */
+    public transient String cachedColorFamily = null;
 
     // ── V4-00: Four block health states ─────────────────────────────────────
     /**

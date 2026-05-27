@@ -1271,6 +1271,19 @@ public class GuiManager {
                 case BULK_OP_PICKER -> openBulkOpPicker(player, state.editingId(), state.page());
                 case COLOR_PICKER -> openColorPicker(player, state.editingId());
                 case VOICE_PICKER -> openVoicePickerGui(player); // 5.25
+                case BULK_ASSIGN_PICKER -> openBulkAssignPicker(player, state.page());
+                case BULK_RECOLOR_CONFIRM -> openBulkRecolorConfirm(player, state.page());
+                case BULK_RECOLOR_WIZARD -> openBulkRecolorWizard(player, state.page());
+                case CATEGORY_BLOCK_CONTEXT -> {
+                    String[] _cbcParts = state.editingId() != null ? state.editingId().split("\\|", 2) : new String[]{"", ""};
+                    openCategoryBlockContext(player, _cbcParts.length > 0 ? _cbcParts[0] : "", _cbcParts.length > 1 ? _cbcParts[1] : "", state.page());
+                }
+                case CATEGORY_ICON_PICKER -> openCategoryIconPicker(player, state.editingId(), state.page(), state.confirmDelete());
+                case CATEGORY_STATS -> openCategoryStats(player, state.editingId());
+                case DELETE_CATEGORY_MENU -> openDeleteCategoryMenu(player, state.editingId());
+                case IMPORT_CONFLICT -> openImportConflictGui(player, state.page());
+                case MERGE_CATEGORY_PICKER_TARGET -> openMergeCategoryPickerTarget(player, state.editingId(), state.page());
+                case SORT_BLOCKS_MENU -> openSortBlocksMenu(player, state.editingId());
                 default -> openMain(player, 0);
             }
         } finally {
@@ -1655,6 +1668,7 @@ public class GuiManager {
                     byte[] finalBytes;
                     if (isBlock) {
                         SlotData dd = SlotManager.getById(targetId);
+                        if (dd == null) throw new Exception("Block not found");
                         if (dd.texture != null) finalBytes = dd.texture.clone();
                         else throw new Exception("Block has no texture");
                     } else { finalBytes = ImageProcessor.downloadAndProcess(text).bytes(); }
@@ -1709,10 +1723,12 @@ public class GuiManager {
                 String newId = text.toLowerCase().replaceAll("[^a-z0-9_\\-]", "_");
                 if (newId.isEmpty())          { send(player, "§cInvalid ID."); openEditor(player, blockId, rp); return true; }
                 if (SlotManager.hasId(newId)) { send(player, "§c'" + newId + "' already taken."); openEditor(player, blockId, rp); return true; }
-                UndoManager.pushUndoMutation(blockId, SlotManager.getById(blockId), "reid", player.getUuid());
                 SlotData d = SlotManager.getById(blockId);
+                if (d == null) { send(player, "Block not found."); openMain(player, rp); return true; }
+                UndoManager.pushUndoMutation(blockId, d, "reid", player.getUuid());
                 SlotManager.reId(blockId, newId); SlotManager.saveAll();
                 SlotData upd = SlotManager.getById(newId);
+                if (upd == null) { send(player, "Block not found after re-ID."); openMain(player, rp); return true; }
                 NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("remove", d.index, blockId, null, null, 0, 0, "stone"));
                 NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("add", upd.index, newId, upd.displayName, upd.texture, upd.lightLevel, upd.hardness, upd.soundType, null, null, upd.animMeta));
                 send(player, "Re-ID'd '§f" + blockId + "§a' → '§f" + newId + "§a'.");
@@ -1733,7 +1749,8 @@ public class GuiManager {
                     UndoManager.pushUndoMutation(blockId, d, "setglow", player.getUuid());
                     SlotManager.setLightLevel(blockId, light);
                     SlotManager.saveAll();
-                    syncProp(player, SlotManager.getById(blockId)); 
+                    SlotData afterLight = SlotManager.getById(blockId);
+                    if (afterLight != null) syncProp(player, afterLight);
                     send(player, "Light level set to " + light + ".");
                     openPropertiesGui(player, blockId, rp);
                 } catch (NumberFormatException e) {
@@ -1752,7 +1769,8 @@ public class GuiManager {
                     UndoManager.pushUndoMutation(blockId, d, "sethardness", player.getUuid());
                     SlotManager.setHardness(blockId, hardness);
                     SlotManager.saveAll();
-                    syncProp(player, SlotManager.getById(blockId)); 
+                    SlotData afterHard = SlotManager.getById(blockId);
+                    if (afterHard != null) syncProp(player, afterHard);
                     send(player, "Hardness set to " + hardness + ".");
                     openPropertiesGui(player, blockId, rp);
                 } catch (NumberFormatException e) {
@@ -3462,7 +3480,7 @@ public class GuiManager {
             return;
         }
         if (slot == 22) return; // slot 22 was add-shape (purged)
-        if (slot == 23) { UndoManager.pushUndoMutation(id, d, "clearshape", uuid); SlotManager.setShape(id, null); SlotManager.saveAll(); broadcastShape(player.getServer(),SlotManager.getById(id)); send(player,"§a[Shape] Cleared — full cube."); reopenShapeEditor(player,id,rp,0); return; }
+        if (slot == 23) { UndoManager.pushUndoMutation(id, d, "clearshape", uuid); SlotManager.setShape(id, null); SlotManager.saveAll(); SlotData clearedD = SlotManager.getById(id); if (clearedD != null) broadcastShape(player.getServer(), clearedD); send(player,"§a[Shape] Cleared — full cube."); reopenShapeEditor(player,id,rp,0); return; }
         if (slot >= 28 && slot <= 36) {
             int boxIdx = boxPage*9 + (slot-28);
             if (boxIdx < boxes.size()) {
@@ -3471,7 +3489,7 @@ public class GuiManager {
                     openBoxNudgeEditor(player, id, boxIdx, rp);
                 } else {
                     // Left-click → delete the box
-                    UndoManager.pushUndoMutation(id, d, "removeshape", uuid); SlotManager.removeBox(id,boxIdx); SlotManager.saveAll(); broadcastShape(player.getServer(),SlotManager.getById(id)); send(player,"§a[Shape] Removed box #"+boxIdx+"."); int np=Math.min(boxPage,Math.max(0,(boxes.size()-2)/9)); reopenShapeEditor(player,id,rp,np);
+                    UndoManager.pushUndoMutation(id, d, "removeshape", uuid); SlotManager.removeBox(id,boxIdx); SlotManager.saveAll(); SlotData removedD = SlotManager.getById(id); if (removedD != null) broadcastShape(player.getServer(), removedD); send(player,"§a[Shape] Removed box #"+boxIdx+"."); int np=Math.min(boxPage,Math.max(0,(boxes.size()-2)/9)); reopenShapeEditor(player,id,rp,np);
                 }
             }
             return;
@@ -3559,7 +3577,7 @@ public class GuiManager {
             UndoManager.pushUndoMutation(id, d, "setglow", uuid);
             SlotManager.setLightLevel(id, Math.max(0, Math.min(15, newLight)));
             syncProp(player, d);
-            refreshScreen(player, buildPropertiesGui(SlotManager.getById(id)));
+            SlotData _prop = SlotManager.getById(id); if (_prop != null) refreshScreen(player, buildPropertiesGui(_prop)); else openMain(player, rp);
             return;
         }
 
@@ -3570,7 +3588,7 @@ public class GuiManager {
             UndoManager.pushUndoMutation(id, d, "sethardness", uuid);
             SlotManager.setHardness(id, newHardness);
             syncProp(player, d);
-            refreshScreen(player, buildPropertiesGui(SlotManager.getById(id)));
+            SlotData _prop = SlotManager.getById(id); if (_prop != null) refreshScreen(player, buildPropertiesGui(_prop)); else openMain(player, rp);
             return;
         }
 
@@ -3596,6 +3614,7 @@ public class GuiManager {
             case 40 -> {
                 UndoManager.pushUndoMutation(id, d, "setcollision", uuid); SlotManager.setCollision(id,d.noCollision); SlotManager.saveAll();
                 SlotData upd = SlotManager.getById(id);
+                if (upd == null) { send(player, "Block not found."); openMain(player, rp); return; }
                 NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setcollision",upd.index,id,null,null,0,0,"stone",null,upd.noCollision?"false":"true"));
                 send(player,"§a[GUI] Collision: §f"+(upd.noCollision?"§cOFF":"§aON")); refreshScreen(player, buildPropertiesGui(upd));
             }
@@ -3620,7 +3639,7 @@ public class GuiManager {
         String pick = soundSlots.get(slot);
         if (pick != null) {
             setSoundQuiet(player, d, pick, uuid);
-            refreshScreen(player, buildSoundMenu(SlotManager.getById(id)));
+            SlotData _snd = SlotManager.getById(id); if (_snd != null) refreshScreen(player, buildSoundMenu(_snd)); else openMain(player, rp);
         } else if (slot == 45) {
             openEditor(player, id, rp);
         }
@@ -3870,7 +3889,8 @@ public class GuiManager {
         }
         sb.append("]}}");
         String newMeta = sb.toString();
-        UndoManager.pushUndoMutation(id, SlotManager.getById(id), "animsettings", player.getUuid());
+        SlotData _anim = SlotManager.getById(id); if (_anim == null) { playError(player); return; }
+        UndoManager.pushUndoMutation(id, _anim, "animsettings", player.getUuid());
         SlotManager.setAnimMeta(id, newMeta);
         SlotManager.saveAll();
         SlotData d = SlotManager.getById(id);
@@ -5261,40 +5281,24 @@ public class GuiManager {
         SimpleInventory inv = new SimpleInventory(54);
         for (int i = 0; i < 54; i++) inv.setStack(i, glass());
 
-        inv.setStack(4, uiGlint(Items.ENCHANTED_BOOK, "§a§lHelp & Commands",
-            "§7Browse commands by category.",
-            "§8Click a category below to see details."));
+        inv.setStack(4, uiGlint(Items.ENCHANTED_BOOK, "§a§lHow Can I Help?",
+            "§7Click a question to see the answer."));
 
-        inv.setStack(11, uiGlint(Items.EMERALD, "§e§lCreating Blocks",
-            "§7Create, rename, delete, and duplicate blocks.",
-            "§8Click to view commands →"));
-        inv.setStack(13, uiGlint(Items.PAINTING, "§b§lTextures & Design",
-            "§7Retexture, per-face painting, GIF animation.",
-            "§8Click to view commands →"));
-        inv.setStack(15, uiGlint(Items.ANVIL, "§5§lShapes & Collision",
-            "§7Custom shapes, collision, and geometry.",
-            "§8Click to view commands →"));
-        inv.setStack(20, uiGlint(Items.REDSTONE, "§6§lUtilities & Commands",
-            "§7Undo, redo, tools, diagnostics.",
-            "§8Click to view commands →"));
-        inv.setStack(22, uiGlint(Items.ENDER_CHEST, "§a§lServer & Data",
-            "§7Export, import, reload, config.",
-            "§8Click to view commands →"));
-
-        inv.setStack(40, ui(Items.KNOWLEDGE_BOOK, "§a§lQuick Tips",
-            "§71. Use high-resolution PNGs for best quality.",
-            "§72. The Block Editor is the fastest way to customize.",
-            "§73. Keep unique IDs short and descriptive."));
-
-        // V4-34 — keyboard shortcut overlay
-        inv.setStack(42, ui(Items.WRITABLE_BOOK, "§e§lKeyboard Shortcuts",
-            "§7In Block List: §fLeft-click §8→ §7editor",
-            "§7              §fRight-click §8→ §7category",
-            "§7              §fSlot 8 §8→ §7search",
-            "§7In Editor:    §fAll changes §8→ §7live/instant",
-            "§7Anywhere:     §f/cb help §8→ §7this guide",
-            "§7              §f/cb undo §8→ §7undo last action",
-            "§7              §fESC §8→ §7back / close GUI"));
+        inv.setStack(11, uiGlint(Items.CYAN_DYE, "§e§lHow do I change a block's color?",
+            "§7Use a Color Square or Color Triangle tool.",
+            "§8Click to learn how →"));
+        inv.setStack(13, uiGlint(Items.GLOWSTONE_DUST, "§b§lHow do I make a block glow or change its sound?",
+            "§7Use the Properties screen inside the Block Editor.",
+            "§8Click to learn how →"));
+        inv.setStack(15, uiGlint(Items.DAMAGED_ANVIL, "§c§lHow do I fix a broken or purple block?",
+            "§7Open Broken Blocks from the main menu.",
+            "§8Click to learn how →"));
+        inv.setStack(20, uiGlint(Items.GOLDEN_PICKAXE, "§6§lHow do I undo something?",
+            "§7Use the Undo button in the main menu.",
+            "§8Click to learn how →"));
+        inv.setStack(22, uiGlint(Items.ENDER_CHEST, "§a§lHow do I share or back up my blocks?",
+            "§7Use Export in the Block Editor or Config.",
+            "§8Click to learn how →"));
 
         inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
         return inv;
@@ -5306,58 +5310,102 @@ public class GuiManager {
         inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back to Help"));
 
         switch (category) {
-            case 1 -> { // Creating Blocks
-                inv.setStack(4, uiGlint(Items.EMERALD, "§e§lCreating Blocks"));
-                inv.setStack(10, uiGlint(Items.CRAFTING_TABLE, "§eCreate", "§7/cb create <id> <name> <url>", "§8Creates a new custom block from a texture URL.", "§8Optional: add size (16-256) before URL."));
-                inv.setStack(11, uiGlint(Items.NAME_TAG, "§eRename", "§7/cb rename <id> <new name>", "§8Changes the display name of a block."));
-                inv.setStack(12, uiGlint(Items.COMMAND_BLOCK, "§eRe-ID", "§7/cb reid <old_id> <new_id>", "§8Changes the internal ID.", "§8All placed blocks update automatically."));
-                inv.setStack(13, uiGlint(Items.CHEST, "§eDuplicate", "§7/cb dupe <id>", "§8Clones a block with all properties,", "§8textures, shapes, and animation."));
-                inv.setStack(14, uiGlint(Items.BARRIER, "§eDelete", "§7/cb delete <id>", "§8Permanently removes a block."));
-                inv.setStack(15, uiGlint(Items.TNT, "§eBulk Delete", "§7/cb bulkdelete <id1> <id2> ...", "§8Delete multiple blocks at once."));
-                inv.setStack(19, uiGlint(Items.DIAMOND, "§eGive", "§7/cb give <id> [amount] [player]", "§8Adds the block item to inventory."));
+            case 1 -> { // How do I change a block's color?
+                inv.setStack(4, uiGlint(Items.CYAN_DYE, "§e§lChanging a Block's Color"));
+                inv.setStack(10, ui(Items.CYAN_DYE, "§eStep 1: Get a Color Square",
+                    "§7Open the main menu and click Magic Items.",
+                    "§7Grab a Color Square from there."));
+                inv.setStack(11, ui(Items.GRASS_BLOCK, "§eStep 2: Right-click a custom block",
+                    "§7Hold the Color Square and right-click",
+                    "§7the block you want to recolor."));
+                inv.setStack(12, ui(Items.COMPARATOR, "§eStep 3: The block recolors",
+                    "§7The block's texture shifts to match the",
+                    "§7color of the square you used."));
+                inv.setStack(13, ui(Items.ARROW, "§eTip: Use the Color Triangle",
+                    "§7The Color Triangle does finer color",
+                    "§7adjustments than the square."));
+                inv.setStack(14, ui(Items.BRUSH, "§eTip: Use the Block Editor for more",
+                    "§7Open Edit Blocks → click your block →",
+                    "§7use the color tools inside the editor."));
             }
-            case 2 -> { // Textures & Design
-                inv.setStack(4, uiGlint(Items.PAINTING, "§b§lTextures & Design"));
-                inv.setStack(10, uiGlint(Items.MAP, "§bRetexture", "§7/cb retexture <id> [size] <url>", "§8Replaces the texture. GIFs auto-animate.", "§8Size: 16-256 (default 128)."));
-                inv.setStack(11, uiGlint(Items.AMETHYST_SHARD, "§bSet Face", "§7/cb setface <id> <face> [size] <url>", "§8Faces: north, south, east, west, top, bottom."));
-                inv.setStack(12, uiGlint(Items.GLASS, "§bClear Face", "§7/cb clearface <id> <face>", "§8Removes a per-face texture override."));
-                inv.setStack(13, uiGlint(Items.BUCKET, "§bClear All Faces", "§7/cb clearallfaces <id>", "§8Removes all face overrides at once."));
-                inv.setStack(14, uiGlint(Items.SPYGLASS, "§bResize", "§7/cb resize <id> <16-256>", "§8Rescales the stored texture."));
-                inv.setStack(15, uiGlint(Items.BRUSH, "§bEditor", "§7/cb editor [id]", "§8Opens the full block editor GUI."));
-                inv.setStack(19, uiGlint(Items.BLAZE_ROD, "§6Rainbow Rectangle", "§7/cb rectangle", "§8Right-click any block face to paint it.", "§8Shift+click = 256px quality."));
-                inv.setStack(20, uiGlint(Items.CLOCK, "§bAnimation", "§7Use GIF/WebP/APNG URLs in create or retexture.", "§8Animation speed is set in the Block Editor."));
+            case 2 -> { // How do I make a block glow or change its sound?
+                inv.setStack(4, uiGlint(Items.GLOWSTONE_DUST, "§b§lGlow and Sound"));
+                inv.setStack(10, ui(Items.CRAFTING_TABLE, "§bStep 1: Open the Block Editor",
+                    "§7Click Edit Blocks in the main menu,",
+                    "§7then click the block you want to change."));
+                inv.setStack(11, ui(Items.REDSTONE, "§bStep 2: Click Properties",
+                    "§7Inside the editor there is a Properties",
+                    "§7button. Click it."));
+                inv.setStack(12, ui(Items.GLOWSTONE_DUST, "§bStep 3: Adjust the Light slider",
+                    "§7Drag the slider to set how bright the",
+                    "§7block glows. 0 = off, 15 = very bright."));
+                inv.setStack(13, ui(Items.NOTE_BLOCK, "§bStep 4: Change the Sound",
+                    "§7Scroll down to Sound and click the",
+                    "§7sound type you want (stone, wood, etc.)."));
+                inv.setStack(14, ui(Items.AMETHYST_CLUSTER, "§bTip: Changes apply instantly",
+                    "§7You don't need to save — glow and sound",
+                    "§7update as soon as you click."));
             }
-            case 3 -> { // Shapes & Collision
-                inv.setStack(4, uiGlint(Items.ANVIL, "§5§lShapes & Collision"));
-                inv.setStack(10, uiGlint(Items.IRON_INGOT, "§5Set Shape", "§7/cb setshape <id> <preset|coords>", "§8Presets: full, slab, thin, carpet, pillar,", "§8small, micro, pane, trapdoor, fence, stairs, cross."));
-                inv.setStack(11, uiGlint(Items.STICK, "§5Add Shape Box", "§7/cb addshape <id> <x1,y1,z1,x2,y2,z2>", "§8Adds a collision box (0-16 scale).", "§8Up to 16 boxes per block."));
-                inv.setStack(12, uiGlint(Items.SHEARS, "§5Remove Shape Box", "§7/cb removeshape <id> <index>", "§8Removes a specific box by index (0-based)."));
-                inv.setStack(13, uiGlint(Items.WATER_BUCKET, "§5Clear Shape", "§7/cb clearshape <id>", "§8Resets block to full cube."));
-                inv.setStack(14, uiGlint(Items.SLIME_BLOCK, "§5Set Collision", "§7/cb setcollision <id> <on|off>", "§8Toggle whether players can walk through."));
-                inv.setStack(15, uiGlint(Items.ENDER_EYE, "§5Shape Editor GUI", "§7/cb shapeeditor <id>", "§8Visual editor for block shapes."));
+            case 3 -> { // How do I fix a broken or purple block?
+                inv.setStack(4, uiGlint(Items.DAMAGED_ANVIL, "§c§lFixing Broken or Purple Blocks"));
+                inv.setStack(10, ui(Items.SPYGLASS, "§cStep 1: Find the broken block",
+                    "§7Open the main menu and click",
+                    "§7Broken Blocks. It lists every block",
+                    "§7with a missing or damaged texture."));
+                inv.setStack(11, ui(Items.RECOVERY_COMPASS, "§cStep 2: Click the block in the list",
+                    "§7You'll see options: Retry or Re-upload.",
+                    "§7Try Retry first — it's faster."));
+                inv.setStack(12, ui(Items.BUCKET, "§cStep 3: If Retry doesn't work",
+                    "§7Click Re-upload and paste a URL to",
+                    "§7the image you want to use."));
+                inv.setStack(13, ui(Items.TORCH, "§cTip: Purple means the texture failed",
+                    "§7A solid purple or black block means",
+                    "§7the texture file couldn't be loaded.",
+                    "§7This is always fixable with Re-upload."));
+                inv.setStack(14, ui(Items.BEACON, "§cTip: Reload the resource pack",
+                    "§7After fixing, go to Config → Resource Pack",
+                    "§7and click Regenerate if blocks still look wrong."));
             }
-            case 4 -> { // Utilities
-                inv.setStack(4, uiGlint(Items.REDSTONE, "§6§lUtilities & Commands"));
-                inv.setStack(10, uiGlint(Items.GOLDEN_PICKAXE, "§6Undo", "§7/cb undo [count]", "§8Reverts the last change(s) you made.", "§8Up to 20 steps."));
-                inv.setStack(11, uiGlint(Items.DIAMOND_PICKAXE, "§6Redo", "§7/cb redo [count]", "§8Re-applies undone changes."));
-                inv.setStack(12, uiGlint(Items.RECOVERY_COMPASS, "§6Find Broken", "§7/cb showbrokenblocks", "§8Lists all blocks with missing/broken textures."));
-                inv.setStack(13, uiGlint(Items.SUNFLOWER, "§6Set Glow", "§7/cb setglow <id> <0-15>", "§8Light emission. 0=off, 7=torch, 15=max."));
-                inv.setStack(14, uiGlint(Items.NETHERITE_INGOT, "§6Set Hardness", "§7/cb sethardness <id> <-1 to 50>", "§8Break speed. -1=bedrock, 0=instant."));
-                inv.setStack(15, uiGlint(Items.NOTE_BLOCK, "§6Set Sound", "§7/cb setsound <id> <type>", "§8Types: stone, wood, metal, glass, grass,", "§8sand, wool, gravel, snow, etc."));
-                inv.setStack(19, uiGlint(Items.BLACK_DYE, "§7Square Tool", "§7/cb square <black|yellow|green>", "§8Color-swap utility tool."));
-                inv.setStack(20, uiGlint(Items.ARROW, "§7Triangle Tool", "§7/cb triangle <black|yellow|green>", "§8Color triangle utility tool."));
+            case 4 -> { // How do I undo something?
+                inv.setStack(4, uiGlint(Items.GOLDEN_PICKAXE, "§6§lUndoing Changes"));
+                inv.setStack(10, ui(Items.GOLDEN_PICKAXE, "§6Step 1: Open the main menu",
+                    "§7Type /cb in chat to open the",
+                    "§7CustomBlocks main menu."));
+                inv.setStack(11, ui(Items.ARROW, "§6Step 2: Click Undo",
+                    "§7The Undo button shows how many",
+                    "§7actions are available to undo.",
+                    "§7Click it to undo the last action."));
+                inv.setStack(12, ui(Items.COMPARATOR, "§6Step 3: Keep clicking to undo more",
+                    "§7Each click undoes one more action.",
+                    "§7You can undo up to 20 times in a row."));
+                inv.setStack(13, ui(Items.DIAMOND_PICKAXE, "§6Made a mistake? Use Redo",
+                    "§7The Redo button next to Undo",
+                    "§7lets you re-apply something you undid."));
+                inv.setStack(14, ui(Items.BOOK, "§6Tip: Undo is per-player",
+                    "§7Your undo history is separate from",
+                    "§7other players on the server."));
             }
-            case 5 -> { // Server & Data
-                inv.setStack(4, uiGlint(Items.ENDER_CHEST, "§a§lServer & Data"));
-                inv.setStack(10, uiGlint(Items.WRITABLE_BOOK, "§aExport Block", "§7/cb exportblock <id>", "§8Generates a short code to share a block."));
-                inv.setStack(11, uiGlint(Items.BOOK, "§aImport Block", "§7/cb importblock <code>", "§8Imports a block from an export code."));
-                inv.setStack(12, uiGlint(Items.CHEST, "§aExport List", "§7/cb export", "§8Exports all blocks to a JSON file."));
-                inv.setStack(13, uiGlint(Items.HOPPER, "§aImport Folder", "§7/cb importfolder", "§8Bulk-imports from config/customblocks/import/."));
-                inv.setStack(14, uiGlint(Items.REPEATER, "§aReload", "§7/cb reload", "§8Reloads all data and syncs to players."));
-                inv.setStack(15, uiGlint(Items.COMPARATOR, "§aConfig", "§7/cb config", "§8Opens the server configuration GUI."));
-                inv.setStack(19, uiGlint(Items.PLAYER_HEAD, "§aAI Assistant", "§7/cb ai [spawn|hide|come|stay|tp|scan|status]", "§8Manage the in-world AI assistant."));
-                inv.setStack(20, uiGlint(Items.NETHER_STAR, "§aMagic Items", "§7/cb magicitems", "§8Opens the magic items GUI."));
-                inv.setStack(21, uiGlint(Items.COMPASS, "§aResource Pack", "§7/cb rp", "§8Resource pack management hub."));
+            case 5 -> { // How do I share or back up my blocks?
+                inv.setStack(4, uiGlint(Items.ENDER_CHEST, "§a§lSharing and Backing Up"));
+                inv.setStack(10, ui(Items.WRITTEN_BOOK, "§aShare a single block",
+                    "§7Open the Block Editor for your block,",
+                    "§7click Export at the bottom.",
+                    "§7You'll get a short code to share."));
+                inv.setStack(11, ui(Items.CHEST, "§aBack up all your blocks",
+                    "§7Open the main menu → Config →",
+                    "§7Snapshots. Click Create Snapshot.",
+                    "§7This saves everything to a file."));
+                inv.setStack(12, ui(Items.HOPPER, "§aImport a block someone shared",
+                    "§7Open the main menu → Config →",
+                    "§7Import. Paste the code or file."));
+                inv.setStack(13, ui(Items.ENDER_CHEST, "§aRecover a deleted block",
+                    "§7Open the main menu and click",
+                    "§7Deleted Blocks. Blocks stay there",
+                    "§7for 30 days before being removed."));
+                inv.setStack(14, ui(Items.COMPASS, "§aTip: Export saves the texture too",
+                    "§7When you share an export code,",
+                    "§7the texture is included — no need",
+                    "§7to re-upload on the other server."));
             }
             default -> {}
         }

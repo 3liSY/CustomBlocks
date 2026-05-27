@@ -367,6 +367,49 @@ public class CustomBlocksMod implements ModInitializer {
                 com.customblocks.network.OpenHudEditorPayload.ID,
                 com.customblocks.network.OpenHudEditorPayload.CODEC);
 
+        // HUD config sync — bidirectional (C2S = server owner pushes; S2C = server broadcasts)
+        PayloadTypeRegistry.playC2S().register(
+                com.customblocks.network.HudConfigSyncPayload.ID,
+                com.customblocks.network.HudConfigSyncPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(
+                com.customblocks.network.HudConfigSyncPayload.ID,
+                com.customblocks.network.HudConfigSyncPayload.CODEC);
+
+        // Server-side handler: receive config from owner, save and broadcast to all players
+        ServerPlayNetworking.registerGlobalReceiver(
+                com.customblocks.network.HudConfigSyncPayload.ID,
+                (payload, context) -> {
+                    net.minecraft.server.MinecraftServer server = context.player().getServer();
+                    if (server == null) return;
+                    // Save server-side copy
+                    try {
+                        java.nio.file.Path path = server.getRunDirectory()
+                                .resolve("config").resolve("customblocks").resolve("hud-config-server.json");
+                        java.nio.file.Files.createDirectories(path.getParent());
+                        java.nio.file.Files.writeString(path, payload.configJson(),
+                                java.nio.charset.StandardCharsets.UTF_8);
+                    } catch (Exception ignored) {}
+                    // Broadcast to all online players
+                    for (net.minecraft.server.network.ServerPlayerEntity p :
+                            net.fabricmc.fabric.api.networking.v1.PlayerLookup.all(server)) {
+                        ServerPlayNetworking.send(p, payload);
+                    }
+                });
+
+        // On player join, send server-wide HUD config if one exists
+        net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.JOIN.register(
+                (handler, sender, server) -> {
+                    try {
+                        java.nio.file.Path path = server.getRunDirectory()
+                                .resolve("config").resolve("customblocks").resolve("hud-config-server.json");
+                        if (java.nio.file.Files.exists(path)) {
+                            String json = java.nio.file.Files.readString(path,
+                                    java.nio.charset.StandardCharsets.UTF_8);
+                            sender.sendPacket(new com.customblocks.network.HudConfigSyncPayload(json));
+                        }
+                    } catch (Exception ignored) {}
+                });
+
         PayloadTypeRegistry.playC2S().register(
                 com.customblocks.network.AnimSettingsPayload.ID,
                 com.customblocks.network.AnimSettingsPayload.CODEC);

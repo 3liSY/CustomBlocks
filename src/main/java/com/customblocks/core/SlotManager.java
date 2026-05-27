@@ -1185,6 +1185,22 @@ public final class SlotManager {
                 saveAll();
             }
         }
+        // Pre-compute dominant color family for every block that has a texture.
+        // This lets ColorSquareItem skip the expensive ImageIO.read() call on right-click.
+        int colorCached = 0;
+        for (SlotData d : byId.values()) {
+            if (d.texture != null && d.texture.length > 0) {
+                ColorDetection.DetectionResult r = ColorDetection.detect(d.texture);
+                if (r != null && r.confident() && r.primary != null) {
+                    d.cachedColorFamily = r.primary;
+                    colorCached++;
+                }
+            }
+        }
+        if (colorCached > 0) {
+            LOGGER.info("[CustomBlocks] Pre-cached color family for {} block(s).", colorCached);
+        }
+
         startupLoadComplete = true;
         LOGGER.info("[CustomBlocks] Startup load complete — triggering resource pack build.");
         com.customblocks.network.ServerPackGenerator.flushPendingBuildIfNeeded();

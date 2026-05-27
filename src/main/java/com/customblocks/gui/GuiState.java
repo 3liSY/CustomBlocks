@@ -281,6 +281,16 @@ public record GuiState(
         return new GuiState(GuiMode.VOICE_PICKER, null, 0, false, 0, false);
     }
 
+    /** Color Tools Hub — unified hub for color tool management. */
+    public static GuiState colorsHub() {
+        return new GuiState(GuiMode.COLORS_HUB, null, 0, false, 0, false);
+    }
+
+    /** Rename Tool Picker — shows custom triangles/squares in inventory. */
+    public static GuiState renameToolPicker() {
+        return new GuiState(GuiMode.RENAME_TOOL_PICKER, null, 0, false, 0, false);
+    }
+
     /** Feature Menu shortcut — favorited blocks list. page = current page index. */
     public static GuiState favoritesGui(int page) {
         return new GuiState(GuiMode.FAVORITES_GUI, null, page, false, 0, false);

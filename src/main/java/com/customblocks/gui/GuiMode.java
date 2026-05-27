@@ -99,7 +99,11 @@ public enum GuiMode {
     /** V4-13 — Box Nudge Editor: fine-tune a single shape box with + / − buttons. */
     BOX_NUDGE_EDITOR,
     /** Phase 3.5 — Color Triangle confirm dialog: preview color + block before applying. */
-    RECOLOR_CONFIRM
+    RECOLOR_CONFIRM,
+    /** Color Tools Hub — unified hub for color tool management, rename, fill mode. */
+    COLORS_HUB,
+    /** Rename Tool Picker — shows custom triangles/squares in inventory for renaming. */
+    RENAME_TOOL_PICKER
 }
 
 

@@ -1846,6 +1846,16 @@ public class CustomBlockCommand {
                             return 1;
                         })));
 
+                // ── /cb colors ─────────────────────────────────────────────────
+                tree.then(CommandManager.literal("colors")
+                    .requires(PermissionHelper::canUse)
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p == null) { ChatHelper.error(ctx.getSource(), "Player only."); return 0; }
+                        com.customblocks.gui.GuiManager.openColorsHub(p);
+                        return 1;
+                    }));
+
                 // ── /cb customcolor (Phase 11.2) ───────────────────────────────
                 tree.then(CommandManager.literal("customcolor")
                     .requires(PermissionHelper::canGive)

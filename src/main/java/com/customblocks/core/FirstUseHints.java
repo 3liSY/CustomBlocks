@@ -50,7 +50,11 @@ public final class FirstUseHints {
         Map.entry("open_shape_editor",
             "§8Tip: §7The Amethyst Chisel (right-click a block) opens the Shape Editor instantly."),
         Map.entry("first_snapshot",
-            "§8Tip: §7Snapshots are auto-saved before dangerous operations. Browse them with §f/cb snapshots§7.")
+            "§8Tip: §7Snapshots are auto-saved before dangerous operations. Browse them with §f/cb snapshots§7."),
+        Map.entry("color_triangle",
+            "§e§lColor Triangle: §rRight-click a custom block to create a recolored background copy."),
+        Map.entry("color_square",
+            "§e§lColor Square: §rRight-click a custom block to instantly swap to an existing color variant.")
     );
 
     private FirstUseHints() {}

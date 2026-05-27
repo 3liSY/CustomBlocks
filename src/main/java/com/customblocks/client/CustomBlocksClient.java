@@ -296,19 +296,32 @@ public class CustomBlocksClient implements ClientModInitializer {
             "category.customblocks"
         ));
 
-        // ── Pause menu HUD Editor button ────────────────────────────────────
+        // ── Pause menu HUD Editor button — positioned below lowest existing button ─
         net.fabricmc.fabric.api.client.screen.v1.ScreenEvents.AFTER_INIT.register(
                 (client2, screen, scaledWidth, scaledHeight) -> {
             if (screen instanceof net.minecraft.client.gui.screen.GameMenuScreen) {
+                // Find the bottom edge of the lowest existing button
+                int lowestBottom = scaledHeight / 4 + 48;
+                for (net.minecraft.client.gui.Element el : screen.children()) {
+                    if (el instanceof net.minecraft.client.gui.widget.ClickableWidget cw) {
+                        lowestBottom = Math.max(lowestBottom, cw.getY() + cw.getHeight());
+                    }
+                }
                 net.fabricmc.fabric.api.client.screen.v1.Screens.getButtons(screen).add(
                     net.minecraft.client.gui.widget.ButtonWidget
                         .builder(net.minecraft.text.Text.literal("§b✦ HUD Editor"), btn ->
                             client2.setScreen(new com.customblocks.client.gui.HudEditorScreen()))
-                        .dimensions(scaledWidth / 2 - 100, scaledHeight / 4 + 80, 200, 20)
+                        .dimensions(scaledWidth / 2 - 100, lowestBottom + 4, 200, 20)
                         .build()
                 );
             }
         });
+
+        // ── HudConfigSyncPayload — apply server-wide config on receive ────────
+        // payload.configJson() carries a base64 string produced by HudConfig.exportCode()
+        ClientPlayNetworking.registerGlobalReceiver(
+                com.customblocks.network.HudConfigSyncPayload.ID, (payload, context) ->
+            context.client().execute(() -> HudConfig.importCode(payload.configJson())));
 
         // Tint custom_square and custom_triangle icons with their NBT hex color.
         // The texture PNGs are white so the tint becomes the full displayed color.
@@ -364,10 +377,9 @@ public class CustomBlocksClient implements ClientModInitializer {
             }
 
             // Fade alpha update — runs every tick (20/sec)
-            // Auto-hide when any screen (inventory, chat, etc.) is open
             float fadeTarget = 0f;
-            if (HudConfig.hudVisible && client.currentScreen == null
-                    && client.world != null && client.player != null) {
+            if (HudConfig.hudVisible && client.world != null && client.player != null
+                    && client.currentScreen == null) {
                 boolean lookingAtBlock = false;
                 if (client.crosshairTarget instanceof net.minecraft.util.hit.BlockHitResult bhr) {
                     var bs = client.world.getBlockState(bhr.getBlockPos());
@@ -388,8 +400,8 @@ public class CustomBlocksClient implements ClientModInitializer {
                 fadeTarget = lookingAtBlock ? 1f : 0f;
             }
 
-            if (HudConfig.fadeEnabled) {
-                float step = 0.08f;
+            if (HudConfig.fadeEnabled && HudConfig.fadeTicks > 0) {
+                float step = 1.0f / Math.max(1, HudConfig.fadeTicks);
                 if (fadeTarget > HudConfig.currentAlpha) {
                     HudConfig.currentAlpha = Math.min(HudConfig.currentAlpha + step, fadeTarget);
                 } else {
@@ -1062,19 +1074,23 @@ public class CustomBlocksClient implements ClientModInitializer {
             String categoryName = getCategoryName(data.customId);
             java.util.List<String> lines;
             if (HudConfig.contentMode == 1) {
-                // Template mode
-                String line = HudConfig.template
-                    .replace("{name}",      data.displayName)
-                    .replace("{id}",        data.customId)
-                    .replace("{light}",     String.valueOf(data.lightLevel))
-                    .replace("{hardness}",  String.valueOf(data.hardness))
-                    .replace("{sound}",     data.soundType != null ? data.soundType : "none")
-                    .replace("{collision}", data.noCollision ? "OFF" : "ON")
-                    .replace("{face}",      faceName)
-                    .replace("{health}",    data.blockHealth.name())
-                    .replace("{anim}",      data.isAnimated() ? "Animated" : "Static")
-                    .replace("{category}", categoryName);
-                lines = line.isBlank() ? java.util.List.of() : java.util.List.of(line);
+                // Template mode — each non-empty line is rendered separately
+                java.util.List<String> tLines = new java.util.ArrayList<>();
+                for (String tpl : HudConfig.templateLines) {
+                    if (tpl == null || tpl.isBlank()) continue;
+                    tLines.add(tpl
+                        .replace("{name}",      data.displayName)
+                        .replace("{id}",        data.customId)
+                        .replace("{light}",     String.valueOf(data.lightLevel))
+                        .replace("{hardness}",  String.valueOf(data.hardness))
+                        .replace("{sound}",     data.soundType != null ? data.soundType : "none")
+                        .replace("{collision}", data.noCollision ? "OFF" : "ON")
+                        .replace("{face}",      faceName)
+                        .replace("{health}",    data.blockHealth.name())
+                        .replace("{anim}",      data.isAnimated() ? "Animated" : "Static")
+                        .replace("{category}", categoryName));
+                }
+                lines = tLines.isEmpty() ? java.util.List.of() : tLines;
             } else {
                 // Chip mode — respect chipOrder
                 java.util.List<String> tokens = new java.util.ArrayList<>();
@@ -1175,6 +1191,14 @@ public class CustomBlocksClient implements ClientModInitializer {
             case 4 -> "§7🔊§f" + (data.soundType != null ? data.soundType : "none");
             case 5 -> "§7Coll:" + (data.noCollision ? "§cOFF" : "§aON");
             case 6 -> "§7Face:§f" + faceName;
+            case 7 -> "§7Cat:§f" + categoryName;
+            case 8 -> switch (data.blockHealth) {
+                case HEALTHY -> "§aHEALTHY";
+                case CORRUPT -> "§c⚠CORRUPT";
+                case LOAD_FAILURE -> "§e⚠LOAD_FAIL";
+                case PLACEHOLDER -> "§8NO_TEX";
+            };
+            case 9 -> data.isAnimated() ? "§bAnimated" : "§7Static";
             default -> "";
         };
     }
