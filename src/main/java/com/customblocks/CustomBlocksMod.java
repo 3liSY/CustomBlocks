@@ -213,7 +213,7 @@ public class CustomBlocksMod implements ModInitializer {
 
         // ── Color Square items ───────────────────────────────────────────────
 
-        String[][] squares = {{"black", "Black"}, {"yellow", "Yellow"}, {"green", "Green"}};
+        String[][] squares = {{"black", "Black"}, {"yellow", "Yellow"}, {"green", "Green"}, {"red", "Red"}};
 
         for (String[] sq : squares) {
 
@@ -233,9 +233,9 @@ public class CustomBlocksMod implements ModInitializer {
 
         // ── Color Triangle items ─────────────────────────────────────────────
 
-        int[][] triColors = {{10,10,10}, {240,200,20}, {30,140,30}};
+        int[][] triColors = {{10,10,10}, {240,200,20}, {30,140,30}, {238,51,51}};
 
-        String[][] triMeta = {{"black", "Black"}, {"yellow", "Yellow"}, {"green", "Green"}};
+        String[][] triMeta = {{"black", "Black"}, {"yellow", "Yellow"}, {"green", "Green"}, {"red", "Red"}};
 
         for (int i = 0; i < triMeta.length; i++) {
 
@@ -533,7 +533,7 @@ public class CustomBlocksMod implements ModInitializer {
 
                                     if (safeSlotItem(d.index) != null) entries.add(safeSlotItem(d.index));
 
-                            for (String col : new String[]{"black", "yellow", "green"}) {
+                            for (String col : new String[]{"black", "yellow", "green", "red"}) {
 
                                 Item sq = Registries.ITEM.get(Identifier.of(MOD_ID, col + "_square"));
 
@@ -541,7 +541,7 @@ public class CustomBlocksMod implements ModInitializer {
 
                             }
 
-                            for (String col : new String[]{"black", "yellow", "green"}) {
+                            for (String col : new String[]{"black", "yellow", "green", "red"}) {
 
                                 Item tr = Registries.ITEM.get(Identifier.of(MOD_ID, col + "_triangle"));
 

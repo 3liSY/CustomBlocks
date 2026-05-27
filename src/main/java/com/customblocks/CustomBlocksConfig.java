@@ -103,6 +103,8 @@ public final class CustomBlocksConfig {
     public static volatile String triangleGreenHex = "#1E8C1E";
     /** Editable built-in shade for yellow recolor tools. */
     public static volatile String triangleYellowHex = "#F0C814";
+    /** Editable built-in shade for red recolor tools. */
+    public static volatile String triangleRedHex = "#EE3333";
     // ── Network ──────────────────────────────────────────────────────────────
     /** Number of texture payloads to drip-feed per server tick. */
     public static volatile int texturePayloadsPerTick = 8;
@@ -358,6 +360,7 @@ public final class CustomBlocksConfig {
             colorToolBackgroundMode = getString(root, "colorToolBackgroundMode", colorToolBackgroundMode);
             triangleGreenHex      = normalizeHexColor(getString(root, "triangleGreenHex", triangleGreenHex), triangleGreenHex);
             triangleYellowHex     = normalizeHexColor(getString(root, "triangleYellowHex", triangleYellowHex), triangleYellowHex);
+            triangleRedHex        = normalizeHexColor(getString(root, "triangleRedHex", triangleRedHex), triangleRedHex);
             // Clamp values
             int clampedMaxSlots = Math.max(1, Math.min(8192, maxSlots));
             int clampedDefaultTextureSize = Math.max(16, Math.min(256, defaultTextureSize));
@@ -519,6 +522,7 @@ public final class CustomBlocksConfig {
             root.addProperty("colorToolBackgroundMode", colorToolBackgroundMode);
             root.addProperty("triangleGreenHex", normalizeHexColor(triangleGreenHex, "#1E8C1E"));
             root.addProperty("triangleYellowHex", normalizeHexColor(triangleYellowHex, "#F0C814"));
+            root.addProperty("triangleRedHex", normalizeHexColor(triangleRedHex, "#EE3333"));
             root.addProperty("autoSnapshotMinutes", autoSnapshotMinutes);
             root.addProperty("instantClickAggressivenessMs", instantClickAggressivenessMs);
             root.addProperty("soundsEnabled", soundsEnabled);
@@ -592,6 +596,7 @@ public final class CustomBlocksConfig {
             || !root.has("colorToolBackgroundMode")
             || !root.has("triangleGreenHex")
             || !root.has("triangleYellowHex")
+            || !root.has("triangleRedHex")
             || !root.has("autoSnapshotMinutes")
             || !root.has("instantClickAggressivenessMs")
             || !root.has("soundsEnabled")
@@ -617,6 +622,7 @@ public final class CustomBlocksConfig {
         String hex = switch (key) {
             case "green" -> triangleGreenHex;
             case "yellow" -> triangleYellowHex;
+            case "red" -> triangleRedHex;
             default -> null;
         };
         if (hex == null) return new int[]{fallbackR, fallbackG, fallbackB};
