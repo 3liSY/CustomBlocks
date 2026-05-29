@@ -817,7 +817,7 @@ public class HudEditorScreen extends Screen {
         scopeAllPlayers = HudConfig.scopeAllPlayers;
         stickyMode = HudConfig.stickyMode; stickySeconds = HudConfig.stickySeconds;
         System.arraycopy(HudConfig.templateLines, 0, tplLines, 0, 3);
-        chipOrder = Arrays.copyOf(HudConfig.chipOrder, 7);
+        chipOrder = Arrays.copyOf(HudConfig.chipOrder, 10);
         for (int i = 0; i < 10; i++) chipEnabled[i] = HudConfig.isChipEnabled(i);
         if (lineFields != null) for (int i = 0; i < 3; i++) lineFields[i].setText(tplLines[i] != null ? tplLines[i] : "");
     }
@@ -837,7 +837,7 @@ public class HudEditorScreen extends Screen {
         HudConfig.stickyMode   = stickyMode;
         HudConfig.stickySeconds = stickySeconds;
         System.arraycopy(tplLines, 0, HudConfig.templateLines, 0, 3);
-        HudConfig.chipOrder    = Arrays.copyOf(chipOrder, 7);
+        HudConfig.chipOrder    = Arrays.copyOf(chipOrder, 10);
         for (int i = 0; i < 10; i++) HudConfig.setChipEnabled(i, chipEnabled[i]);
     }
 

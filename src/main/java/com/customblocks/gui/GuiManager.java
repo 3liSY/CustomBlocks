@@ -1800,6 +1800,7 @@ public class GuiManager {
                 String key = blockId;
                 try {
                     switch (key) {
+                        case "shadowThreshold" -> CustomBlocksConfig.shadowThreshold = Math.max(0.0f, Math.min(2.0f, Float.parseFloat(text)));
                         case "maxSlots" -> {
                             int newVal = Math.max(1, Math.min(8192, Integer.parseInt(text)));
                             // 1.16 Guard 2 — refuse to lower below highest used slot index
@@ -2668,6 +2669,7 @@ public class GuiManager {
             "§8Height: " + CustomBlocksConfig.hologramHeight + " blocks",
             "§8Click to toggle"));
         // Row 2: Numbers
+        inv.setStack(18, numItem("Shadow Threshold", CustomBlocksConfig.shadowThreshold, "Expansion threshold for Color Triangles (default 1.0)"));
         inv.setStack(19, numItem("Block Capacity", CustomBlocksConfig.maxSlots, "How many custom blocks this server can hold (restart required)"));
         inv.setStack(20, numItem("Texture Quality", CustomBlocksConfig.defaultTextureSize, "Default resolution used when new textures are processed"));
         inv.setStack(21, uiGlint(Items.DIAMOND, "§b§lBackground Studio",
@@ -2838,6 +2840,7 @@ public class GuiManager {
                 openConfigGui(player, false);
             }
             // Numbers
+            case 18 -> configPrompt(player, "shadowThreshold", "Shadow Threshold (0.0-2.0):");
             case 19 -> configPrompt(player, "maxSlots", "Block Capacity (1-8192):");
             case 20 -> configPrompt(player, "defaultTextureSize", "Texture Quality (16-256):");
             case 21 -> openBgStudio(player, false);
@@ -7020,7 +7023,7 @@ public class GuiManager {
 
     private static ItemStack shortPromptItemForConfig(String key) {
         Item item = switch (key) {
-            case "maxSlots", "defaultTextureSize", "bgRemovalTolerance", "maxUndoDepth",
+            case "shadowThreshold", "maxSlots", "defaultTextureSize", "bgRemovalTolerance", "maxUndoDepth",
                  "downloadTimeoutSeconds", "texturePayloadsPerTick", "resourcePackPort",
                  "reloadDebounceMs" -> Items.REPEATER;
             case "undoMode" -> Items.COMPARATOR;
@@ -7035,6 +7038,7 @@ public class GuiManager {
 
     private static String currentConfigValue(String key) {
         return switch (key) {
+            case "shadowThreshold" -> String.valueOf(CustomBlocksConfig.shadowThreshold);
             case "maxSlots" -> String.valueOf(CustomBlocksConfig.maxSlots);
             case "defaultTextureSize" -> String.valueOf(CustomBlocksConfig.defaultTextureSize);
             case "bgRemovalTolerance" -> String.valueOf(CustomBlocksConfig.bgRemovalTolerance);

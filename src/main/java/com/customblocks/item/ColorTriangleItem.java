@@ -716,6 +716,10 @@ public class ColorTriangleItem extends Item {
     }
 
     private static String keyForRgb(int rgb) {
+        String label = labelForRgb(rgb);
+        if (label != null && !label.isEmpty()) {
+            return label.toLowerCase(Locale.ROOT).replace(" ", "_");
+        }
         return "hex_" + hexForRgb(rgb).toLowerCase(Locale.ROOT);
     }
 

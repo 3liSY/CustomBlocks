@@ -1624,7 +1624,11 @@ public final class SlotManager {
             obj.addProperty("lastEditedAt", d.lastEditedAt);
         }
 
-
+        // Arabic letter joining metadata
+        if (d.isLetter)            obj.addProperty("isLetter",           true);
+        if (d.letterConnectsLeft)  obj.addProperty("letterConnectsLeft", true);
+        if (d.letterGroup != null) obj.addProperty("letterGroup",        d.letterGroup);
+        if (d.letterForm  != null) obj.addProperty("letterForm",         d.letterForm);
 
         // Shape boxes
 
@@ -1742,9 +1746,15 @@ public final class SlotManager {
         String hologramText = obj.has("hologramText") ? obj.get("hologramText").getAsString() : null;
         long lastEditedAt = obj.has("lastEditedAt") ? obj.get("lastEditedAt").getAsLong() : 0L;
 
+        boolean isLetter           = obj.has("isLetter")           && obj.get("isLetter").getAsBoolean();
+        boolean letterConnectsLeft = obj.has("letterConnectsLeft") && obj.get("letterConnectsLeft").getAsBoolean();
+        String  letterGroup        = obj.has("letterGroup") ? obj.get("letterGroup").getAsString() : null;
+        String  letterForm         = obj.has("letterForm")  ? obj.get("letterForm").getAsString()  : null;
+
         return SlotData.createTrustedFull(index, customId, displayName, texture,
                 lightLevel, hardness, soundType, faceTextures, animMeta, shapeBoxes, noCol,
-                null, hologramText, lastEditedAt);
+                null, hologramText, lastEditedAt,
+                isLetter, letterConnectsLeft, letterGroup, letterForm);
 
     }
 

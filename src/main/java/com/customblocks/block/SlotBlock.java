@@ -4,6 +4,8 @@ import com.customblocks.core.SlotData;
 import com.customblocks.core.SlotManager;
 import com.customblocks.gui.GuiManager;
 import com.customblocks.core.HologramManager;
+import com.customblocks.CustomBlocksMod;
+import com.customblocks.CustomBlocksConfig;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.ShapeContext;
@@ -152,7 +154,24 @@ public class SlotBlock extends Block {
             ? com.customblocks.core.DropConfigManager.getConfig(blockId).mode()
             : com.customblocks.core.DropConfigManager.DropMode.SELF;
         switch (mode) {
-            case SELF -> super.afterBreak(world, player, pos, state, blockEntity, tool);
+            case SELF -> {
+                // Arabic letter: non-isolated forms always drop the isolated form item
+                if (d != null && d.isLetter && d.letterForm != null
+                        && !d.letterForm.equals("isolated") && d.letterGroup != null
+                        && !world.isClient) {
+                    player.incrementStat(net.minecraft.stat.Stats.MINED.getOrCreateStat(this));
+                    player.addExhaustion(0.005f);
+                    SlotData isolatedData = SlotManager.getById(d.letterGroup);
+                    if (isolatedData != null) {
+                        SlotBlock.SlotItem isolatedItem = CustomBlocksMod.safeSlotItem(isolatedData.index);
+                        if (isolatedItem != null) {
+                            net.minecraft.block.Block.dropStack(world, pos, new ItemStack(isolatedItem));
+                            break;
+                        }
+                    }
+                }
+                super.afterBreak(world, player, pos, state, blockEntity, tool);
+            }
             case STONE_LIKE -> {
                 player.incrementStat(net.minecraft.stat.Stats.MINED.getOrCreateStat(this));
                 player.addExhaustion(0.005f);
@@ -180,6 +199,73 @@ public class SlotBlock extends Block {
                 // no drop
             }
         }
+    }
+
+    // ── Arabic letter joining ────────────────────────────────────────────────
+
+    @Override
+    public void onBlockAdded(BlockState state, World world, BlockPos pos,
+                             BlockState oldState, boolean notify) {
+        super.onBlockAdded(state, world, pos, oldState, notify);
+        if (world.isClient || !CustomBlocksConfig.autoConnectLetters) return;
+        SlotData d = SlotManager.getBySlot(slotKey);
+        if (d != null && d.isLetter) updateLetterForm(world, pos, d);
+    }
+
+    @Override
+    public void neighborUpdate(BlockState state, World world, BlockPos pos,
+                               Block sourceBlock, BlockPos sourcePos, boolean notify) {
+        super.neighborUpdate(state, world, pos, sourceBlock, sourcePos, notify);
+        if (world.isClient || !CustomBlocksConfig.autoConnectLetters) return;
+        SlotData d = SlotManager.getBySlot(slotKey);
+        if (d == null || !d.isLetter) return;
+        BlockPos diff = sourcePos.subtract(pos);
+        boolean isEW = diff.getZ() == 0 && diff.getY() == 0 && Math.abs(diff.getX()) == 1;
+        boolean isNS = diff.getX() == 0 && diff.getY() == 0 && Math.abs(diff.getZ()) == 1;
+        if (isEW || isNS) updateLetterForm(world, pos, d);
+    }
+
+    private static SlotData getLetterDataAt(World world, BlockPos pos) {
+        net.minecraft.block.BlockState s = world.getBlockState(pos);
+        if (!(s.getBlock() instanceof SlotBlock sb)) return null;
+        SlotData d = SlotManager.getBySlot(sb.slotKey);
+        return (d != null && d.isLetter) ? d : null;
+    }
+
+    private static String calculateForm(World world, BlockPos pos, SlotData L) {
+        SlotData E = getLetterDataAt(world, pos.east());
+        SlotData W = getLetterDataAt(world, pos.west());
+
+        boolean connectsRight = E != null && E.letterConnectsLeft;
+        boolean connectsLeft  = W != null && L.letterConnectsLeft;
+
+        // Fallback to North/South axis if no EW letter neighbors (for wall writing)
+        if (E == null && W == null) {
+            SlotData N = getLetterDataAt(world, pos.north());
+            SlotData S = getLetterDataAt(world, pos.south());
+            connectsRight = N != null && N.letterConnectsLeft;
+            connectsLeft  = S != null && L.letterConnectsLeft;
+        }
+
+        if (!connectsRight && !connectsLeft) return "isolated";
+        if (!connectsRight &&  connectsLeft) return "initial";
+        if ( connectsRight &&  connectsLeft) return "medial";
+        /* connectsRight && !connectsLeft */  return "final";
+    }
+
+    private static void updateLetterForm(World world, BlockPos pos, SlotData current) {
+        String newForm = calculateForm(world, pos, current);
+        if (newForm.equals(current.letterForm)) return; // already correct — anti-loop guard
+
+        String targetId = current.letterGroup +
+            (newForm.equals("isolated") ? "" : "_" + newForm);
+        SlotData target = SlotManager.getById(targetId);
+        if (target == null) return;
+
+        SlotBlock targetBlock = CustomBlocksMod.safeSlotBlock(target.index);
+        if (targetBlock == null) return;
+
+        world.setBlockState(pos, targetBlock.getDefaultState(), Block.NOTIFY_ALL);
     }
 
     /** Build VoxelShape from slot shape boxes. */

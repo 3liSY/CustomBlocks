@@ -20,14 +20,15 @@ import java.util.Set;
  * Persisted as {@code config/customblocks/config.json}.
  * <p>
  * All fields are volatile so read access from any thread sees the latest value
- * without synchronisation; writes only happen on the server thread via {@link #load()} / {@link #save()}.
+ * without synchronisation; writes only happen on the server thread via
+ * {@link #load()} / {@link #save()}.
  */
 @SuppressFBWarnings("PA_PUBLIC_PRIMITIVE_ATTRIBUTE")
 public final class CustomBlocksConfig {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("CustomBlocks");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final String CONFIG_DIR  = "config/customblocks";
+    private static final String CONFIG_DIR = "config/customblocks";
     private static final String CONFIG_FILE = "config.json";
 
     // ── Slot System ──────────────────────────────────────────────────────────
@@ -39,14 +40,24 @@ public final class CustomBlocksConfig {
     public static volatile int defaultTextureSize = 128;
     /** Background-removal colour-distance tolerance (0 = disabled, 1–100). */
     public static volatile int bgRemovalTolerance = 30;
-    /** Use YCbCr luminance/chroma math for white-background cleanup; false falls back to CIE-Lab Delta-E. */
+    /**
+     * Use YCbCr luminance/chroma math for white-background cleanup; false falls
+     * back to CIE-Lab Delta-E.
+     */
     public static volatile boolean bgRemovalUseYcbcr = true;
-    /** When true, tolerance is computed per-image from border pixel analysis instead of using bgRemovalTolerance directly. bgRemovalTolerance acts as an upper cap. */
+    /**
+     * When true, tolerance is computed per-image from border pixel analysis instead
+     * of using bgRemovalTolerance directly. bgRemovalTolerance acts as an upper
+     * cap.
+     */
     public static volatile boolean bgRemovalAutoDetect = false;
+    /** Expansion threshold for Color Triangles (default 1.0). */
+    public static volatile float shadowThreshold = 1.0f;
     /** HTTP download timeout in seconds. */
     public static volatile int downloadTimeoutSeconds = 15;
     /**
-     * 1.25 — Maximum GIF file size in MB before upload is rejected (pre-check to prevent OOM/crash).
+     * 1.25 — Maximum GIF file size in MB before upload is rejected (pre-check to
+     * prevent OOM/crash).
      * Minimum enforced at runtime: 1. Default: 2. Range: 1–10.
      */
     public static volatile int maxGifSizeMb = 2;
@@ -56,21 +67,35 @@ public final class CustomBlocksConfig {
     public static volatile int sessionTimeoutSeconds = 300;
 
     // ── Undo System ──────────────────────────────────────────────────────────
-    /** Undo mode: "global" = single shared stack, "per_player" = one stack per player, "both" = both available. */
+    /**
+     * Undo mode: "global" = single shared stack, "per_player" = one stack per
+     * player, "both" = both available.
+     */
     public static volatile String undoMode = "both";
-    /** Maximum undo depth (per stack). Expanded to 10000 in v2 for "unlimited undo" experience. */
+    /**
+     * Maximum undo depth (per stack). Expanded to 10000 in v2 for "unlimited undo"
+     * experience.
+     */
     public static volatile int maxUndoDepth = 10000;
-    /** Minimum selection size that requires a second click to confirm bulk deletion (H2). */
+    /**
+     * Minimum selection size that requires a second click to confirm bulk deletion
+     * (H2).
+     */
     public static volatile int bulkConfirmThreshold = 10;
 
     // ── Permissions ──────────────────────────────────────────────────────────
-    /** Default OP level required for admin commands (create/delete/edit). Hardened in v2 per A6. */
+    /**
+     * Default OP level required for admin commands (create/delete/edit). Hardened
+     * in v2 per A6.
+     */
     public static volatile int permissionLevelAdmin = 4;
     /** Default OP level required for use commands (give/gui). */
     public static volatile int permissionLevelUse = 0;
     /**
-     * When {@code true}, a saved {@link #permissionLevelAdmin} value of {@code 2} is kept on load (v1-era opt-out).
-     * When {@code false} (default), loading {@code permissionLevelAdmin: 2} from disk is migrated to {@code 4} (X1 / A6).
+     * When {@code true}, a saved {@link #permissionLevelAdmin} value of {@code 2}
+     * is kept on load (v1-era opt-out).
+     * When {@code false} (default), loading {@code permissionLevelAdmin: 2} from
+     * disk is migrated to {@code 4} (X1 / A6).
      */
     public static volatile boolean permissionLevelAdminUser = false;
 
@@ -108,36 +133,60 @@ public final class CustomBlocksConfig {
     // ── Network ──────────────────────────────────────────────────────────────
     /** Number of texture payloads to drip-feed per server tick. */
     public static volatile int texturePayloadsPerTick = 8;
-    /** 1.12 — Max uncompressed GIF frame-strip bytes before trimming frames (4 MB default). */
+    /**
+     * 1.12 — Max uncompressed GIF frame-strip bytes before trimming frames (4 MB
+     * default).
+     */
     public static volatile long maxGifStripBytes = 4_000_000L;
     /** Internal HTTP server port for resource pack hosting (0 = disabled/auto). */
     public static volatile int resourcePackPort = 8080;
-    /** RP-2 — If non-empty, overrides the external IP lookup for the resource-pack URL (e.g. your Docker host IP). */
+    /**
+     * RP-2 — If non-empty, overrides the external IP lookup for the resource-pack
+     * URL (e.g. your Docker host IP).
+     */
     public static volatile String serverIpOverride = "";
     /** Debounce time for live-edit resource pack reloads (ms). */
     public static volatile long reloadDebounceMs = 2000;
-    // joinDebounceMs removed in 1.20 — replaced by count-verified SyncCompletePayload.
-    /** Hardcoded Cloud Vault URL — not configurable to prevent OPs redirecting uploads. */
+    // joinDebounceMs removed in 1.20 — replaced by count-verified
+    // SyncCompletePayload.
+    /**
+     * Hardcoded Cloud Vault URL — not configurable to prevent OPs redirecting
+     * uploads.
+     */
     public static final String cloudShareUrl = "https://cb-cloud-vault.cbbblocksvault.workers.dev";
     /** Enables Cloud Vault upload/download. */
     public static volatile boolean cloudShareEnabled = true;
-    /** 1.13 — Shared secret for authenticating pack uploads to Cloud Vault (set in config file only, never in GUI). */
+    /**
+     * 1.13 — Shared secret for authenticating pack uploads to Cloud Vault (set in
+     * config file only, never in GUI).
+     */
     public static volatile String cloudPackSecret = "";
 
-
     // ── AI / Voice ───────────────────────────────────────────────────────────
-    /** Branded chat voice (Phase B2 phrases); migrated from legacy {@code aiStyle}. */
+    /**
+     * Branded chat voice (Phase B2 phrases); migrated from legacy {@code aiStyle}.
+     */
     public static volatile String voiceMode = "friendly";
 
-    public static final Set<String> VOICE_MODES =
-        Set.of("friendly", "professional", "royal", "minimal", "arabic", "silly");
-    /** Phase 11.1 — AI image provider: "openai" or "stability". Empty = procedural only. */
+    public static final Set<String> VOICE_MODES = Set.of("friendly", "professional", "royal", "minimal", "arabic",
+            "silly");
+    /**
+     * Phase 11.1 — AI image provider: "openai" or "stability". Empty = procedural
+     * only.
+     */
     public static volatile String aiApiProvider = "";
-    /** Cloudflare Worker URL for AI chat (publicly known; security comes from aiServerToken). */
+    /**
+     * Cloudflare Worker URL for AI chat (publicly known; security comes from
+     * aiServerToken).
+     */
     public static volatile String aiWorkerUrl = "";
-    /** Server identity token sent to the Cloudflare Worker to prove authenticity. */
+    /**
+     * Server identity token sent to the Cloudflare Worker to prove authenticity.
+     */
     public static volatile String aiServerToken = "";
-    /** Phase 11.1 — API key for the AI image provider. Empty = procedural fallback. */
+    /**
+     * Phase 11.1 — API key for the AI image provider. Empty = procedural fallback.
+     */
     public static volatile String aiApiKey = "";
     /** Phase 11.1 — Maximum number of AI texture variations to generate (1–3). */
     public static volatile int aiMaxVariations = 3;
@@ -145,7 +194,8 @@ public final class CustomBlocksConfig {
     public static volatile String aiTextureStyle = "pixel_art";
 
     /**
-     * Phase B4 did-you-mean for unknown first argument: {@code off}, {@code strict} (distance ≤1),
+     * Phase B4 did-you-mean for unknown first argument: {@code off}, {@code strict}
+     * (distance ≤1),
      * {@code smart} (≤3), {@code genius} (smart + block-id gift + light memory).
      */
     public static volatile String didYouMeanMode = "smart";
@@ -155,9 +205,12 @@ public final class CustomBlocksConfig {
     public static volatile int autoSnapshotMinutes = 30;
 
     // ── Performance (Phase D) ────────────────────────────────────────────────
-    /** Controls client-side pack-reload debounce timing (ms).
-     *  Read by CustomBlocksClient.fastReloadDebounceMs() and fullReloadDebounceMs().
-     *  0 = reload immediately on every edit. 10000 = lazy/batched reloads. Default 300. */
+    /**
+     * Controls client-side pack-reload debounce timing (ms).
+     * Read by CustomBlocksClient.fastReloadDebounceMs() and fullReloadDebounceMs().
+     * 0 = reload immediately on every edit. 10000 = lazy/batched reloads. Default
+     * 300.
+     */
     public static volatile int instantClickAggressivenessMs = 300;
 
     // ── Feedback Layers (Phase F) ────────────────────────────────────────────
@@ -184,17 +237,30 @@ public final class CustomBlocksConfig {
     // ── Holograms (Phase I) ──────────────────────────────────────────────────
     /** Whether floating name holograms appear above placed custom blocks. */
     public static volatile boolean hologramEnabled = false;
-    /** Height in blocks above the block's base at which the hologram marker floats. */
+    /**
+     * Height in blocks above the block's base at which the hologram marker floats.
+     */
     public static volatile float hologramHeight = 1.5f;
     /** MC formatting-code prefix applied to all hologram labels (e.g. "§e§l"). */
     public static volatile String hologramColor = "§e§l";
 
+    // ── Arabic Letters ───────────────────────────────────────────────────────
+    /**
+     * When true, Arabic letter blocks automatically switch to the correct connected
+     * form (initial/medial/final/isolated) based on neighbors.
+     */
+    public static volatile boolean autoConnectLetters = true;
+
     // ── Trash (V4-18) ────────────────────────────────────────────────────────
-    /** Days to keep deleted blocks in trash before auto-purging. 0 = keep forever. */
+    /**
+     * Days to keep deleted blocks in trash before auto-purging. 0 = keep forever.
+     */
     public static volatile int trashRetentionDays = 30;
 
     // ── Notifications (Phase M) ──────────────────────────────────────────────
-    /** Discord webhook URL for block create/delete/panic events. Empty = disabled. */
+    /**
+     * Discord webhook URL for block create/delete/panic events. Empty = disabled.
+     */
     public static volatile String discordWebhookUrl = "";
 
     public static void setResourcePackPort(int port) {
@@ -211,13 +277,15 @@ public final class CustomBlocksConfig {
     }
 
     public static String normalizeVoiceMode(String raw) {
-        if (raw == null) return "friendly";
+        if (raw == null)
+            return "friendly";
         String v = raw.toLowerCase(Locale.ROOT).trim();
         return VOICE_MODES.contains(v) ? v : "friendly";
     }
 
     public static String normalizeDidYouMeanMode(String raw) {
-        if (raw == null) return "smart";
+        if (raw == null)
+            return "smart";
         String s = raw.toLowerCase(Locale.ROOT).trim();
         return switch (s) {
             case "off", "strict", "smart", "genius" -> s;
@@ -226,7 +294,8 @@ public final class CustomBlocksConfig {
     }
 
     public static String normalizeAiProvider(String raw) {
-        if (raw == null) return "";
+        if (raw == null)
+            return "";
         String s = raw.toLowerCase(Locale.ROOT).trim();
         return switch (s) {
             case "openai", "stability" -> s;
@@ -235,7 +304,8 @@ public final class CustomBlocksConfig {
     }
 
     public static String normalizeAiTextureStyle(String raw) {
-        if (raw == null) return "pixel_art";
+        if (raw == null)
+            return "pixel_art";
         String s = raw.toLowerCase(Locale.ROOT).trim();
         return switch (s) {
             case "pixel_art", "natural", "flat" -> s;
@@ -244,10 +314,13 @@ public final class CustomBlocksConfig {
     }
 
     private static String mapLegacyAiStyleToVoiceMode(String legacy) {
-        if (legacy == null) return "friendly";
+        if (legacy == null)
+            return "friendly";
         String s = legacy.trim().toLowerCase(Locale.ROOT);
-        if ("echo".equals(s)) return "friendly";
-        if ("pro".equals(s)) return "professional";
+        if ("echo".equals(s))
+            return "friendly";
+        if ("pro".equals(s))
+            return "professional";
         return normalizeVoiceMode(s);
     }
 
@@ -266,29 +339,30 @@ public final class CustomBlocksConfig {
             JsonObject root = JsonParser.parseString(json).getAsJsonObject();
             boolean shouldRewrite = missingManagedKeys(root);
 
-            maxSlots              = getInt(root, "maxSlots", maxSlots);
-            defaultTextureSize    = getInt(root, "defaultTextureSize", defaultTextureSize);
-            bgRemovalTolerance    = getInt(root, "bgRemovalTolerance", bgRemovalTolerance);
-            bgRemovalUseYcbcr     = getBool(root, "bgRemovalUseYcbcr", bgRemovalUseYcbcr);
-            bgRemovalAutoDetect   = getBool(root, "bgRemovalAutoDetect", bgRemovalAutoDetect);
-            downloadTimeoutSeconds= getInt(root, "downloadTimeoutSeconds", downloadTimeoutSeconds);
-            maxGifSizeMb          = Math.max(1, getInt(root, "maxGifSizeMb", maxGifSizeMb)); // 1.25 — min 1
+            maxSlots = getInt(root, "maxSlots", maxSlots);
+            defaultTextureSize = getInt(root, "defaultTextureSize", defaultTextureSize);
+            bgRemovalTolerance = getInt(root, "bgRemovalTolerance", bgRemovalTolerance);
+            bgRemovalUseYcbcr = getBool(root, "bgRemovalUseYcbcr", bgRemovalUseYcbcr);
+            bgRemovalAutoDetect = getBool(root, "bgRemovalAutoDetect", bgRemovalAutoDetect);
+            shadowThreshold = getFloat(root, "shadowThreshold", shadowThreshold);
+            downloadTimeoutSeconds = getInt(root, "downloadTimeoutSeconds", downloadTimeoutSeconds);
+            maxGifSizeMb = Math.max(1, getInt(root, "maxGifSizeMb", maxGifSizeMb)); // 1.25 — min 1
             sessionTimeoutSeconds = getInt(root, "sessionTimeoutSeconds", sessionTimeoutSeconds);
-            undoMode              = getString(root, "undoMode", undoMode);
-            maxUndoDepth          = getInt(root, "maxUndoDepth", maxUndoDepth);
-            bulkConfirmThreshold  = getInt(root, "bulkConfirmThreshold", bulkConfirmThreshold);
+            undoMode = getString(root, "undoMode", undoMode);
+            maxUndoDepth = getInt(root, "maxUndoDepth", maxUndoDepth);
+            bulkConfirmThreshold = getInt(root, "bulkConfirmThreshold", bulkConfirmThreshold);
             permissionLevelAdminUser = getBool(root, "permissionLevelAdminUser", permissionLevelAdminUser);
             int rawPermissionLevelAdmin = root.has("permissionLevelAdmin")
-                ? root.get("permissionLevelAdmin").getAsInt()
-                : permissionLevelAdmin;
+                    ? root.get("permissionLevelAdmin").getAsInt()
+                    : permissionLevelAdmin;
             permissionLevelAdmin = rawPermissionLevelAdmin;
             if (rawPermissionLevelAdmin == 2 && !permissionLevelAdminUser) {
                 permissionLevelAdmin = 4;
                 shouldRewrite = true;
                 LOGGER.warn("[CustomBlocks] Hardened permissionLevelAdmin from 2 to 4 (v2 default). "
-                    + "To keep OP level 2, set \"permissionLevelAdminUser\": true and \"permissionLevelAdmin\": 2 in config.json.");
+                        + "To keep OP level 2, set \"permissionLevelAdminUser\": true and \"permissionLevelAdmin\": 2 in config.json.");
             }
-            permissionLevelUse    = getInt(root, "permissionLevelUse", permissionLevelUse);
+            permissionLevelUse = getInt(root, "permissionLevelUse", permissionLevelUse);
 
             if (!root.has("permissionFallbackUse")) {
                 permissionFallbackUse = permissionLevelUse;
@@ -316,51 +390,58 @@ public final class CustomBlocksConfig {
                 permissionFallbackAdmin = getInt(root, "permissionFallbackAdmin", permissionFallbackAdmin);
                 permissionFallbackPanic = getInt(root, "permissionFallbackPanic", permissionFallbackPanic);
                 permissionFallbackUndo = getInt(root, "permissionFallbackUndo", permissionFallbackUndo);
-                permissionFallbackMarketplacePublish = getInt(root, "permissionFallbackMarketplacePublish", permissionFallbackMarketplacePublish);
+                permissionFallbackMarketplacePublish = getInt(root, "permissionFallbackMarketplacePublish",
+                        permissionFallbackMarketplacePublish);
                 permissionFallbackAi = getInt(root, "permissionFallbackAi", permissionFallbackAi);
-                permissionFallbackDevConsole = getInt(root, "permissionFallbackDevConsole", permissionFallbackDevConsole);
+                permissionFallbackDevConsole = getInt(root, "permissionFallbackDevConsole",
+                        permissionFallbackDevConsole);
             }
-            texturePayloadsPerTick= getInt(root, "texturePayloadsPerTick", texturePayloadsPerTick);
-            maxGifStripBytes      = getLong(root, "maxGifStripBytes", maxGifStripBytes);
-            resourcePackPort      = getInt(root, "resourcePackPort", resourcePackPort);
-            serverIpOverride      = getString(root, "serverIpOverride", serverIpOverride);
-            reloadDebounceMs      = getLong(root, "reloadDebounceMs", reloadDebounceMs);
+            texturePayloadsPerTick = getInt(root, "texturePayloadsPerTick", texturePayloadsPerTick);
+            maxGifStripBytes = getLong(root, "maxGifStripBytes", maxGifStripBytes);
+            resourcePackPort = getInt(root, "resourcePackPort", resourcePackPort);
+            serverIpOverride = getString(root, "serverIpOverride", serverIpOverride);
+            reloadDebounceMs = getLong(root, "reloadDebounceMs", reloadDebounceMs);
             // joinDebounceMs removed in 1.20
-            cloudShareEnabled     = getBool(root, "cloudShareEnabled", cloudShareEnabled);
-            cloudPackSecret       = getString(root, "cloudPackSecret", cloudPackSecret);
+            cloudShareEnabled = getBool(root, "cloudShareEnabled", cloudShareEnabled);
+            cloudPackSecret = getString(root, "cloudPackSecret", cloudPackSecret);
             if (root.has("voiceMode")) {
                 voiceMode = normalizeVoiceMode(getString(root, "voiceMode", voiceMode));
             } else if (root.has("aiStyle")) {
-                voiceMode = mapLegacyAiStyleToVoiceMode(getString(root, "aiStyle", getString(root, "helperSkin", "Echo")));
+                voiceMode = mapLegacyAiStyleToVoiceMode(
+                        getString(root, "aiStyle", getString(root, "helperSkin", "Echo")));
                 shouldRewrite = true;
             } else {
                 voiceMode = normalizeVoiceMode(voiceMode);
             }
-            aiApiProvider         = normalizeAiProvider(getString(root, "aiApiProvider", aiApiProvider));
-            aiApiKey              = getString(root, "aiApiKey", aiApiKey);
-            aiWorkerUrl           = getString(root, "aiWorkerUrl", aiWorkerUrl);
-            aiServerToken         = getString(root, "aiServerToken", aiServerToken);
-            aiMaxVariations       = Math.max(1, Math.min(8, getInt(root, "aiMaxVariations", aiMaxVariations)));
-            aiTextureStyle        = normalizeAiTextureStyle(getString(root, "aiTextureStyle", aiTextureStyle));
-            didYouMeanMode         = normalizeDidYouMeanMode(getString(root, "didYouMeanMode", didYouMeanMode));
-            autoSnapshotMinutes    = Math.max(0, Math.min(1440, getInt(root, "autoSnapshotMinutes", autoSnapshotMinutes)));
-            instantClickAggressivenessMs = Math.max(0, Math.min(10000, getInt(root, "instantClickAggressivenessMs", instantClickAggressivenessMs)));
-            soundsEnabled          = getBool(root, "soundsEnabled", soundsEnabled);
-            particlesEnabled       = getBool(root, "particlesEnabled", particlesEnabled);
+            aiApiProvider = normalizeAiProvider(getString(root, "aiApiProvider", aiApiProvider));
+            aiApiKey = getString(root, "aiApiKey", aiApiKey);
+            aiWorkerUrl = getString(root, "aiWorkerUrl", aiWorkerUrl);
+            aiServerToken = getString(root, "aiServerToken", aiServerToken);
+            aiMaxVariations = Math.max(1, Math.min(8, getInt(root, "aiMaxVariations", aiMaxVariations)));
+            aiTextureStyle = normalizeAiTextureStyle(getString(root, "aiTextureStyle", aiTextureStyle));
+            didYouMeanMode = normalizeDidYouMeanMode(getString(root, "didYouMeanMode", didYouMeanMode));
+            autoSnapshotMinutes = Math.max(0, Math.min(1440, getInt(root, "autoSnapshotMinutes", autoSnapshotMinutes)));
+            instantClickAggressivenessMs = Math.max(0,
+                    Math.min(10000, getInt(root, "instantClickAggressivenessMs", instantClickAggressivenessMs)));
+            soundsEnabled = getBool(root, "soundsEnabled", soundsEnabled);
+            particlesEnabled = getBool(root, "particlesEnabled", particlesEnabled);
             loadFeedbackCategories(root, "soundCategories", soundCategories);
             loadFeedbackCategories(root, "particleCategories", particleCategories);
-            marketplaceEnabled     = getBool(root, "marketplaceEnabled", marketplaceEnabled);
-            discordWebhookUrl     = getString(root, "discordWebhookUrl", discordWebhookUrl);
-            hologramEnabled       = getBool(root, "hologramEnabled", hologramEnabled);
-            hologramHeight        = root.has("hologramHeight") ? root.get("hologramHeight").getAsFloat() : hologramHeight;
-            hologramHeight        = Math.max(0.5f, Math.min(5.0f, hologramHeight));
-            hologramColor         = getString(root, "hologramColor", hologramColor);
-            hideCustomBlockText   = getBool(root, "hideCustomBlockText", hideCustomBlockText);
-            hideCategoryBadge     = getBool(root, "hideCategoryBadge", hideCategoryBadge);
+            marketplaceEnabled = getBool(root, "marketplaceEnabled", marketplaceEnabled);
+            discordWebhookUrl = getString(root, "discordWebhookUrl", discordWebhookUrl);
+            hologramEnabled = getBool(root, "hologramEnabled", hologramEnabled);
+            hologramHeight = root.has("hologramHeight") ? root.get("hologramHeight").getAsFloat() : hologramHeight;
+            hologramHeight = Math.max(0.5f, Math.min(5.0f, hologramHeight));
+            hologramColor = getString(root, "hologramColor", hologramColor);
+            autoConnectLetters = getBool(root, "Auto Connect Letters", autoConnectLetters);
+            hideCustomBlockText = getBool(root, "hideCustomBlockText", hideCustomBlockText);
+            hideCategoryBadge = getBool(root, "hideCategoryBadge", hideCategoryBadge);
             colorToolBackgroundMode = getString(root, "colorToolBackgroundMode", colorToolBackgroundMode);
-            triangleGreenHex      = normalizeHexColor(getString(root, "triangleGreenHex", triangleGreenHex), triangleGreenHex);
-            triangleYellowHex     = normalizeHexColor(getString(root, "triangleYellowHex", triangleYellowHex), triangleYellowHex);
-            triangleRedHex        = normalizeHexColor(getString(root, "triangleRedHex", triangleRedHex), triangleRedHex);
+            triangleGreenHex = normalizeHexColor(getString(root, "triangleGreenHex", triangleGreenHex),
+                    triangleGreenHex);
+            triangleYellowHex = normalizeHexColor(getString(root, "triangleYellowHex", triangleYellowHex),
+                    triangleYellowHex);
+            triangleRedHex = normalizeHexColor(getString(root, "triangleRedHex", triangleRedHex), triangleRedHex);
             // Clamp values
             int clampedMaxSlots = Math.max(1, Math.min(8192, maxSlots));
             int clampedDefaultTextureSize = Math.max(16, Math.min(256, defaultTextureSize));
@@ -412,15 +493,15 @@ public final class CustomBlocksConfig {
             shouldRewrite |= clampedTexturePayloadsPerTick != texturePayloadsPerTick;
             shouldRewrite |= clampedMaxGifStripBytes != maxGifStripBytes;
 
-            maxSlots              = clampedMaxSlots;
-            defaultTextureSize    = clampedDefaultTextureSize;
-            bgRemovalTolerance    = clampedBgRemovalTolerance;
-            downloadTimeoutSeconds= clampedDownloadTimeoutSeconds;
+            maxSlots = clampedMaxSlots;
+            defaultTextureSize = clampedDefaultTextureSize;
+            bgRemovalTolerance = clampedBgRemovalTolerance;
+            downloadTimeoutSeconds = clampedDownloadTimeoutSeconds;
             sessionTimeoutSeconds = clampedSessionTimeoutSeconds;
-            maxUndoDepth          = clampedMaxUndoDepth;
-            bulkConfirmThreshold  = clampedBulkConfirmThreshold;
-            permissionLevelAdmin  = clampedPermissionLevelAdmin;
-            permissionLevelUse    = clampedPermissionLevelUse;
+            maxUndoDepth = clampedMaxUndoDepth;
+            bulkConfirmThreshold = clampedBulkConfirmThreshold;
+            permissionLevelAdmin = clampedPermissionLevelAdmin;
+            permissionLevelUse = clampedPermissionLevelUse;
             permissionFallbackUse = cU;
             permissionFallbackEdit = cE;
             permissionFallbackCreate = cC;
@@ -434,8 +515,8 @@ public final class CustomBlocksConfig {
             permissionFallbackMarketplacePublish = cMp;
             permissionFallbackAi = cAi;
             permissionFallbackDevConsole = cDc;
-            texturePayloadsPerTick= clampedTexturePayloadsPerTick;
-            maxGifStripBytes      = clampedMaxGifStripBytes;
+            texturePayloadsPerTick = clampedTexturePayloadsPerTick;
+            maxGifStripBytes = clampedMaxGifStripBytes;
 
             if (!undoMode.equals("global") && !undoMode.equals("per_player") && !undoMode.equals("both")) {
                 LOGGER.warn("[CustomBlocks] Invalid undoMode '{}', defaulting to 'both'", undoMode);
@@ -445,7 +526,8 @@ public final class CustomBlocksConfig {
             if (!colorToolBackgroundMode.equals("unset")
                     && !colorToolBackgroundMode.equals("corners_only")
                     && !colorToolBackgroundMode.equals("corners_and_trapped")) {
-                LOGGER.warn("[CustomBlocks] Invalid colorToolBackgroundMode '{}', defaulting to 'unset'", colorToolBackgroundMode);
+                LOGGER.warn("[CustomBlocks] Invalid colorToolBackgroundMode '{}', defaulting to 'unset'",
+                        colorToolBackgroundMode);
                 colorToolBackgroundMode = "unset";
                 shouldRewrite = true;
             }
@@ -480,6 +562,7 @@ public final class CustomBlocksConfig {
             root.addProperty("bgRemovalTolerance", bgRemovalTolerance);
             root.addProperty("bgRemovalUseYcbcr", bgRemovalUseYcbcr);
             root.addProperty("bgRemovalAutoDetect", bgRemovalAutoDetect);
+            root.addProperty("shadowThreshold", shadowThreshold);
             root.addProperty("downloadTimeoutSeconds", downloadTimeoutSeconds);
             root.addProperty("maxGifSizeMb", maxGifSizeMb); // 1.25
             root.addProperty("sessionTimeoutSeconds", sessionTimeoutSeconds);
@@ -534,11 +617,12 @@ public final class CustomBlocksConfig {
             root.addProperty("hologramEnabled", hologramEnabled);
             root.addProperty("hologramHeight", hologramHeight);
             root.addProperty("hologramColor", hologramColor);
+            root.addProperty("Auto Connect Letters", autoConnectLetters);
             Path tempFile = dir.resolve(CONFIG_FILE + ".tmp");
             Files.writeString(tempFile, GSON.toJson(root), StandardCharsets.UTF_8);
             java.nio.file.Files.move(tempFile, file,
-                java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             VoiceCatalog.invalidate();
         } catch (Exception e) {
             LOGGER.error("[CustomBlocks] Failed to save config", e);
@@ -549,6 +633,10 @@ public final class CustomBlocksConfig {
 
     private static int getInt(JsonObject obj, String key, int def) {
         return obj.has(key) ? obj.get(key).getAsInt() : def;
+    }
+
+    private static float getFloat(JsonObject obj, String key, float def) {
+        return obj.has(key) ? obj.get(key).getAsFloat() : def;
     }
 
     private static long getLong(JsonObject obj, String key, long def) {
@@ -565,45 +653,46 @@ public final class CustomBlocksConfig {
 
     private static boolean missingManagedKeys(JsonObject root) {
         return !root.has("maxSlots")
-            || !root.has("defaultTextureSize")
-            || !root.has("bgRemovalTolerance")
-            || !root.has("bgRemovalUseYcbcr")
-            || !root.has("bgRemovalAutoDetect")
-            || !root.has("downloadTimeoutSeconds")
-            || !root.has("maxGifSizeMb") // 1.25
-            || !root.has("sessionTimeoutSeconds")
-            || !root.has("undoMode")
-            || !root.has("maxUndoDepth")
-            || !root.has("bulkConfirmThreshold")
-            || !root.has("permissionLevelAdmin")
-            || !root.has("permissionLevelUse")
-            || !root.has("permissionFallbackUse")
-            || !root.has("texturePayloadsPerTick")
-            || !root.has("resourcePackPort")
-            || !root.has("reloadDebounceMs")
-            || !root.has("cloudShareEnabled")
-            || !root.has("cloudPackSecret")
-            || !root.has("voiceMode")
-            || !root.has("didYouMeanMode")
-            || !root.has("aiApiProvider")
-            || !root.has("aiWorkerUrl")
-            || !root.has("aiServerToken")
-            || !root.has("aiApiKey")
-            || !root.has("aiMaxVariations")
-            || !root.has("aiTextureStyle")
-            || !root.has("hideCustomBlockText")
-            || !root.has("hideCategoryBadge")
-            || !root.has("colorToolBackgroundMode")
-            || !root.has("triangleGreenHex")
-            || !root.has("triangleYellowHex")
-            || !root.has("triangleRedHex")
-            || !root.has("autoSnapshotMinutes")
-            || !root.has("instantClickAggressivenessMs")
-            || !root.has("soundsEnabled")
-            || !root.has("particlesEnabled")
-            || !root.has("soundCategories")
-            || !root.has("particleCategories")
-            || !root.has("marketplaceEnabled");
+                || !root.has("defaultTextureSize")
+                || !root.has("bgRemovalTolerance")
+                || !root.has("bgRemovalUseYcbcr")
+                || !root.has("bgRemovalAutoDetect")
+                || !root.has("downloadTimeoutSeconds")
+                || !root.has("maxGifSizeMb") // 1.25
+                || !root.has("sessionTimeoutSeconds")
+                || !root.has("undoMode")
+                || !root.has("maxUndoDepth")
+                || !root.has("bulkConfirmThreshold")
+                || !root.has("permissionLevelAdmin")
+                || !root.has("permissionLevelUse")
+                || !root.has("permissionFallbackUse")
+                || !root.has("texturePayloadsPerTick")
+                || !root.has("resourcePackPort")
+                || !root.has("reloadDebounceMs")
+                || !root.has("cloudShareEnabled")
+                || !root.has("cloudPackSecret")
+                || !root.has("voiceMode")
+                || !root.has("didYouMeanMode")
+                || !root.has("aiApiProvider")
+                || !root.has("aiWorkerUrl")
+                || !root.has("aiServerToken")
+                || !root.has("aiApiKey")
+                || !root.has("aiMaxVariations")
+                || !root.has("aiTextureStyle")
+                || !root.has("hideCustomBlockText")
+                || !root.has("hideCategoryBadge")
+                || !root.has("colorToolBackgroundMode")
+                || !root.has("triangleGreenHex")
+                || !root.has("triangleYellowHex")
+                || !root.has("triangleRedHex")
+                || !root.has("autoSnapshotMinutes")
+                || !root.has("instantClickAggressivenessMs")
+                || !root.has("soundsEnabled")
+                || !root.has("particlesEnabled")
+                || !root.has("soundCategories")
+                || !root.has("particleCategories")
+                || !root.has("marketplaceEnabled")
+                || !root.has("Auto Connect Letters");
     }
 
     /** Returns true when player has chosen a color tool mode in /cb config. */
@@ -625,22 +714,27 @@ public final class CustomBlocksConfig {
             case "red" -> triangleRedHex;
             default -> null;
         };
-        if (hex == null) return new int[]{fallbackR, fallbackG, fallbackB};
+        if (hex == null)
+            return new int[] { fallbackR, fallbackG, fallbackB };
         int rgb = parseHexColor(hex, (fallbackR << 16) | (fallbackG << 8) | fallbackB);
-        return new int[]{(rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF};
+        return new int[] { (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF };
     }
 
     private static String normalizeHexColor(String raw, String fallback) {
-        if (raw == null) return fallback;
+        if (raw == null)
+            return fallback;
         String s = raw.trim();
-        if (!s.startsWith("#")) s = "#" + s;
-        if (!s.matches("(?i)^#[0-9a-f]{6}$")) return fallback;
+        if (!s.startsWith("#"))
+            s = "#" + s;
+        if (!s.matches("(?i)^#[0-9a-f]{6}$"))
+            return fallback;
         return s.toUpperCase();
     }
 
     private static int parseHexColor(String raw, int fallback) {
         String normalized = normalizeHexColor(raw, null);
-        if (normalized == null) return fallback;
+        if (normalized == null)
+            return fallback;
         try {
             return Integer.parseInt(normalized.substring(1), 16);
         } catch (Exception ignored) {
@@ -664,11 +758,13 @@ public final class CustomBlocksConfig {
         resetFeedbackCategoryDefaults(defaults);
         target.clear();
         target.putAll(defaults);
-        if (!root.has(key) || !root.get(key).isJsonObject()) return;
+        if (!root.has(key) || !root.get(key).isJsonObject())
+            return;
         JsonObject obj = root.getAsJsonObject(key);
         for (Map.Entry<String, JsonElement> e : obj.entrySet()) {
             String k = e.getKey() == null ? "" : e.getKey().trim().toLowerCase(Locale.ROOT);
-            if (!target.containsKey(k)) continue;
+            if (!target.containsKey(k))
+                continue;
             try {
                 target.put(k, e.getValue().getAsBoolean());
             } catch (Exception ignored) {
@@ -694,5 +790,6 @@ public final class CustomBlocksConfig {
         return particlesEnabled && particleCategories.getOrDefault(key, true);
     }
 
-    private CustomBlocksConfig() {} // static-only
+    private CustomBlocksConfig() {
+    } // static-only
 }
