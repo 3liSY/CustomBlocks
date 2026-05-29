@@ -1975,7 +1975,7 @@ public class CustomBlockCommand {
                 .requires(src -> PermissionHelper.canUse(src))
                 .executes(ctx -> {
                     var p = ctx.getSource().getPlayer();
-                    if (p != null) com.customblocks.gui.GuiManager.openFeatureMenu(p, 0);
+                    if (p != null) com.customblocks.gui.GuiManager.openWelcomeGui(p);
                     return 1;
                 })
                 .redirect(dispatcher.getRoot().getChild("customblock")));
