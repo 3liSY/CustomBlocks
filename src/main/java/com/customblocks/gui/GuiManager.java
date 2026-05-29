@@ -92,7 +92,7 @@ public class GuiManager {
         "VARIANT_GUI", "COLOR_STUDIO", "PALETTE_GENERATOR", "AI_SUGGEST_GUI",
         "MARKET_GUI", "BULK_HUB", "BULK_OP_PICKER", "COLOR_PICKER",
         "VOICE_PICKER", "FAVORITES_GUI", "RECENT_GUI", "SAFETY_CENTER",
-        "HISTORY_GUI", "SCRIPT_GUI", "SCRIPT_SUMMARY", "CACHE_DASHBOARD",
+        "SCRIPT_GUI", "SCRIPT_SUMMARY", "CACHE_DASHBOARD",
         "AUDIT_GUI", "AI_GEN", "CUSTOM_COLOR_STUDIO", "ACHIEVEMENTS_GUI",
         "SNAPSHOTS_GUI", "DELETED_BLOCKS_GUI", "BOX_NUDGE_EDITOR",
         "RECOLOR_CONFIRM"
@@ -689,9 +689,7 @@ public class GuiManager {
         openScreenFromGuiState(player, GuiState.safetyCenter(), buildSafetyCenterGui(player), Text.literal(normalizeFormattingCodes("§6Safety Center")));
     }
 
-    public static void openHistoryGui(ServerPlayerEntity player, int page) {
-        openScreenFromGuiState(player, GuiState.historyGui(page), buildHistoryGui(page), Text.literal(normalizeFormattingCodes("§eRecent History")));
-    }
+
 
     public static void openSnapshotsGui(ServerPlayerEntity player, int page) {
         pushBackStack(player.getUuid());
@@ -1250,7 +1248,7 @@ public class GuiManager {
                 case FAVORITES_GUI -> openFavoritesGui(player, state.page());
                 case RECENT_GUI -> openRecentGui(player);
                 case SAFETY_CENTER -> openSafetyCenter(player);
-                case HISTORY_GUI -> openHistoryGui(player, state.page());
+                case HISTORY_GUI -> openMain(player, state.page());
                 case SNAPSHOTS_GUI -> openSnapshotsGui(player, state.page());
                 case DELETED_BLOCKS_GUI -> openDeletedBlocksGui(player, state.page());
                 case BOX_NUDGE_EDITOR -> openBoxNudgeEditor(player, state.editingId(), state.shapeBoxPage(), state.page());
@@ -1375,7 +1373,7 @@ public class GuiManager {
                 case FAVORITES_GUI -> handleFavoritesGuiClick(player, state, slot);
                 case RECENT_GUI -> handleRecentGuiClick(player, state, slot);
                 case SAFETY_CENTER -> handleSafetyCenterClick(player, state, slot);
-                case HISTORY_GUI -> handleHistoryGuiClick(player, state, slot);
+                case HISTORY_GUI -> handleEscBack(player);
                 case SNAPSHOTS_GUI -> handleSnapshotsGuiClick(player, state, slot);
                 case DELETED_BLOCKS_GUI -> handleDeletedBlocksGuiClick(player, state, slot, button);
                 case BOX_NUDGE_EDITOR -> handleBoxNudgeClick(player, state, slot, button);
@@ -3182,7 +3180,7 @@ public class GuiManager {
             // Row 3: config + tools
             case 28 -> openConfigWarningGui(player);
             case 30 -> openResourceHub(player);
-            case 32 -> openHistoryGui(player, 0);
+            case 32 -> {} // history GUI removed
             case 34 -> openHelpGui(player);
 
             // Row 4: diagnostics + exit
@@ -6250,22 +6248,6 @@ public class GuiManager {
         return inv;
     }
 
-    private static SimpleInventory buildHistoryGui(int page) {
-        SimpleInventory inv = new SimpleInventory(54);
-        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
-        java.util.List<com.customblocks.core.HistoryTracker.Entry> entries = com.customblocks.core.HistoryTracker.latest(28);
-        inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back"));
-        inv.setStack(49, uiGlint(Items.KNOWLEDGE_BOOK, "§e§lSession History", "§7Entries: §f" + entries.size()));
-        for (int i = 0, invSlot = 10; i < entries.size() && i < 28; i++, invSlot++) {
-            if (invSlot == 17) invSlot = 19;
-            if (invSlot == 26) invSlot = 28;
-            if (invSlot > 34) break;
-            var entry = entries.get(i);
-            inv.setStack(invSlot, ui(Items.PAPER, "§f" + entry.blockId(), "§7" + stripFormattingCodes(entry.toDisplayString())));
-        }
-        return inv;
-    }
-
     private static final int SNAPSHOTS_PER_PAGE = 18;
 
     private static SimpleInventory buildSnapshotsGui(int page) {
@@ -6671,10 +6653,6 @@ public class GuiManager {
         if (slot == 45 || slot == 49) { handleEscBack(player); return; }
         if (slot == 20) { openUndoPicker(player, 0); return; }
         if (slot == 22) { openRecoverGui(player, 0); return; }
-    }
-
-    private static void handleHistoryGuiClick(ServerPlayerEntity player, GuiState state, int slot) {
-        handleSimpleBackOnly(player, slot);
     }
 
     private static void handleScriptGuiClick(ServerPlayerEntity player, GuiState state, int slot, int button) {

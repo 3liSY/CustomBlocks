@@ -445,7 +445,7 @@ public class CustomBlockCommand {
                     .executes(ctx -> {
                         // V4-21: no-args opens bulk delete GUI
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
-                        if (p != null) { GuiManager.openBulkHub(p); return 1; }
+                        if (p != null) { GuiManager.openBulkDelete(p, 0); return 1; }
                         return usage(ctx.getSource(), "bulkdelete");
                     })
                     .then(CommandManager.argument("ids", StringArgumentType.greedyString())
@@ -1314,8 +1314,6 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("history")
                     .requires(PermissionHelper::canAdmin)
                     .executes(ctx -> {
-                        ServerPlayerEntity p = ctx.getSource().getPlayer();
-                        if (p != null) { GuiManager.openHistoryGui(p, 0); return 1; }
                         var entries = com.customblocks.core.HistoryTracker.latest(20);
                         if (entries.isEmpty()) {
                             ChatHelper.info(ctx.getSource(), "§7No mutations recorded this session.");
@@ -1783,15 +1781,7 @@ public class CustomBlockCommand {
                         return 1;
                     }));
 
-                // ── /cb historygui / undogui / redogui (V4-17) ───────────────
-                tree.then(CommandManager.literal("historygui")
-                    .requires(PermissionHelper::canAdmin)
-                    .executes(ctx -> {
-                        ServerPlayerEntity p = ctx.getSource().getPlayer();
-                        if (p == null) { ChatHelper.error(ctx.getSource(), "Player only."); return 0; }
-                        com.customblocks.gui.GuiManager.openHistoryGui(p, 0);
-                        return 1;
-                    }));
+                // ── /cb historygui removed — use /cb history for text output ──
                 tree.then(CommandManager.literal("undogui")
                     .requires(PermissionHelper::canEdit)
                     .executes(ctx -> {
