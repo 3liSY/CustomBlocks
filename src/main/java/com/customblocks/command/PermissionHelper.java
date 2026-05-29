@@ -129,6 +129,7 @@ public final class PermissionHelper {
      * Magic wand / chisel tools — same node and vanilla fallback as {@link #canEdit(ServerCommandSource)}.
      */
     public static boolean canUseTool(PlayerEntity player) {
+        if (player.getWorld().isClient) return true; // client-side prediction bypass; server still validates
         if (!(player instanceof ServerPlayerEntity sp)) return false;
         return canEdit(sp.getCommandSource());
     }

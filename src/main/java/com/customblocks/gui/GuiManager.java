@@ -641,7 +641,7 @@ public class GuiManager {
 
     private static void handleRecoverGuiClick(ServerPlayerEntity player, GuiState state, int slot) {
         int page = state.page();
-        if (slot == 49) { openMain(player, 0); return; }
+        if (slot == 49) { handleEscBack(player); return; }
         if (slot == 45 && page > 0) {
             openScreenFromGuiState(player, GuiState.recoverGui(page - 1), buildRecoverGui(player, page - 1), Text.translatable("customblocks.gui.recover.title"));
             return;
@@ -2244,7 +2244,7 @@ public class GuiManager {
                 openMagicItemsGui(player);
             }
             // Back
-            case 0, 45 -> openMain(player, 0);
+            case 0, 45 -> handleEscBack(player);
             default -> {}
         }
     }
@@ -3506,7 +3506,7 @@ public class GuiManager {
     }
 
     private static void handleMaintenanceClick(ServerPlayerEntity player, GuiState state, int slot) {
-        if(slot == 0 || slot == 45) { openMain(player, 0); return; }
+        if(slot == 0 || slot == 45) { handleEscBack(player); return; }
         if(slot == 19) openTabIconPicker(player, 0);
         else if(slot == 21) openBrokenBlocks(player, 0);
         else if(slot == 23) openResourceHub(player);
@@ -4054,7 +4054,7 @@ public class GuiManager {
 
         if (slot == 0) {
             BULK_DELETE_SELECTIONS.remove(player.getUuid());
-            openMain(player, 0);
+            handleEscBack(player);
             return;
         }
         if (slot == 8) {
@@ -5658,7 +5658,7 @@ public class GuiManager {
         int page = state.page();
         UUID uuid = player.getUuid();
         String query = SEARCH_QUERIES.getOrDefault(uuid, "");
-        if (slot == 0) { openMain(player, 0); return; }
+        if (slot == 0) { handleEscBack(player); return; }
         if (slot == 45) {
             if (page > 0) {
                 STATES.put(uuid, GuiState.searchPicker(page - 1));
@@ -9372,7 +9372,7 @@ public class GuiManager {
     private static void handleBulkHubClick(ServerPlayerEntity player, GuiState state, int slot) {
         UUID uuid = player.getUuid();
         switch (slot) {
-            case 45 -> openMain(player, 0);
+            case 45 -> handleEscBack(player);
             case 46 -> {
                 bulkSelectAll(uuid, sortedBlocks());
                 refreshScreen(player, buildBulkHub(uuid));

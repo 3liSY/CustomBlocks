@@ -113,7 +113,7 @@ public class ColorTriangleItem extends Item {
 
     @Override
     public boolean hasGlint(ItemStack stack) {
-        return isCustomTriangle(stack);
+        return true;
     }
 
     public static ItemStack createCustomStack(Item item, int rgb) {

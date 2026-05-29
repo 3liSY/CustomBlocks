@@ -994,7 +994,7 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("menu")
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
-                        if (p != null) GuiManager.openFeatureMenu(p, 0);
+                        if (p != null) GuiManager.openWelcomeGui(p);
                         else ChatHelper.error(ctx.getSource(), ChatHelper.formattedKey("cmd.console_player_only"));
                         return 1;
                     }))
@@ -4652,12 +4652,7 @@ public class CustomBlockCommand {
     private static int cmdGui(ServerCommandSource src) {
         try {
             ServerPlayerEntity player = src.getPlayerOrThrow();
-            // V4-30: first-time players see the welcome/onboarding screen
-            if (!com.customblocks.core.OnboardingManager.hasSeenWelcome(player.getUuid())) {
-                GuiManager.openWelcomeGui(player);
-            } else {
-                GuiManager.openFeatureMenu(player, 0);
-            }
+            GuiManager.openWelcomeGui(player);
         } catch (Exception ex) {
             CustomBlocksMod.LOGGER.error("[CB] cmdGui failed", ex);
             com.customblocks.gui.GuiManager.logError();
