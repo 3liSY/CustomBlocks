@@ -445,7 +445,7 @@ public class CustomBlockCommand {
                     .executes(ctx -> {
                         // V4-21: no-args opens bulk delete GUI
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
-                        if (p != null) { GuiManager.openBulkDelete(p, 0); return 1; }
+                        if (p != null) { GuiManager.openBulkHub(p); return 1; }
                         return usage(ctx.getSource(), "bulkdelete");
                     })
                     .then(CommandManager.argument("ids", StringArgumentType.greedyString())
@@ -961,14 +961,6 @@ public class CustomBlockCommand {
                         else ChatHelper.error(ctx.getSource(), ChatHelper.formattedKey("cmd.console_player_only"));
                         return 1;
                     }))
-                .then(CommandManager.literal("helpgui")
-                    .executes(ctx -> {
-                        ServerPlayerEntity p = ctx.getSource().getPlayer();
-                        if (p != null) GuiManager.openHelpGui(p);
-                        else ChatHelper.error(ctx.getSource(), ChatHelper.formattedKey("cmd.console_player_only"));
-                        return 1;
-                    }))
-
                 // /cb edithud — opens HUD layout editor on the client
                 .then(CommandManager.literal("edithud")
                     .requires(PermissionHelper::canUse)

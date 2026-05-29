@@ -1100,7 +1100,7 @@ public class GuiManager {
             case 2 -> {
                 switch (slot) {
                     case 10 -> { playClick(player); openBulkHub(player); }
-                    case 11 -> { playClick(player); openBulkDelete(player, 0); }
+                    case 11 -> { playClick(player); openBulkHub(player); }
                     case 12 -> { playClick(player); openBulkHub(player); }
                     case 13 -> { playClick(player); openBulkHub(player); }
                     case 14 -> { playClick(player); openBulkHub(player); }
@@ -3158,7 +3158,7 @@ public class GuiManager {
             case 16 -> openMagicItemsGui(player);
 
             // Row 2: bulk + undo/redo
-            case 19 -> openBulkDelete(player, 0);
+            case 19 -> openBulkHub(player);
             case 21 -> openBulkRecolorWizard(player, 0);
             case 23 -> {
                 int undoSz = UndoManager.undoSize(uuid);
@@ -3474,6 +3474,7 @@ public class GuiManager {
         if (slot == 8) {
             UndoManager.pushUndoMutation(id, d, "setcollision", uuid); SlotManager.setCollision(id,d.noCollision); SlotManager.saveAll();
             SlotData upd = SlotManager.getById(id);
+            if (upd == null) { openMain(player, rp); return; }
             NetworkManager.broadcastUpdate(player.getServer(), new SlotUpdatePayload("setcollision",upd.index,id,null,null,0,0,"stone",null,upd.noCollision?"false":"true"));
             send(player,"§a[Shape] Collision: §f"+(upd.noCollision?"§cOFF":"§aON")); reopenShapeEditor(player,id,rp,boxPage); return;
         }
@@ -3599,7 +3600,7 @@ public class GuiManager {
         }
 
         switch(slot) {
-            case 19 -> { UndoManager.pushUndoMutation(id, d, "setglow", uuid); SlotManager.setLightLevel(id,Math.max(0,d.lightLevel-1)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
+            case 19 -> { UndoManager.pushUndoMutation(id, d, "setglow", uuid); SlotManager.setLightLevel(id,Math.max(0,d.lightLevel-1)); syncProp(player,d); SlotData _prop = SlotManager.getById(id); if (_prop != null) refreshScreen(player, buildPropertiesGui(_prop)); else openMain(player, rp); }
             case 20 -> openShortInputPrompt(
                 player,
                 new PendingInput(InputAction.SET_LIGHT, id, null, null, null, rp),
@@ -3607,8 +3608,8 @@ public class GuiManager {
                 new ItemStack(Items.GLOWSTONE_DUST),
                 String.valueOf(d.lightLevel)
             );
-            case 21 -> { UndoManager.pushUndoMutation(id, d, "setglow", uuid); SlotManager.setLightLevel(id,Math.min(15,d.lightLevel+1)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
-            case 23 -> { UndoManager.pushUndoMutation(id, d, "sethardness", uuid); SlotManager.setHardness(id,prevHardness(d.hardness)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
+            case 21 -> { UndoManager.pushUndoMutation(id, d, "setglow", uuid); SlotManager.setLightLevel(id,Math.min(15,d.lightLevel+1)); syncProp(player,d); SlotData _prop = SlotManager.getById(id); if (_prop != null) refreshScreen(player, buildPropertiesGui(_prop)); else openMain(player, rp); }
+            case 23 -> { UndoManager.pushUndoMutation(id, d, "sethardness", uuid); SlotManager.setHardness(id,prevHardness(d.hardness)); syncProp(player,d); SlotData _prop = SlotManager.getById(id); if (_prop != null) refreshScreen(player, buildPropertiesGui(_prop)); else openMain(player, rp); }
             case 24 -> openShortInputPrompt(
                 player,
                 new PendingInput(InputAction.SET_HARDNESS, id, null, null, null, rp),
@@ -3616,7 +3617,7 @@ public class GuiManager {
                 new ItemStack(Items.NETHERITE_SCRAP),
                 String.valueOf(d.hardness)
             );
-            case 25 -> { UndoManager.pushUndoMutation(id, d, "sethardness", uuid); SlotManager.setHardness(id,nextHardness(d.hardness)); syncProp(player,d); refreshScreen(player, buildPropertiesGui(SlotManager.getById(id))); }
+            case 25 -> { UndoManager.pushUndoMutation(id, d, "sethardness", uuid); SlotManager.setHardness(id,nextHardness(d.hardness)); syncProp(player,d); SlotData _prop = SlotManager.getById(id); if (_prop != null) refreshScreen(player, buildPropertiesGui(_prop)); else openMain(player, rp); }
             case 40 -> {
                 UndoManager.pushUndoMutation(id, d, "setcollision", uuid); SlotManager.setCollision(id,d.noCollision); SlotManager.saveAll();
                 SlotData upd = SlotManager.getById(id);
@@ -9425,6 +9426,7 @@ public class GuiManager {
 
     /** Phase 2 — open the shared bulk-op block picker. */
     public static void openBulkOpPicker(ServerPlayerEntity player, String opId, int page) {
+        pushBackStack(player.getUuid());
         STATES.put(player.getUuid(), GuiState.bulkOpPicker(opId, page));
         openScreen(player, new SimpleNamedScreenHandlerFactory(
                 (s, pi, p) -> new CbScreenHandler(s, pi, buildBulkOpPicker(player.getUuid(), opId, page)),
