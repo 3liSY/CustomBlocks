@@ -425,7 +425,7 @@ public class ColorTriangleItem extends Item {
         // Edge expansion: catch background-tinted anti-aliased pixels the BFS missed.
         // Expands the recolor zone by 1.5x tolerance. Dark shadow pixels are far from the
         // background color in Lab space and won't be touched.
-        double expandThreshold = labThreshold * 1.2;
+        double expandThreshold = labThreshold * 1.5;
         int[][] eDirs = {{1,0},{-1,0},{0,1},{0,-1}};
         for (int x = 0; x < w; x++) {
             for (int y = 0; y < h; y++) {
