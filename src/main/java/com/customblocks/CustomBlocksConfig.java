@@ -51,6 +51,8 @@ public final class CustomBlocksConfig {
      * cap.
      */
     public static volatile boolean bgRemovalAutoDetect = false;
+    /** When false, all background removal is completely skipped regardless of other settings. */
+    public static volatile boolean bgRemovalEnabled = true;
     /** Expansion threshold for Color Triangles (default 1.0). */
     public static volatile float shadowThreshold = 1.0f;
     /** HTTP download timeout in seconds. */
@@ -124,6 +126,8 @@ public final class CustomBlocksConfig {
     public static volatile boolean hideCategoryBadge = false;
     /** Colour tool mode: "unset", "corners_only", "corners_and_trapped". */
     public static volatile String colorToolBackgroundMode = "unset";
+    /** Editable built-in shade for black recolor tools. */
+    public static volatile String triangleBlackHex = "#0A0A0A";
     /** Editable built-in shade for green recolor tools. */
     public static volatile String triangleGreenHex = "#1E8C1E";
     /** Editable built-in shade for yellow recolor tools. */
@@ -344,6 +348,7 @@ public final class CustomBlocksConfig {
             bgRemovalTolerance = getInt(root, "bgRemovalTolerance", bgRemovalTolerance);
             bgRemovalUseYcbcr = getBool(root, "bgRemovalUseYcbcr", bgRemovalUseYcbcr);
             bgRemovalAutoDetect = getBool(root, "bgRemovalAutoDetect", bgRemovalAutoDetect);
+            bgRemovalEnabled = getBool(root, "bgRemovalEnabled", bgRemovalEnabled);
             shadowThreshold = getFloat(root, "shadowThreshold", shadowThreshold);
             downloadTimeoutSeconds = getInt(root, "downloadTimeoutSeconds", downloadTimeoutSeconds);
             maxGifSizeMb = Math.max(1, getInt(root, "maxGifSizeMb", maxGifSizeMb)); // 1.25 — min 1
@@ -437,6 +442,7 @@ public final class CustomBlocksConfig {
             hideCustomBlockText = getBool(root, "hideCustomBlockText", hideCustomBlockText);
             hideCategoryBadge = getBool(root, "hideCategoryBadge", hideCategoryBadge);
             colorToolBackgroundMode = getString(root, "colorToolBackgroundMode", colorToolBackgroundMode);
+            triangleBlackHex = normalizeHexColor(getString(root, "triangleBlackHex", triangleBlackHex), triangleBlackHex);
             triangleGreenHex = normalizeHexColor(getString(root, "triangleGreenHex", triangleGreenHex),
                     triangleGreenHex);
             triangleYellowHex = normalizeHexColor(getString(root, "triangleYellowHex", triangleYellowHex),
@@ -562,6 +568,7 @@ public final class CustomBlocksConfig {
             root.addProperty("bgRemovalTolerance", bgRemovalTolerance);
             root.addProperty("bgRemovalUseYcbcr", bgRemovalUseYcbcr);
             root.addProperty("bgRemovalAutoDetect", bgRemovalAutoDetect);
+            root.addProperty("bgRemovalEnabled", bgRemovalEnabled);
             root.addProperty("shadowThreshold", shadowThreshold);
             root.addProperty("downloadTimeoutSeconds", downloadTimeoutSeconds);
             root.addProperty("maxGifSizeMb", maxGifSizeMb); // 1.25
@@ -603,6 +610,7 @@ public final class CustomBlocksConfig {
             root.addProperty("hideCustomBlockText", hideCustomBlockText);
             root.addProperty("hideCategoryBadge", hideCategoryBadge);
             root.addProperty("colorToolBackgroundMode", colorToolBackgroundMode);
+            root.addProperty("triangleBlackHex", normalizeHexColor(triangleBlackHex, "#0A0A0A"));
             root.addProperty("triangleGreenHex", normalizeHexColor(triangleGreenHex, "#1E8C1E"));
             root.addProperty("triangleYellowHex", normalizeHexColor(triangleYellowHex, "#F0C814"));
             root.addProperty("triangleRedHex", normalizeHexColor(triangleRedHex, "#EE3333"));

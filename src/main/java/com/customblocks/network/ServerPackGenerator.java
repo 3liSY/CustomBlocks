@@ -295,9 +295,11 @@ public class ServerPackGenerator {
                 addGeneratedItemModel(zos, "black_square", "minecraft:item/black_dye", writtenPaths);
                 addGeneratedItemModel(zos, "yellow_square", "minecraft:item/yellow_dye", writtenPaths);
                 addGeneratedItemModel(zos, "green_square", "minecraft:item/green_dye", writtenPaths);
+                addGeneratedItemModel(zos, "red_square", "minecraft:item/red_dye", writtenPaths);
                 addGeneratedItemModel(zos, "black_triangle", "minecraft:item/black_dye", writtenPaths);
                 addGeneratedItemModel(zos, "yellow_triangle", "minecraft:item/yellow_dye", writtenPaths);
                 addGeneratedItemModel(zos, "green_triangle", "minecraft:item/green_dye", writtenPaths);
+                addGeneratedItemModel(zos, "red_triangle", "minecraft:item/red_dye", writtenPaths);
                 addGeneratedItemModel(zos, "custom_square", "minecraft:item/light_blue_dye", writtenPaths);
                 addGeneratedItemModel(zos, "custom_triangle", "minecraft:item/light_blue_dye", writtenPaths);
                 addGeneratedItemModel(zos, "rainbow_rectangle", "minecraft:item/painting", writtenPaths);

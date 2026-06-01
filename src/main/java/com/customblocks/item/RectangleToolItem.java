@@ -52,7 +52,8 @@ public class RectangleToolItem extends Item {
             BlockPos pos,
             String   face,
             String   slotId,
-            int      size
+            int      size,
+            boolean  skipBgRemoval
     ) {}
 
     public RectangleToolItem(Settings settings) { super(settings); }
@@ -81,15 +82,15 @@ public class RectangleToolItem extends Item {
         BlockPos     pos    = ctx.getBlockPos();
         PlayerEntity player = ctx.getPlayer();
 
-        if (world.isClient) return ActionResult.PASS;
-
         BlockState state = world.getBlockState(pos);
         if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
 
         if (player != null && !PermissionHelper.canUseTool(player)) {
-            player.sendMessage(PermissionHelper.toolPermissionDeniedMessage(), true);
+            if (!world.isClient) player.sendMessage(PermissionHelper.toolPermissionDeniedMessage(), true);
             return ActionResult.FAIL;
         }
+
+        if (world.isClient) return ActionResult.PASS;
 
         SlotData data = SlotManager.getBySlot(sb.getSlotKey());
         if (data == null) return ActionResult.PASS;
@@ -108,13 +109,15 @@ public class RectangleToolItem extends Item {
                 : ImageProcessor.DEFAULT_SIZE;
 
         UUID uuid = player.getUuid();
-        PENDING.put(uuid, new PendingSession(pos, face, data.customId, size));
+        boolean skipBg = player.isSneaking();
+        PENDING.put(uuid, new PendingSession(pos, face, data.customId, size, skipBg));
         SESSION_TIMESTAMPS.put(uuid, System.currentTimeMillis());
 
         String faceU = face.toUpperCase(Locale.ROOT);
         player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_rect_clicked_face", faceU, data.displayName)), false);
         player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_rect_paste_url")), false);
         player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_rect_quality_line", size)), false);
+        if (skipBg) player.sendMessage(Text.literal("§e[Shift held] §7Background removal will be §eskipped§7 for this upload."), false);
         player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.gui_face_paste_cancel_hint")), false);
 
         if (world instanceof ServerWorld sw) {
@@ -146,10 +149,11 @@ public class RectangleToolItem extends Item {
             return true;
         }
 
-        String url    = trimmed;
-        String face   = session.face();
-        String baseId = session.slotId();
-        int    size   = session.size();
+        String url          = trimmed;
+        String face         = session.face();
+        String baseId       = session.slotId();
+        int    size         = session.size();
+        boolean skipBgRemoval = session.skipBgRemoval();
         MinecraftServer server = player.getServer();
         if (server == null) return true;
 
@@ -173,7 +177,7 @@ public class RectangleToolItem extends Item {
                 } else {
                     faceBytes = ImageProcessor.toPng(raw);
                     faceBytes = ImageProcessor.padToSquare(faceBytes);
-                    faceBytes = ImageProcessor.replaceBackground(faceBytes);
+                    if (!skipBgRemoval) faceBytes = ImageProcessor.replaceBackground(faceBytes);
                     faceBytes = ImageProcessor.resizeTo(faceBytes, size);
                 }
 
@@ -215,15 +219,14 @@ public class RectangleToolItem extends Item {
                     SlotManager.saveAll();
 
                     ServerWorld world = player.getServerWorld();
-                    BlockState current = world.getBlockState(session.pos());
-                    if (current.getBlock() instanceof SlotBlock) {
-                        SlotBlock sb = CustomBlocksMod.safeSlotBlock(newBlock.index);
-                        if (sb != null) world.setBlockState(session.pos(), sb.getDefaultState());
-                    }
 
                     player.getInventory().insertStack(
                         (CustomBlocksMod.safeSlotItem(newBlock.index) != null ? new ItemStack(CustomBlocksMod.safeSlotItem(newBlock.index), 1) : ItemStack.EMPTY));
 
+                    // RT1 — broadcast the new variant to all clients BEFORE swapping the block
+                    // in the world.  Clients must know the variant exists before they receive the
+                    // block-state change packet; swapping first caused a race where the block
+                    // appeared broken because the client had no record of the new slot.
                     SlotData fresh = SlotManager.getById(variantId);
                     if (fresh != null) {
                         NetworkManager.broadcastUpdate(server,
@@ -235,6 +238,13 @@ public class RectangleToolItem extends Item {
                                 new SlotUpdatePayload("setface", fresh.index, variantId, null,
                                     fe.getValue(), fresh.lightLevel, fresh.hardness, fresh.soundType,
                                     fe.getKey()));
+                    }
+
+                    // Now swap the block — clients already know the variant, so no broken flash
+                    BlockState current = world.getBlockState(session.pos());
+                    if (current.getBlock() instanceof SlotBlock) {
+                        SlotBlock sb = CustomBlocksMod.safeSlotBlock(newBlock.index);
+                        if (sb != null) world.setBlockState(session.pos(), sb.getDefaultState());
                     }
 
                     player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_rect_variant_done",

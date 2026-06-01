@@ -49,7 +49,8 @@ public final class UndoManager {
     public sealed interface UndoDelta permits
             UndoManager.MetaDelta, UndoManager.TextureDelta, UndoManager.FaceDelta,
             UndoManager.AnimDelta, UndoManager.ShapeDelta,
-            UndoManager.SlotCreated, UndoManager.SlotDeleted {
+            UndoManager.SlotCreated, UndoManager.SlotDeleted,
+            UndoManager.BatchDelta {
         String customId();
         String description();
         UUID   playerUuid();
@@ -98,6 +99,22 @@ public final class UndoManager {
     public record SlotDeleted(String customId, UUID playerUuid,
                               String snapshotPath) implements UndoDelta {
         public String description() { return "delete"; }
+    }
+
+    /**
+     * UND1 — A batch of deltas that should be undone together as one atomic operation.
+     * Used for bulk operations (bulk delete, bulk recolor, etc.) so a single /cb undo
+     * call can restore all affected blocks at once after a confirmation prompt.
+     */
+    @SuppressFBWarnings({"EI_EXPOSE_REP", "EI_EXPOSE_REP2"})
+    public record BatchDelta(
+            String batchDescription,
+            UUID   playerUuid,
+            List<UndoDelta> deltas
+    ) implements UndoDelta {
+        /** Returns empty string — batch has no single customId. */
+        public String customId() { return ""; }
+        public String description() { return batchDescription; }
     }
 
     // ── Undo entry record (public API — unchanged externally) ─────────────────
@@ -182,6 +199,168 @@ public final class UndoManager {
      */
     public static void pushUndoDeletion(String customId, SlotData snapshot, UUID playerUuid) {
         pushUndo(new UndoEntry(customId, snapshot, "delete", true, playerUuid));
+    }
+
+    // ── UND1 — Batch push / peek / pop ───────────────────────────────────────
+
+    /**
+     * UND1 — Push a group of undo entries as a single atomic batch.
+     * When the user runs /cb undo and the top of the stack is a batch, they are
+     * shown a confirmation prompt; confirming undoes all entries at once.
+     *
+     * @param description  human-readable label, e.g. "bulk-delete 20"
+     * @param entries      the individual undo entries to group
+     * @param playerUuid   the player who performed the bulk operation
+     */
+    public static synchronized void pushUndoBatch(String description, List<UndoEntry> entries, UUID playerUuid) {
+        if (entries.isEmpty()) return;
+        List<UndoDelta> deltas = new ArrayList<>();
+        for (UndoEntry e : entries) deltas.add(toDelta(e));
+        BatchDelta batch = new BatchDelta(description, playerUuid, deltas);
+        String mode = CustomBlocksConfig.undoMode;
+        int maxDepth = CustomBlocksConfig.maxUndoDepth;
+        if ("global".equals(mode) || "both".equals(mode)) {
+            pushTo(GLOBAL_UNDO, batch, maxDepth);
+            clearDeltaStack(GLOBAL_REDO);
+        }
+        if (("per_player".equals(mode) || "both".equals(mode)) && playerUuid != null) {
+            Deque<UndoDelta> stack = PLAYER_UNDO.computeIfAbsent(playerUuid, k -> new ArrayDeque<>());
+            pushTo(stack, batch, maxDepth);
+            clearDeltaStack(PLAYER_REDO.computeIfAbsent(playerUuid, k -> new ArrayDeque<>()));
+        }
+        // Phase 9.1 callback
+        java.util.function.BiConsumer<java.util.UUID, String> cb = onUndoPushed;
+        if (cb != null && playerUuid != null) cb.accept(playerUuid, description);
+    }
+
+    /** UND1 — Returns true if the next undo entry on the stack is a batch operation. */
+    public static synchronized boolean peekIsUndoBatch(UUID playerUuid) {
+        UndoDelta d = peekUndoDeltaInternal(playerUuid);
+        return d instanceof BatchDelta;
+    }
+
+    /** UND1 — Returns the number of blocks in the pending batch, or 0 if top is not a batch. */
+    public static synchronized int peekUndoBatchSize(UUID playerUuid) {
+        UndoDelta d = peekUndoDeltaInternal(playerUuid);
+        return (d instanceof BatchDelta bd) ? bd.deltas().size() : 0;
+    }
+
+    /** UND1 — Returns the description of the pending batch, or "" if top is not a batch. */
+    public static synchronized String peekUndoBatchDescription(UUID playerUuid) {
+        UndoDelta d = peekUndoDeltaInternal(playerUuid);
+        return (d instanceof BatchDelta bd) ? bd.batchDescription() : "";
+    }
+
+    /** Pop the batch at the top of the undo stack and return all its entries. Returns empty list if top is not a batch. */
+    public static synchronized List<UndoEntry> popUndoBatch(UUID playerUuid) {
+        UndoDelta d = popUndoDeltaRaw(playerUuid);
+        if (!(d instanceof BatchDelta bd)) return List.of();
+        List<UndoEntry> result = new ArrayList<>();
+        for (UndoDelta inner : bd.deltas()) result.add(toEntry(inner));
+        return result;
+    }
+
+    // ── REDO2 — Batch redo push / peek / pop ─────────────────────────────────
+
+    /** REDO2 — Push a group of entries as a single atomic batch onto the REDO stack. */
+    public static synchronized void pushRedoBatch(String description, List<UndoEntry> entries, UUID playerUuid) {
+        if (entries.isEmpty()) return;
+        List<UndoDelta> deltas = new ArrayList<>();
+        for (UndoEntry e : entries) deltas.add(toDelta(e));
+        BatchDelta batch = new BatchDelta(description, playerUuid, deltas);
+        String mode = CustomBlocksConfig.undoMode;
+        int maxDepth = CustomBlocksConfig.maxUndoDepth;
+        if ("global".equals(mode) || "both".equals(mode)) {
+            pushTo(GLOBAL_REDO, batch, maxDepth);
+        }
+        if (("per_player".equals(mode) || "both".equals(mode)) && playerUuid != null) {
+            Deque<UndoDelta> stack = PLAYER_REDO.computeIfAbsent(playerUuid, k -> new ArrayDeque<>());
+            pushTo(stack, batch, maxDepth);
+        }
+    }
+
+    /** REDO2 — Returns true if the next redo entry is a batch operation. */
+    public static synchronized boolean peekIsRedoBatch(UUID playerUuid) {
+        return peekRedoDeltaInternal(playerUuid) instanceof BatchDelta;
+    }
+
+    /** REDO2 — Returns the number of blocks in the pending redo batch, or 0 if not a batch. */
+    public static synchronized int peekRedoBatchSize(UUID playerUuid) {
+        UndoDelta d = peekRedoDeltaInternal(playerUuid);
+        return (d instanceof BatchDelta bd) ? bd.deltas().size() : 0;
+    }
+
+    /** REDO2 — Returns the description of the pending redo batch, or "" if not a batch. */
+    public static synchronized String peekRedoBatchDescription(UUID playerUuid) {
+        UndoDelta d = peekRedoDeltaInternal(playerUuid);
+        return (d instanceof BatchDelta bd) ? bd.batchDescription() : "";
+    }
+
+    /** REDO2 — Pop the batch at the top of the redo stack. Returns empty list if not a batch. */
+    public static synchronized List<UndoEntry> popRedoBatch(UUID playerUuid) {
+        UndoDelta d = popRedoDeltaRaw(PLAYER_REDO, GLOBAL_REDO, playerUuid);
+        if (!(d instanceof BatchDelta bd)) return List.of();
+        List<UndoEntry> result = new ArrayList<>();
+        for (UndoDelta inner : bd.deltas()) result.add(toEntry(inner));
+        return result;
+    }
+
+    /** Internal: peek at the top redo delta without removing it. */
+    private static UndoDelta peekRedoDeltaInternal(UUID playerUuid) {
+        String mode = CustomBlocksConfig.undoMode;
+        if ("per_player".equals(mode) || "both".equals(mode)) {
+            Deque<UndoDelta> stack = PLAYER_REDO.get(playerUuid);
+            if (stack != null && !stack.isEmpty()) return stack.peekFirst();
+        }
+        if ("global".equals(mode) || "both".equals(mode)) {
+            if (!GLOBAL_REDO.isEmpty()) return GLOBAL_REDO.peekFirst();
+        }
+        return null;
+    }
+
+    /** Internal: pop the top delta from the redo stacks without converting. */
+    private static UndoDelta popRedoDeltaRaw(Map<UUID, Deque<UndoDelta>> playerMap, Deque<UndoDelta> globalStack, UUID playerUuid) {
+        String mode = CustomBlocksConfig.undoMode;
+        if ("per_player".equals(mode)) {
+            Deque<UndoDelta> stack = playerMap.get(playerUuid);
+            return stack != null ? stack.pollFirst() : null;
+        } else if ("global".equals(mode)) {
+            return globalStack.pollFirst();
+        } else { // "both"
+            Deque<UndoDelta> pstack = playerMap.get(playerUuid);
+            UndoDelta pd = pstack != null ? pstack.pollFirst() : null;
+            if (pd != null) { globalStack.removeIf(d -> d == pd); return pd; }
+            return globalStack.pollFirst();
+        }
+    }
+
+    /** Internal: peek at the top delta without removing it. */
+    private static UndoDelta peekUndoDeltaInternal(UUID playerUuid) {
+        String mode = CustomBlocksConfig.undoMode;
+        if ("per_player".equals(mode) || "both".equals(mode)) {
+            Deque<UndoDelta> stack = PLAYER_UNDO.get(playerUuid);
+            if (stack != null && !stack.isEmpty()) return stack.peekFirst();
+        }
+        if ("global".equals(mode) || "both".equals(mode)) {
+            if (!GLOBAL_UNDO.isEmpty()) return GLOBAL_UNDO.peekFirst();
+        }
+        return null;
+    }
+
+    /** Internal: pop the top delta without converting to UndoEntry. */
+    private static UndoDelta popUndoDeltaRaw(UUID playerUuid) {
+        String mode = CustomBlocksConfig.undoMode;
+        if ("per_player".equals(mode)) {
+            Deque<UndoDelta> stack = PLAYER_UNDO.get(playerUuid);
+            return stack != null ? stack.pollFirst() : null;
+        } else if ("global".equals(mode)) {
+            return GLOBAL_UNDO.pollFirst();
+        } else { // "both"
+            Deque<UndoDelta> pstack = PLAYER_UNDO.get(playerUuid);
+            UndoDelta pd = pstack != null ? pstack.pollFirst() : null;
+            if (pd != null) { GLOBAL_UNDO.removeIf(d -> d == pd); return pd; }
+            return GLOBAL_UNDO.pollFirst();
+        }
     }
 
     // ── Pop ──────────────────────────────────────────────────────────────────
@@ -533,6 +712,13 @@ public final class UndoManager {
                 o.addProperty("type", "delete");
                 if (sd.snapshotPath() != null) o.addProperty("snapshotPath", sd.snapshotPath());
             }
+            case BatchDelta bd -> {
+                o.addProperty("type", "batch");
+                o.addProperty("batchDescription", bd.batchDescription());
+                com.google.gson.JsonArray inner = new com.google.gson.JsonArray();
+                for (UndoDelta innerDelta : bd.deltas()) inner.add(serializeDelta(innerDelta));
+                o.add("deltas", inner);
+            }
             case AnimDelta ad -> {
                 o.addProperty("type", "anim");
                 if (ad.prevMcmeta() != null) o.addProperty("prevMcmeta", ad.prevMcmeta());
@@ -569,6 +755,17 @@ public final class UndoManager {
             case "create" -> new SlotCreated(customId, playerUuid);
             case "delete" -> new SlotDeleted(customId, playerUuid,
                     o.has("snapshotPath") ? o.get("snapshotPath").getAsString() : null);
+            case "batch" -> {
+                String batchDesc = o.has("batchDescription") ? o.get("batchDescription").getAsString() : "batch";
+                List<UndoDelta> innerDeltas = new ArrayList<>();
+                if (o.has("deltas")) {
+                    for (com.google.gson.JsonElement el : o.getAsJsonArray("deltas")) {
+                        try { innerDeltas.add(deserializeDelta(el.getAsJsonObject())); }
+                        catch (Exception ex) { LOGGER.warn("[CB-Undo] Skipping corrupt batch inner delta: {}", ex.getMessage()); }
+                    }
+                }
+                yield new BatchDelta(batchDesc, playerUuid, innerDeltas);
+            }
             case "anim" -> new AnimDelta(customId, playerUuid,
                     o.has("prevMcmeta") ? o.get("prevMcmeta").getAsString() : null);
             case "shape" -> {
@@ -604,6 +801,8 @@ public final class UndoManager {
 
     /** Lightweight display-only UndoEntry — no disk I/O, no previousState loaded. */
     private static UndoEntry deltaToDisplay(UndoDelta d) {
+        if (d instanceof BatchDelta bd)
+            return new UndoEntry("", null, bd.batchDescription(), false, bd.playerUuid());
         return new UndoEntry(d.customId(), null, d.description(), d instanceof SlotDeleted, d.playerUuid());
     }
 
@@ -672,6 +871,7 @@ public final class UndoManager {
             case TextureDelta td -> deleteSnapshot(td.snapshotPath());
             case FaceDelta    fd -> deleteSnapshot(fd.snapshotPath());
             case SlotDeleted  sd -> deleteSnapshot(sd.snapshotPath());
+            case BatchDelta   bd -> { for (UndoDelta inner : bd.deltas()) deleteSnapshotOfDelta(inner); }
             default -> { /* MetaDelta / AnimDelta / ShapeDelta / SlotCreated — no disk file */ }
         }
     }
@@ -809,6 +1009,11 @@ public final class UndoManager {
                 }
                 yield new UndoEntry(md.customId(), prev, "meta", false, md.playerUuid());
             }
+            case BatchDelta bd ->
+                // BatchDelta is never converted to a single UndoEntry via toEntry() —
+                // it is handled by popUndoBatch() which calls toEntry() on each inner delta.
+                // This case exists only to satisfy the sealed switch exhaustiveness check.
+                new UndoEntry("", null, bd.batchDescription(), false, bd.playerUuid());
         };
     }
 

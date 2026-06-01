@@ -103,7 +103,13 @@ public enum GuiMode {
     /** Color Tools Hub — unified hub for color tool management, rename, fill mode. */
     COLORS_HUB,
     /** Rename Tool Picker — shows custom triangles/squares in inventory for renaming. */
-    RENAME_TOOL_PICKER
+    RENAME_TOOL_PICKER,
+    /** Arabic Letter Browser — paginated grid of imported Arabic letter/number blocks, with color tabs. */
+    ARABIC_BROWSER,
+    /** COL9 — confirm bulk recolor of existing blocks after a hex color change. */
+    HEX_RECOLOR_CONFIRM,
+    /** NF2 — confirm single-block deletion via the Deleter Tool. */
+    DELETER_CONFIRM
 }
 
 

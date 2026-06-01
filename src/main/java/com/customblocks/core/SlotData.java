@@ -295,7 +295,7 @@ public final class SlotData {
                 soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     public SlotData withCustomId(String newId) {
@@ -303,7 +303,7 @@ public final class SlotData {
                 soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     public SlotData withTexture(byte[] tex) {
@@ -312,7 +312,7 @@ public final class SlotData {
                 soundType, faceTextures, animMeta, shapeBoxes, noCollision, health,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     /** V4-00 — explicitly set the block health state (used by loadTexturesAsync for LOAD_FAILURE). */
@@ -321,7 +321,7 @@ public final class SlotData {
                 soundType, faceTextures, animMeta, shapeBoxes, noCollision, health,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     public SlotData withLightLevel(int level) {
@@ -329,7 +329,7 @@ public final class SlotData {
                 soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     public SlotData withHardness(float h) {
@@ -337,7 +337,7 @@ public final class SlotData {
                 soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     public SlotData withSoundType(String sound) {
@@ -345,7 +345,7 @@ public final class SlotData {
                 sound, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     public SlotData withAnimMeta(String meta) {
@@ -353,7 +353,7 @@ public final class SlotData {
                 soundType, faceTextures, meta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     public SlotData withShapeBoxes(List<ShapeBox> boxes) {
@@ -361,7 +361,7 @@ public final class SlotData {
                 soundType, faceTextures, animMeta, boxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     public SlotData withNoCollision(boolean nc) {
@@ -369,7 +369,7 @@ public final class SlotData {
                 soundType, faceTextures, animMeta, shapeBoxes, nc, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     public SlotData withFaceTexture(String face, byte[] tex) {
@@ -382,7 +382,7 @@ public final class SlotData {
                 soundType, newFaces, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     public SlotData withoutFaceTexture(String face) {
@@ -392,7 +392,7 @@ public final class SlotData {
                 soundType, newFaces, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     public SlotData withClearedFaces() {
@@ -400,7 +400,7 @@ public final class SlotData {
                 soundType, Collections.emptyMap(), animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     public SlotData withIndex(int newIndex) {
@@ -408,7 +408,7 @@ public final class SlotData {
                 soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     public SlotData withProperties(int light, float hard, String sound) {
@@ -416,7 +416,7 @@ public final class SlotData {
                 sound, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     /** H4 — replace the variant texture list (0–7 extra variants). */
@@ -425,7 +425,7 @@ public final class SlotData {
                 soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 variants == null ? List.of() : variants, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     /** I2 — set or clear the per-block hologram text override. null/blank = use displayName. */
@@ -434,7 +434,7 @@ public final class SlotData {
                 soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, (text != null && !text.isBlank()) ? text : null, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     /** 1.27 — set the lastEditedAt timestamp (used by SlotManager.put() on every mutation). */
@@ -443,7 +443,7 @@ public final class SlotData {
                 soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, ts,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     /** Phase 4A.1 — set the background removal mode for this block's import settings. */
@@ -452,7 +452,7 @@ public final class SlotData {
                 soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 mode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     /** Phase 4A.1 — set the fringe removal aggressiveness ("off", "light", "normal", "aggressive"). */
@@ -461,7 +461,7 @@ public final class SlotData {
                 soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, fringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     /** Phase 4A.7 — set the target import size in pixels (64, 128, 256; 0 = server default). */
@@ -470,7 +470,7 @@ public final class SlotData {
                 soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, size,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     /** Arabic letter joining — set letter metadata fields. */
@@ -479,7 +479,7 @@ public final class SlotData {
                 soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                v, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                v, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     public SlotData withLetterConnectsLeft(boolean v) {
@@ -487,7 +487,7 @@ public final class SlotData {
                 soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, v, this.letterGroup, this.letterForm);
+                this.isLetter, v, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     public SlotData withLetterGroup(String v) {
@@ -495,7 +495,7 @@ public final class SlotData {
                 soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, v, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, v, this.letterForm).preserveTransients(this);
     }
 
     public SlotData withLetterForm(String v) {
@@ -506,13 +506,19 @@ public final class SlotData {
                 this.isLetter, this.letterConnectsLeft, this.letterGroup, v);
     }
 
+    /** Copies transient caches from an older snapshot. */
+    private SlotData preserveTransients(SlotData from) {
+        this.cachedColorFamily = from.cachedColorFamily;
+        return this;
+    }
+
     /** Full deep copy — same as constructing from all fields. */
     public SlotData deepCopy() {
         return new SlotData(index, customId, displayName, texture, lightLevel, hardness,
                 soundType, faceTextures, animMeta, shapeBoxes, noCollision, this.blockHealth,
                 this.variantTextures, this.hologramText, this.lastEditedAt,
                 this.importBgMode, this.importFringe, this.importSize,
-                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm);
+                this.isLetter, this.letterConnectsLeft, this.letterGroup, this.letterForm).preserveTransients(this);
     }
 
     @Override
@@ -520,3 +526,5 @@ public final class SlotData {
         return "SlotData{" + customId + " #" + index + " '" + displayName + "'}";
     }
 }
+
+

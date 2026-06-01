@@ -1253,6 +1253,8 @@ public class GuiManager {
                 case DELETED_BLOCKS_GUI -> openDeletedBlocksGui(player, state.page());
                 case BOX_NUDGE_EDITOR -> openBoxNudgeEditor(player, state.editingId(), state.shapeBoxPage(), state.page());
                 case RECOLOR_CONFIRM -> openMain(player, 0); // transient — job not serialised across reconnect
+                case HEX_RECOLOR_CONFIRM -> openConfigGui(player, false); // transient
+                case DELETER_CONFIRM -> openMain(player, 0); // transient
                 case SCRIPT_GUI -> openScriptGui(player, state.page());
                 case SCRIPT_SUMMARY -> {
                     com.customblocks.core.MacroManager.ScriptRunResult result = LAST_SCRIPT_RESULTS.get(player.getUuid());
@@ -1282,6 +1284,8 @@ public class GuiManager {
                 case IMPORT_CONFLICT -> openImportConflictGui(player, state.page());
                 case MERGE_CATEGORY_PICKER_TARGET -> openMergeCategoryPickerTarget(player, state.editingId(), state.page());
                 case SORT_BLOCKS_MENU -> openSortBlocksMenu(player, state.editingId());
+                case ARABIC_BROWSER -> openArabicBrowser(player,
+                    state.editingId() != null ? state.editingId() : "black", state.page());
                 default -> openMain(player, 0);
             }
         } finally {
@@ -1378,6 +1382,8 @@ public class GuiManager {
                 case DELETED_BLOCKS_GUI -> handleDeletedBlocksGuiClick(player, state, slot, button);
                 case BOX_NUDGE_EDITOR -> handleBoxNudgeClick(player, state, slot, button);
                 case RECOLOR_CONFIRM -> handleRecolorConfirmClick(player, state, slot);
+                case HEX_RECOLOR_CONFIRM -> handleHexRecolorConfirmClick(player, state, slot);
+                case DELETER_CONFIRM -> handleDeleterConfirmClick(player, state, slot);
                 case SCRIPT_GUI -> handleScriptGuiClick(player, state, slot, button);
                 case SCRIPT_SUMMARY -> handleScriptSummaryClick(player, state, slot);
                 case CACHE_DASHBOARD -> handleCacheDashboardClick(player, state, slot);
@@ -1392,6 +1398,7 @@ public class GuiManager {
                 case VOICE_PICKER -> handleVoicePickerClick(player, slot); // 5.25
                 case COLORS_HUB -> handleColorsHubClick(player, state, slot);
                 case RENAME_TOOL_PICKER -> handleRenameToolPickerClick(player, state, slot);
+                case ARABIC_BROWSER -> handleArabicBrowserClick(player, state, slot);
                 default -> {
                     LOGGER.warn("[CustomBlocks] Unhandled GUI mode in handleClick: {} for player {}",
                             state.mode(), player.getName().getString());
@@ -1840,12 +1847,21 @@ public class GuiManager {
                             }
                             CustomBlocksConfig.triangleYellowHex = normalized;
                         }
+                        case "triangleRedHex" -> { // COL8b
+                            String normalized = normalizeHexInput(text);
+                            if (normalized == null) {
+                                send(player, "§cUse a valid hex color like §f#EE3333§c.");
+                                openConfigGui(player, false);
+                                return true;
+                            }
+                            CustomBlocksConfig.triangleRedHex = normalized;
+                        }
                         case "colorToolBackgroundMode" -> {
                             String v = text.toLowerCase().trim();
-                            if (List.of("unset", "corners_only", "corners_and_trapped").contains(v)) {
+                            if (List.of("unset", "corners_only", "corners_and_trapped", "none").contains(v)) {
                                 CustomBlocksConfig.colorToolBackgroundMode = v;
                             } else {
-                                send(player, "§cMust be: unset / corners_only / corners_and_trapped");
+                                send(player, "§cMust be: unset / corners_only / corners_and_trapped / none");
                                 openConfigGui(player, false);
                                 return true;
                             }
@@ -1864,7 +1880,17 @@ public class GuiManager {
                     send(player, "§cInvalid number.");
                 }
                 if ("bgRemovalTolerance".equals(key)) openBgStudio(player, false);
-                else openConfigGui(player, false);
+                else if (key.equals("triangleRedHex") || key.equals("triangleGreenHex") || key.equals("triangleYellowHex")) {
+                    // COL9 — rebuild pack for item icons, then offer to recolor existing blocks
+                    net.minecraft.server.MinecraftServer server = player.getServer();
+                    if (server != null) com.customblocks.ResourcePackManager.scheduleRebuild(server);
+                    try {
+                        java.awt.Color c = java.awt.Color.decode(text.trim());
+                        openHexRecolorConfirmGui(player, key, c.getRed(), c.getGreen(), c.getBlue());
+                    } catch (Exception ignored) {
+                        openConfigGui(player, false);
+                    }
+                } else openConfigGui(player, false);
                 return true;
             }
             case BULK_RECOLOR_SCOPE -> {
@@ -2282,7 +2308,7 @@ public class GuiManager {
             ? uiGlint(Items.RECOVERY_COMPASS, "§a§l✔ Auto-Detect: §lON",
                 "§7Analyses each image's border pixels to find",
                 "§7the right tolerance automatically.",
-                "§8Tolerance slider acts as an upper cap.",
+                "§8Manual slider is ignored when Auto is ON.",
                 "§8Click to turn off")
             : ui(Items.COMPASS, "§7§l✖ Auto-Detect: §lOFF",
                 "§7Tolerance slider applies as a fixed value.",
@@ -2299,9 +2325,9 @@ public class GuiManager {
         // Use 10 segments of 10 each for cleaner display: slots 18-27 (10 slots)
         boolean autoDetectOn = CustomBlocksConfig.bgRemovalAutoDetect;
         inv.setStack(18, uiGlint(Items.AMETHYST_CLUSTER,
-            autoDetectOn ? "§b✦ Max Cap: §f" + tol : "§e✦ Tolerance: §f" + tol,
-            autoDetectOn ? "§7Auto-Detect is ON — this is the upper limit" : "§7Range: §f0-100",
-            autoDetectOn ? "§8Lower = auto cannot exceed this value" : "§80=OFF • 30=balanced • 60=aggressive • 100=max"));
+            autoDetectOn ? "§b✦ Auto-Detect Active" : "§e✦ Tolerance: §f" + tol,
+            autoDetectOn ? "§7Auto-Detect is ON — manual slider is ignored." : "§7Range: §f0-100",
+            autoDetectOn ? "§8Turn off Auto-Detect to use manual slider." : "§80=OFF • 30=balanced • 60=aggressive • 100=max"));
         // 8 slider segments mapping 0-100 -> slots 19-26
         for (int seg = 0; seg < 8; seg++) {
             int slotIdx = 19 + seg;
@@ -2666,6 +2692,7 @@ public class GuiManager {
             "§7Show floating names above placed custom blocks",
             "§8Height: " + CustomBlocksConfig.hologramHeight + " blocks",
             "§8Click to toggle"));
+        inv.setStack(15, toggleItem("Auto-Detect BG", CustomBlocksConfig.bgRemovalAutoDetect, "Smart tolerance for background removal. Slider acts as baseline."));
         // Row 2: Numbers
         inv.setStack(18, numItem("Shadow Threshold", CustomBlocksConfig.shadowThreshold, "Expansion threshold for Color Triangles (default 1.0)"));
         inv.setStack(19, numItem("Block Capacity", CustomBlocksConfig.maxSlots, "How many custom blocks this server can hold (restart required)"));
@@ -2685,7 +2712,7 @@ public class GuiManager {
         inv.setStack(30, colorFillModeButton(CustomBlocksConfig.colorToolBackgroundMode));
         inv.setStack(31, strItem("Green Shade", CustomBlocksConfig.triangleGreenHex, "Edit the built-in Green triangle/square shade"));
         inv.setStack(32, voiceModeButton(CustomBlocksConfig.voiceMode));
-        // Slot 33 was Cloud Vault URL — removed (URL is now a hardcoded constant, not user-configurable)
+        inv.setStack(33, strItem("Red Shade", CustomBlocksConfig.triangleRedHex, "Edit the built-in Red triangle/square shade")); // COL8b
         inv.setStack(34, strItem("Yellow Shade", CustomBlocksConfig.triangleYellowHex, "Edit the built-in Yellow triangle/square shade"));
         // Row 5: Back
         inv.setStack(45, uiGlint(Items.ECHO_SHARD, "§c◀ Back")); // Royal Directive
@@ -2713,6 +2740,7 @@ public class GuiManager {
         switch (mode) {
             case "corners_only" -> { icon = Items.LIME_DYE; head = "§a§lBackground Only"; }
             case "corners_and_trapped" -> { icon = Items.LIME_CONCRETE; head = "§a§lBackground + Enclosed Areas"; }
+            case "none" -> { icon = Items.BARRIER; head = "§7§lNo Background Removal"; }
             default -> { icon = Items.GRAY_DYE; head = "§e§lUnset (pick one)"; }
         }
         return uiGlint(icon,
@@ -2758,30 +2786,32 @@ public class GuiManager {
         boolean isUnset = "unset".equals(mode);
         boolean isDefault = "corners_only".equals(mode);
         boolean isExtra = "corners_and_trapped".equals(mode);
+        boolean isNone = "none".equals(mode);
 
         inv.setStack(4, uiGlint(Items.PAINTING, "§6§lColour Fill Mode",
             "§7Pick how aggressively the §a§lTriangle§r§7 (and §a§lSquare§r§7)",
             "§7treat background versus trapped holes inside a design.",
             isUnset ? "§e§lYou must pick a mode before colour tools work." : "§aCurrent: §f" + formatColorToolMode(mode)));
 
-        inv.setStack(11, uiGlint(Items.LIME_DYE,
-            (isDefault ? "§a§l✦ " : "§7§l") + "Background Only" + (isDefault ? " §a§l(active)" : ""),
-            "§7Recolours only pixels reachable from the edges",
-            "§7of the texture — the usual corner flood.",
-            "§7Anything fully enclosed by your art (the inside",
-            "§7of a “0”, a ring shape, etc.) stays unchanged.",
+        inv.setStack(10, uiGlint(Items.LIME_DYE,
+            (isDefault ? "§a§l* " : "§7§l") + "Background Only" + (isDefault ? " §a§l(active)" : ""),
+            "§7Recolours pixels reachable from the image edges.",
+            "§7Enclosed regions (hole inside a 0, ring, etc.) stay.",
             "§8Same behaviour as before this update.",
             "§eClick to select."));
 
-        inv.setStack(15, uiGlint(Items.LIME_CONCRETE,
-            (isExtra ? "§a§l✦ " : "§7§l") + "Background + Enclosed Areas" + (isExtra ? " §a§l(active)" : ""),
-            "§7Runs the same corner flood as Default,",
-            "§7then looks for small enclosed pockets that still",
-            "§7look like leftover background (solid black or",
-            "§7checker-style placeholder patterns).",
-            "§7Those pockets get the same new colour.",
-            "§8Very large enclosed regions are skipped",
-            "§8automatically so big dark areas survive.",
+        inv.setStack(13, uiGlint(Items.LIME_CONCRETE,
+            (isExtra ? "§a§l* " : "§7§l") + "Background + Enclosed Areas" + (isExtra ? " §a§l(active)" : ""),
+            "§7Same as Background Only, plus recolours enclosed",
+            "§7pockets of background colour inside the design.",
+            "§7(e.g. the hole inside a 9 or a ring shape)",
+            "§eClick to select."));
+
+        inv.setStack(16, uiGlint(Items.BARRIER,
+            (isNone ? "§a§l* " : "§7§l") + "No Background Removal" + (isNone ? " §a§l(active)" : ""),
+            "§7Imports textures exactly as uploaded. No flood-fill.",
+            "§7Color Triangle is disabled in this mode.",
+            "§7Use if your art already has the right background.",
             "§eClick to select."));
 
         inv.setStack(22, uiGlint(Items.ECHO_SHARD, "§c← Back"));
@@ -2790,17 +2820,24 @@ public class GuiManager {
 
     private static void handleColorFillModeClick(ServerPlayerEntity player, GuiState state, int slot) {
         switch (slot) {
-            case 11 -> {
+            case 10 -> {
                 CustomBlocksConfig.colorToolBackgroundMode = "corners_only";
                 CustomBlocksConfig.save();
                 send(player, "§a[Config] §fColour Fill Mode §a= §eBackground Only");
                 playSuccess(player);
                 openColorFillModeGui(player);
             }
-            case 15 -> {
+            case 13 -> {
                 CustomBlocksConfig.colorToolBackgroundMode = "corners_and_trapped";
                 CustomBlocksConfig.save();
                 send(player, "§a[Config] §fColour Fill Mode §a= §eBackground + Enclosed Areas");
+                playSuccess(player);
+                openColorFillModeGui(player);
+            }
+            case 16 -> {
+                CustomBlocksConfig.colorToolBackgroundMode = "none";
+                CustomBlocksConfig.save();
+                send(player, "§a[Config] §fColour Fill Mode §a= §eNo Background Removal");
                 playSuccess(player);
                 openColorFillModeGui(player);
             }
@@ -2837,6 +2874,12 @@ public class GuiManager {
                 }
                 openConfigGui(player, false);
             }
+            case 15 -> {
+                CustomBlocksConfig.bgRemovalAutoDetect = !CustomBlocksConfig.bgRemovalAutoDetect;
+                CustomBlocksConfig.save();
+                send(player, "§a[Config] bgRemovalAutoDetect = " + CustomBlocksConfig.bgRemovalAutoDetect);
+                openConfigGui(player, false);
+            }
             // Numbers
             case 18 -> configPrompt(player, "shadowThreshold", "Shadow Threshold (0.0-2.0):");
             case 19 -> configPrompt(player, "maxSlots", "Block Capacity (1-8192):");
@@ -2864,7 +2907,7 @@ public class GuiManager {
                 send(player, "§a[Config] §fVoice mode: §e" + next);
                 openConfigGui(player, false);
             }
-            // case 33 was Cloud Vault URL — removed (hardcoded constant)
+            case 33 -> configPrompt(player, "triangleRedHex", "Red Shade Hex (#RRGGBB):"); // COL8b
             case 34 -> configPrompt(player, "triangleYellowHex", "Yellow Shade Hex (#RRGGBB):");
             case 45 -> openMain(player, 0);
             default -> {}
@@ -4106,19 +4149,26 @@ public class GuiManager {
             java.util.List<String> selectedList = new ArrayList<>(selected);
             boolean useBossBar = selectedList.size() >= 2;
             if (useBossBar) FeedbackHelper.startBossBar(player, "§cBulk deleting...");
+            // UND1 — collect all deletion entries into a list so they can be pushed as one
+            // atomic batch, letting the user undo the entire bulk delete with a single /cb undo
+            java.util.List<com.customblocks.core.UndoManager.UndoEntry> batchEntries = new ArrayList<>();
             try {
             for (int i = 0; i < selectedList.size(); i++) {
                 String id = selectedList.get(i);
                 if (useBossBar) FeedbackHelper.updateBossBar(player, "§cDeleting " + (i + 1) + " / " + selectedList.size(), (i + 1) / (float) selectedList.size());
                 SlotData d = SlotManager.getById(id);
                 if (d != null) {
-                    UndoManager.pushUndoDeletion(id, d.deepCopy(), uuid);
+                    batchEntries.add(new com.customblocks.core.UndoManager.UndoEntry(id, d.deepCopy(), "delete", true, uuid));
                     SlotManager.remove(id);
                     NetworkManager.broadcastUpdate(server, new SlotUpdatePayload("remove", d.index, id, null, null, 0, 0, "stone"));
                     count++;
                 }
             }
             } finally { if (useBossBar) FeedbackHelper.clearBossBar(player); }
+            // UND1 — push as a single batch so /cb undo restores all at once
+            if (!batchEntries.isEmpty()) {
+                UndoManager.pushUndoBatch("bulk-delete " + batchEntries.size(), batchEntries, uuid);
+            }
             if (count > 0) SlotManager.saveAll();
             send(player, "§a[GUI] Bulk deleted §f" + count + "§a block(s). Use Undo to restore.");
             FeedbackHelper.actionBar(player, "§c§l✗ §r§cBulk deleted §f" + count + " §cblocks");
@@ -4676,6 +4726,213 @@ public class GuiManager {
         } else {
             // Cancel or any other slot
             openMain(player, 0);
+        }
+    }
+
+    // ── NF2: Deleter Tool Confirm ─────────────────────────────────────────────
+
+    /** NF2 — open the deleter confirmation screen for a single block. */
+    public static void openDeleterConfirmGui(ServerPlayerEntity player, String payload) {
+        String blockId = payload;
+        if (payload.contains("|")) {
+            String[] parts = payload.split("\\|");
+            blockId = parts[0];
+        }
+        SlotData d = SlotManager.getById(blockId);
+        if (d == null) { send(player, "§c[CB] Block not found."); return; }
+
+        SimpleInventory inv = new SimpleInventory(27);
+        // Block info at centre
+        inv.setStack(13, ui(net.minecraft.item.Items.BARRIER,
+            "§f§l" + d.displayName,
+            "§8ID: " + blockId,
+            "§7Are you sure you want to delete this block?"));
+        // Confirm — red terracotta slot 20
+        inv.setStack(20, uiGlint(net.minecraft.item.Items.RED_TERRACOTTA,
+            "§c§l💀 Confirm Delete",
+            "§7Sends block to trash. Can be undone."));
+        // Cancel — green terracotta slot 24
+        inv.setStack(24, ui(net.minecraft.item.Items.LIME_TERRACOTTA,
+            "§a§l◀ Keep Block",
+            "§7Nothing happens."));
+        for (int i = 0; i < 27; i++) if (inv.getStack(i).isEmpty()) inv.setStack(i, glass());
+
+        openScreenFromGuiState(player, GuiState.deleterConfirm(payload), inv, "§cDelete §f" + d.displayName + "§c?");
+    }
+
+    /** NF2 — handle clicks on the deleter confirm screen. */
+    private static void handleDeleterConfirmClick(ServerPlayerEntity player, GuiState state, int slot) {
+        if (slot == 20) {
+            executeDeleterDelete(player, state.editingId());
+        } else {
+            player.closeHandledScreen();
+        }
+    }
+
+    /** NF2 — actually delete the block (called from confirm GUI or shift-click). */
+    public static void executeDeleterDelete(ServerPlayerEntity player, String payload) {
+        String blockId = payload;
+        net.minecraft.util.math.BlockPos pos = null;
+        if (payload.contains("|")) {
+            String[] parts = payload.split("\\|");
+            blockId = parts[0];
+            try { pos = net.minecraft.util.math.BlockPos.fromLong(Long.parseLong(parts[1])); } catch (Exception ignored) {}
+        }
+        SlotData d = SlotManager.getById(blockId);
+        if (d == null) { send(player, "§c[CB] Block not found."); return; }
+        if (com.customblocks.core.LockManager.isLocked(blockId)) {
+            FeedbackHelper.actionBar(player, "§c§l🔒 §r§cBlock is locked — /cb unlock " + blockId);
+            playError(player);
+            return;
+        }
+        MinecraftServer server = player.getServer();
+        UUID uuid = player.getUuid();
+
+        UndoManager.pushUndoMutation(blockId, d, "delete", uuid);
+        com.customblocks.core.TrashManager.addToTrash(d); // NF2 — add to trash
+        SlotManager.remove(blockId);
+        com.customblocks.core.LockManager.onBlockDeleted(blockId);
+        final String finalBlockId = blockId;
+        new java.util.HashSet<>(com.customblocks.core.CategoryManager.getCategoriesForBlock(finalBlockId))
+            .forEach(cat -> com.customblocks.core.CategoryManager.unassignBlock(finalBlockId, cat));
+        SlotManager.saveAll();
+        if (server != null) {
+            NetworkManager.broadcastUpdate(server,
+                new SlotUpdatePayload("remove", -1, blockId, null, null, 0, 0, ""));
+            com.customblocks.ResourcePackManager.scheduleRebuild(server);
+        }
+        if (pos != null && player.getWorld() != null) {
+            net.minecraft.block.BlockState state = player.getWorld().getBlockState(pos);
+            player.getWorld().setBlockState(pos, state,
+                net.minecraft.block.Block.NOTIFY_LISTENERS | net.minecraft.block.Block.REDRAW_ON_MAIN_THREAD | net.minecraft.block.Block.FORCE_STATE);
+        }
+        FeedbackHelper.actionBar(player, "§c§l✗ §r§cDeleted §f" + d.displayName);
+        // Clickable undo link
+        net.minecraft.text.MutableText msg = net.minecraft.text.Text.literal("§c[CB] §r§cDeleted §f" + d.displayName + "§c. ")
+            .append(net.minecraft.text.Text.literal("§e§n[Click to undo]")
+                .styled(s -> s.withClickEvent(new net.minecraft.text.ClickEvent(
+                    net.minecraft.text.ClickEvent.Action.RUN_COMMAND, "/cb undo"))));
+        player.sendMessage(msg, false);
+        player.closeHandledScreen();
+    }
+
+    // ── COL9: Hex Recolor Confirm ─────────────────────────────────────────────
+
+    /** COL9 — open the "update N existing blocks?" confirm screen after a hex change. */
+    public static void openHexRecolorConfirmGui(ServerPlayerEntity player, String configKey, int newR, int newG, int newB) {
+        // Find all blocks whose customId contains the color suffix
+        String colorSuffix = switch (configKey) {
+            case "triangleRedHex"   -> "_red";
+            case "triangleGreenHex" -> "_green";
+            case "triangleYellowHex"-> "_yellow";
+            default -> null;
+        };
+        if (colorSuffix == null) { openConfigGui(player, false); return; }
+
+        java.util.List<SlotData> affected = SlotManager.allSlots().stream()
+            .filter(d -> d.customId != null && d.customId.contains(colorSuffix) && d.texture != null && d.texture.length > 0)
+            .collect(java.util.stream.Collectors.toList());
+
+        if (affected.isEmpty()) {
+            // Nothing to update — just go back to config
+            openConfigGui(player, false);
+            return;
+        }
+
+        int count = affected.size();
+        String colorLabel = switch (configKey) {
+            case "triangleRedHex"    -> "§cRed";
+            case "triangleGreenHex"  -> "§aGreen";
+            case "triangleYellowHex" -> "§eYellow";
+            default -> "color";
+        };
+
+        SimpleInventory inv = new SimpleInventory(27);
+        // Info item at top centre
+        inv.setStack(13, ui(net.minecraft.item.Items.PAINTING,
+            "§f§l" + count + " block" + (count == 1 ? "" : "s") + " use " + colorLabel,
+            "§7These blocks were made with the old shade.",
+            "§7Recolor them to match the new hex?"));
+        // Confirm — green terracotta slot 20
+        inv.setStack(20, uiGlint(net.minecraft.item.Items.LIME_TERRACOTTA,
+            "§a§l✔ Yes, update all " + count + " block" + (count == 1 ? "" : "s"),
+            "§7Recolors each block's texture to the new shade.",
+            "§8This may take a moment."));
+        // Skip — red terracotta slot 24
+        inv.setStack(24, ui(net.minecraft.item.Items.RED_TERRACOTTA,
+            "§c§l✗ Skip",
+            "§7Keep existing blocks as-is."));
+        // Glass fill
+        for (int i = 0; i < 27; i++) if (inv.getStack(i).isEmpty()) inv.setStack(i, glass());
+
+        int packedRgb = (newR << 16) | (newG << 8) | newB;
+        openScreenFromGuiState(player, GuiState.hexRecolorConfirm(configKey, packedRgb),
+            inv, "§8Update " + count + " block" + (count == 1 ? "" : "s") + "?");
+    }
+
+    /** COL9 — handle clicks on the hex recolor confirm screen. */
+    private static void handleHexRecolorConfirmClick(ServerPlayerEntity player, GuiState state, int slot) {
+        if (slot == 20) {
+            // Confirm — recolor all matching blocks on a background thread
+            String configKey = state.editingId();
+            int packed = state.page();
+            int newR = (packed >> 16) & 0xFF;
+            int newG = (packed >> 8)  & 0xFF;
+            int newB =  packed        & 0xFF;
+
+            String colorSuffix = switch (configKey) {
+                case "triangleRedHex"    -> "_red";
+                case "triangleGreenHex"  -> "_green";
+                case "triangleYellowHex" -> "_yellow";
+                default -> null;
+            };
+            if (colorSuffix == null) { openConfigGui(player, false); return; }
+
+            java.util.List<SlotData> affected = SlotManager.allSlots().stream()
+                .filter(d -> d.customId != null && d.customId.contains(colorSuffix) && d.texture != null && d.texture.length > 0)
+                .collect(java.util.stream.Collectors.toList());
+
+            MinecraftServer server = player.getServer();
+            int fR = newR, fG = newG, fB = newB;
+
+            player.closeHandledScreen();
+            send(player, "§7[CB] Recoloring " + affected.size() + " block(s)...");
+
+            Thread t = new Thread(() -> {
+                int success = 0;
+                for (SlotData d : affected) {
+                    try {
+                        byte[] newTex = com.customblocks.item.ColorTriangleItem.recolourTextureForPlayer(
+                            d.texture, fR, fG, fB,
+                            CustomBlocksConfig.useTrappedHoleFill(),
+                            player.getUuid());
+                        if (server != null) {
+                            final byte[] finalTex = newTex;
+                            final String id = d.customId;
+                            final SlotData snap = d;
+                            server.execute(() -> {
+                                SlotManager.updateTexture(id, finalTex);
+                                SlotManager.saveAll();
+                                NetworkManager.broadcastUpdate(server,
+                                    new SlotUpdatePayload("retexture", snap.index, id, null, finalTex,
+                                        snap.lightLevel, snap.hardness, snap.soundType, null, null, null));
+                            });
+                        }
+                        success++;
+                    } catch (Exception ignored) {}
+                }
+                final int done = success;
+                if (server != null) server.execute(() -> {
+                    send(player, "§a[CB] Updated §f" + done + "§a block(s) to the new shade.");
+                    com.customblocks.ResourcePackManager.scheduleRebuild(server);
+                    openConfigGui(player, false);
+                });
+            }, "CB-HexRecolor");
+            t.setDaemon(true);
+            t.start();
+        } else {
+            // Skip or any other slot
+            openConfigGui(player, false);
         }
     }
 
@@ -6890,7 +7147,10 @@ public class GuiManager {
         // Fill mode toggle (slot 45)
         if (slot == 45) {
             String cur = com.customblocks.CustomBlocksConfig.colorToolBackgroundMode;
-            String next = "corners_and_trapped".equals(cur) ? "corners_only" : "corners_and_trapped";
+            String next;
+            if ("corners_only".equals(cur)) next = "corners_and_trapped";
+            else if ("corners_and_trapped".equals(cur)) next = "none";
+            else next = "corners_only";
             com.customblocks.CustomBlocksConfig.colorToolBackgroundMode = next;
             com.customblocks.CustomBlocksConfig.save();
             send(player, "§aFill mode set to §f" + formatColorToolMode(next));
@@ -7008,6 +7268,7 @@ public class GuiManager {
             case "undoMode" -> Items.COMPARATOR;
             case "colorToolBackgroundMode" -> Items.BOOK;
             case "triangleGreenHex", "triangleYellowHex" -> Items.LIME_DYE;
+            case "triangleRedHex" -> Items.RED_DYE; // COL8b
             case "voiceMode" -> Items.PAINTING;
             // cloudShareUrl removed — was ENDER_PEARL (now hardcoded constant)
             default -> Items.NAME_TAG;
@@ -7033,6 +7294,7 @@ public class GuiManager {
             case "colorToolBackgroundMode" -> CustomBlocksConfig.colorToolBackgroundMode;
             case "triangleGreenHex" -> CustomBlocksConfig.triangleGreenHex;
             case "triangleYellowHex" -> CustomBlocksConfig.triangleYellowHex;
+            case "triangleRedHex" -> CustomBlocksConfig.triangleRedHex; // COL8b
             case "voiceMode" -> CustomBlocksConfig.voiceMode;
             default -> "";
         };
@@ -7041,6 +7303,7 @@ public class GuiManager {
     private static String formatColorToolMode(String mode) {
         if ("corners_only".equals(mode)) return "Background Only";
         if ("corners_and_trapped".equals(mode)) return "Background + Enclosed Areas";
+        if ("none".equals(mode)) return "No Background Removal";
         return "Not Configured";
     }
 
@@ -9638,6 +9901,8 @@ public class GuiManager {
                         com.customblocks.core.UndoManager.captureCategorySnapshot("bulk-delete " + sel.size(), uuid));
                 int count = 0;
                 for (String id : sel) {
+                    SlotData dSnap = com.customblocks.core.SlotManager.getById(id);
+                    if (dSnap != null) com.customblocks.core.TrashManager.addToTrash(dSnap); // NF2 bulk trash fix
                     if (com.customblocks.core.SlotManager.remove(id) != null) {
                         com.customblocks.core.LockManager.onBlockDeleted(id);
                         new java.util.HashSet<>(com.customblocks.core.CategoryManager.getCategoriesForBlock(id))
@@ -9702,6 +9967,132 @@ public class GuiManager {
             case "recolor"   -> "/cb bulkrecolor green " + ids;
             default          -> "/cb bulk" + opId + " " + ids;
         };
+    }
+
+    // ── Arabic Letter Browser ────────────────────────────────────────────────
+
+    private static final int ARABIC_PER_PAGE = 36; // slots 9-44
+
+    public static void openArabicBrowser(ServerPlayerEntity player, String color, int page) {
+        pushBackStack(player.getUuid());
+        String col = color != null ? color.toLowerCase(java.util.Locale.ROOT) : "black";
+        SimpleInventory inv = buildArabicBrowserGui(player, col, page);
+        openScreenFromGuiState(player, GuiState.arabicBrowser(col, page), inv,
+            "§0Arabic Letters — §f" + Character.toUpperCase(col.charAt(0)) + col.substring(1));
+    }
+
+    private static SimpleInventory buildArabicBrowserGui(ServerPlayerEntity player, String color, int page) {
+        java.util.List<String> ids = com.customblocks.arabic.ArabicBlockRegistry.getAllForColor(color);
+        int totalPages = ids.isEmpty() ? 1 : (int) Math.ceil((double) ids.size() / ARABIC_PER_PAGE);
+        int p = Math.max(0, Math.min(page, totalPages - 1));
+        int start = p * ARABIC_PER_PAGE;
+        int end = Math.min(start + ARABIC_PER_PAGE, ids.size());
+
+        SimpleInventory inv = new SimpleInventory(54);
+        for (int i = 0; i < 54; i++) inv.setStack(i, glass());
+
+        // Row 0: Back | Color tabs | Help
+        inv.setStack(0, ui(Items.ARROW, "§f◀ Back", "§7Return to previous menu"));
+
+        // Color selector tabs  — slots 1-4
+        String[] colors = {"black", "yellow", "green", "red"};
+        Item[] colorItems = {Items.BLACK_DYE, Items.YELLOW_DYE, Items.GREEN_DYE, Items.RED_DYE};
+        String[] colorLabels = {"§0Black", "§eYellow", "§aGreen", "§cRed"};
+        for (int ci = 0; ci < colors.length; ci++) {
+            boolean active = colors[ci].equals(color);
+            String label = colorLabels[ci] + (active ? " §7(active)" : "");
+            inv.setStack(ci + 1, active
+                ? uiGlint(colorItems[ci], label)
+                : ui(colorItems[ci], label, "§7Click to view " + colors[ci] + " letters"));
+        }
+
+        // Slot 8: info
+        inv.setStack(8, ui(Items.BOOK, "§6Arabic Letters",
+            "§7" + ids.size() + " blocks in " + color,
+            "§7Click any letter to receive it.",
+            "§7Use §f/cb arabic text §7to build words."));
+
+        // Letter grid: slots 9-44
+        if (ids.isEmpty()) {
+            inv.setStack(22, ui(Items.BARRIER, "§cNo letters imported yet",
+                "§7Run §f/cb arabic import <path>",
+                "§7to import your letter PNG files."));
+        } else {
+            for (int i = start; i < end; i++) {
+                String customId = ids.get(i);
+                com.customblocks.core.SlotData d = com.customblocks.core.SlotManager.getById(customId);
+                if (d == null) continue;
+                com.customblocks.block.SlotBlock.SlotItem si =
+                    com.customblocks.CustomBlocksMod.safeSlotItem(d.index);
+                if (si == null) continue;
+                int slot = 9 + (i - start);
+                net.minecraft.item.ItemStack blockStack = new net.minecraft.item.ItemStack(si);
+                // Add display name + Arabic character as lore
+                blockStack.set(net.minecraft.component.DataComponentTypes.CUSTOM_NAME,
+                    net.minecraft.text.Text.literal(normalizeFormattingCodes("§f" + d.displayName))
+                        .styled(s -> s.withItalic(false)));
+                java.util.List<net.minecraft.text.Text> loreLine = new java.util.ArrayList<>();
+                String lgKey = d.letterGroup != null ? d.letterGroup.replace("arabic_", "") : "";
+                Character arabicChar = lgKey.isEmpty() ? null
+                    : com.customblocks.arabic.ArabicLetterMap.charFor(lgKey);
+                String charStr = arabicChar != null ? " §7(" + arabicChar + ")" : "";
+                loreLine.add(lore("§7Click to receive" + charStr));
+                blockStack.set(net.minecraft.component.DataComponentTypes.LORE,
+                    new net.minecraft.component.type.LoreComponent(loreLine));
+                inv.setStack(slot, blockStack);
+            }
+        }
+
+        // Bottom row: navigation
+        if (p > 0) inv.setStack(45, ui(Items.ARROW, "§f◀ Previous", "§7Page " + p + " of " + totalPages));
+        inv.setStack(49, ui(Items.PAPER, "§7Page §f" + (p + 1) + " §7of §f" + totalPages,
+            "§7" + ids.size() + " total letter blocks"));
+        if (p < totalPages - 1) inv.setStack(53, ui(Items.ARROW, "§fNext ▶", "§7Page " + (p + 2) + " of " + totalPages));
+
+        return inv;
+    }
+
+    private static void handleArabicBrowserClick(ServerPlayerEntity player, GuiState state, int slot) {
+        String color = state.editingId() != null ? state.editingId() : "black";
+        int page = state.page();
+
+        // Back
+        if (slot == 0) { handleEscBack(player); return; }
+
+        // Color tabs (slots 1-4)
+        String[] colors = {"black", "yellow", "green", "red"};
+        if (slot >= 1 && slot <= 4) {
+            openArabicBrowser(player, colors[slot - 1], 0);
+            return;
+        }
+
+        // Navigation
+        java.util.List<String> ids = com.customblocks.arabic.ArabicBlockRegistry.getAllForColor(color);
+        int totalPages = ids.isEmpty() ? 1 : (int) Math.ceil((double) ids.size() / ARABIC_PER_PAGE);
+        if (slot == 45 && page > 0)              { openArabicBrowser(player, color, page - 1); return; }
+        if (slot == 53 && page < totalPages - 1) { openArabicBrowser(player, color, page + 1); return; }
+
+        // Letter grid
+        if (slot >= 9 && slot <= 44) {
+            int idx = page * ARABIC_PER_PAGE + (slot - 9);
+            if (idx < 0 || idx >= ids.size()) return;
+            String customId = ids.get(idx);
+            com.customblocks.core.SlotData d = com.customblocks.core.SlotManager.getById(customId);
+            if (d == null) { playError(player); return; }
+            com.customblocks.block.SlotBlock.SlotItem si =
+                com.customblocks.CustomBlocksMod.safeSlotItem(d.index);
+            if (si == null) { playError(player); return; }
+            net.minecraft.item.ItemStack give = new net.minecraft.item.ItemStack(si);
+            if (!player.getInventory().insertStack(give)) {
+                player.dropItem(give, false);
+                send(player, "§7Inventory full — §f" + d.displayName + " §7dropped at your feet.");
+            } else {
+                FeedbackHelper.actionBar(player, "§a✔ §fGave: §7" + d.displayName);
+            }
+            // Refresh the screen in place (player stays in GUI)
+            SimpleInventory refreshed = buildArabicBrowserGui(player, color, page);
+            refreshScreen(player, refreshed);
+        }
     }
 }
 

@@ -64,6 +64,12 @@ public class ResourcePackServer {
      * Returns false if the pack hash isn't ready yet.
      */
     private static boolean sendPackToPlayer(net.minecraft.server.network.ServerPlayerEntity player) {
+        // PACK2 — Never send the HTTP resource pack to modded clients.
+        // They receive textures via the drip-feed sync pipeline (SlotUpdatePayload).
+        // Sending the RP pack to them overwrites custom textures with vanilla fallbacks.
+        if (net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.canSend(player, SlotUpdatePayload.ID)) {
+            return false;
+        }
         String hash = currentHash;
         if (hash == null || hash.isEmpty()) return false;
         String url = getPackUrl(serverInstance);
@@ -252,15 +258,24 @@ public class ResourcePackServer {
                     }
                     currentHash = sb.toString();
                     CustomBlocksMod.LOGGER.info("[CustomBlocks] Cached internal resource pack ZIP (Atomic Update).");
-                    FeedbackHelper.broadcastPackRegeneratedIfDue(serverInstance, 4000L);
                     // 1.13+1.14 — upload to Cloud Vault so external players can download via HTTPS
                     if (CustomBlocksConfig.cloudShareEnabled) {
                         String secret = CustomBlocksConfig.cloudPackSecret;
                         if (secret != null && !secret.isBlank()) {
                             final java.io.File uploadTarget = packFile;
                             final String uploadHash = currentHash;
-                            PACK_UPLOADER.submit(() -> uploadPackToCloudVault(uploadTarget, uploadHash, secret));
+                            PACK_UPLOADER.submit(() -> {
+                                uploadPackToCloudVault(uploadTarget, uploadHash, secret);
+                                FeedbackHelper.broadcastPackRegeneratedIfDue(serverInstance, 4000L);
+                                sendUpdateToAllPlayers();
+                            });
+                        } else {
+                            FeedbackHelper.broadcastPackRegeneratedIfDue(serverInstance, 4000L);
+                            sendUpdateToAllPlayers();
                         }
+                    } else {
+                        FeedbackHelper.broadcastPackRegeneratedIfDue(serverInstance, 4000L);
+                        sendUpdateToAllPlayers();
                     }
                 }
             } catch (Exception e) {

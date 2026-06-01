@@ -1,5 +1,7 @@
 {
   "itemGroup.customblocks.blocks": "CustomBlocks",
+  "item.customblocks.deleter": "Deleter Tool",
+  "customblocks.youtube": "YouTube",
 
   "customblocks.gui.dashboard.title":         "§b§l✦ §r§fCustomBlocks Dashboard",
   "customblocks.gui.picker.title":            "§b§l✦ §r§fBlock Picker",

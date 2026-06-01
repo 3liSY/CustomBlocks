@@ -1,12 +1,15 @@
 {
   "schemaVersion": 1,
   "id": "customblocks",
-  "version": "2.0.0",
+  "version": "1",
   "name": "CustomBlocks",
-  "description": "Paint any image onto blocks — URL, GIF, per-face, color tools, categories, cloud sharing. No coding needed.",
-  "authors": [ "3liSY" ],
-  "license": "MIT",
+  "description": "Make any image or gif a working block :)",
+  "authors": [ "3liSY / SrbGamer" ],
+  "license": "All Rights Reserved",
   "icon": "assets/customblocks/icon.png",
+  "contact": {
+    "homepage": "https://modrinth.com/mod/customblocks"
+  },
   "environment": "*",
   "entrypoints": {
     "main":   [ "com.customblocks.CustomBlocksMod" ],
@@ -24,13 +27,11 @@
     "cloth-config": "*",
     "modmenu": "*"
   },
-  "contact": {
-    "sources": "https://github.com/3liSY/CustomBlocks"
-  },
   "custom": {
     "modmenu": {
       "links": {
-        "modmenu.modrinth": "https://modrinth.com/mod/customblocks"
+        "modmenu.discord": "https://discord.gg/stormygang",
+        "customblocks.youtube": "https://www.youtube.com/@SrbGamerr"
       }
     }
   }

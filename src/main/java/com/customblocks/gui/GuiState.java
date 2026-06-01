@@ -388,6 +388,24 @@ public record GuiState(
     // Back-stack helper
 
     /**
+     * Arabic Letter Browser — color stored in editingId, page in page.
+     * color must be one of: "black", "yellow", "green", "red".
+     */
+    public static GuiState arabicBrowser(String color, int page) {
+        return new GuiState(GuiMode.ARABIC_BROWSER, color != null ? color : "black", page, false, 0, false);
+    }
+
+    /** COL9 — hex recolor confirm. editingId = config key, page = packed new RGB (r<<16|g<<8|b). */
+    public static GuiState hexRecolorConfirm(String configKey, int packedRgb) {
+        return new GuiState(GuiMode.HEX_RECOLOR_CONFIRM, configKey, packedRgb, false, 0, false);
+    }
+
+    /** NF2 — deleter confirm. editingId = block customId to delete. */
+    public static GuiState deleterConfirm(String blockId) {
+        return new GuiState(GuiMode.DELETER_CONFIRM, blockId, 0, false, 0, false);
+    }
+
+    /**
      * Creates a new back-stack initialized with the main menu as the bottom.
      */
     public static Deque<GuiState> newBackStack() {

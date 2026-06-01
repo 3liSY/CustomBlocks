@@ -38,9 +38,13 @@ import com.customblocks.gui.ChatHelper;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -311,7 +315,7 @@ public class CustomBlockCommand {
                         return 1;
                     })
                     .then(CommandManager.argument("color", StringArgumentType.word())
-                        .suggests((ctx, b) -> { b.suggest("green"); b.suggest("yellow"); b.suggest("black"); return b.buildFuture(); })
+                        .suggests((ctx, b) -> { b.suggest("green"); b.suggest("yellow"); b.suggest("black"); b.suggest("red"); return b.buildFuture(); })
                         .executes(ctx -> cmdBulkRecolor(ctx.getSource(),
                             StringArgumentType.getString(ctx, "color"),
                             "all",
@@ -343,7 +347,7 @@ public class CustomBlockCommand {
                         return 1;
                     })
                     .then(CommandManager.argument("color", StringArgumentType.word())
-                        .suggests((ctx, b) -> { b.suggest("green"); b.suggest("yellow"); b.suggest("black"); return b.buildFuture(); })
+                        .suggests((ctx, b) -> { b.suggest("green"); b.suggest("yellow"); b.suggest("black"); b.suggest("red"); return b.buildFuture(); })
                         .executes(ctx -> {
                             ChatHelper.warn(ctx.getSource(), "/cb bulkcolor is deprecated. Use /cb bulkrecolor instead.");
                             return cmdBulkRecolor(ctx.getSource(),
@@ -1045,8 +1049,8 @@ public class CustomBlockCommand {
 
 
 
-                // ── config ───────────────────────────────────────────────────
-                .then(CommandManager.literal("config")
+                // ── settings (primary) + config (alias) ──────────────────────
+                .then(CommandManager.literal("settings")
                     .requires(PermissionHelper::canConfig)
                     .executes(ctx -> {
                         ServerPlayerEntity p = ctx.getSource().getPlayer();
@@ -1054,10 +1058,19 @@ public class CustomBlockCommand {
                         else ChatHelper.error(ctx.getSource(), ChatHelper.formattedKey("cmd.console_player_only"));
                         return 1;
                     })
-                    // 1.29 — /cb config hologram <true|false>
+                    // /cb settings hologram <true|false>
                     .then(CommandManager.literal("hologram")
                         .then(CommandManager.argument("enabled", BoolArgumentType.bool())
                             .executes(ctx -> cmdConfigHologram(ctx.getSource(), BoolArgumentType.getBool(ctx, "enabled"))))))
+                // CMD1 — /cb config is now the alias of /cb settings
+                .then(CommandManager.literal("config")
+                    .requires(PermissionHelper::canConfig)
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p != null) GuiManager.openConfigWarningGui(p);
+                        else ChatHelper.error(ctx.getSource(), ChatHelper.formattedKey("cmd.console_player_only"));
+                        return 1;
+                    }))
 
                 // ── reload ───────────────────────────────────────────────────
                 .then(CommandManager.literal("reload")
@@ -1188,7 +1201,7 @@ public class CustomBlockCommand {
                         return usage(ctx.getSource(), "square");
                     })
                     .then(CommandManager.argument("color", StringArgumentType.word())
-                        .suggests((ctx, b) -> { b.suggest("black"); b.suggest("yellow"); b.suggest("green"); return b.buildFuture(); })
+                        .suggests((ctx, b) -> { b.suggest("black"); b.suggest("yellow"); b.suggest("green"); b.suggest("red"); return b.buildFuture(); })
                         .executes(ctx -> cmdGiveSquare(ctx.getSource(),
                             StringArgumentType.getString(ctx, "color")))))
 
@@ -1201,7 +1214,7 @@ public class CustomBlockCommand {
                         return usage(ctx.getSource(), "triangle");
                     })
                     .then(CommandManager.argument("color", StringArgumentType.word())
-                        .suggests((ctx, b) -> { b.suggest("black"); b.suggest("yellow"); b.suggest("green"); return b.buildFuture(); })
+                        .suggests((ctx, b) -> { b.suggest("black"); b.suggest("yellow"); b.suggest("green"); b.suggest("red"); return b.buildFuture(); })
                         .executes(ctx -> cmdGiveTriangle(ctx.getSource(),
                             StringArgumentType.getString(ctx, "color")))))
 
@@ -1220,6 +1233,10 @@ public class CustomBlockCommand {
                 .then(CommandManager.literal("chisel")
                     .requires(PermissionHelper::canGive)
                     .executes(ctx -> cmdGiveChiselInternal(ctx.getSource())))
+                // NF2 — /cb deleter
+                .then(CommandManager.literal("deleter")
+                    .requires(PermissionHelper::canGive)
+                    .executes(ctx -> cmdGiveDeleterInternal(ctx.getSource())))
 
                 // V4-42: /cb bgstudio — opens Background Studio (replaces removed diamondtriangle)
                 .then(CommandManager.literal("bgstudio")
@@ -1969,6 +1986,72 @@ public class CustomBlockCommand {
                         com.customblocks.gui.GuiManager.openAchievementsGui(p, 0);
                         return 1;
                     }));
+
+                // ── /cb arabic ─────────────────────────────────────────────────
+                tree.then(CommandManager.literal("arabic")
+                    .requires(PermissionHelper::canUse)
+                    // bare /cb arabic → opens browser
+                    .executes(ctx -> {
+                        ServerPlayerEntity p = ctx.getSource().getPlayer();
+                        if (p == null) { ChatHelper.error(ctx.getSource(), "Player only."); return 0; }
+                        com.customblocks.gui.GuiManager.openArabicBrowser(p, "black", 0);
+                        return 1;
+                    })
+                    // /cb arabic gui [color]
+                    .then(CommandManager.literal("gui")
+                        .executes(ctx -> {
+                            ServerPlayerEntity p = ctx.getSource().getPlayer();
+                            if (p == null) { ChatHelper.error(ctx.getSource(), "Player only."); return 0; }
+                            com.customblocks.gui.GuiManager.openArabicBrowser(p, "black", 0);
+                            return 1;
+                        })
+                        .then(CommandManager.argument("color", StringArgumentType.word())
+                            .suggests((ctx, b) -> {
+                                b.suggest("black"); b.suggest("yellow"); b.suggest("green"); b.suggest("red");
+                                return b.buildFuture();
+                            })
+                            .executes(ctx -> {
+                                ServerPlayerEntity p = ctx.getSource().getPlayer();
+                                if (p == null) { ChatHelper.error(ctx.getSource(), "Player only."); return 0; }
+                                com.customblocks.gui.GuiManager.openArabicBrowser(p,
+                                    StringArgumentType.getString(ctx, "color").toLowerCase(Locale.ROOT), 0);
+                                return 1;
+                            })))
+                    // /cb arabic import <base_path>
+                    .then(CommandManager.literal("import")
+                        .requires(src -> src.hasPermissionLevel(CustomBlocksConfig.permissionLevelAdmin))
+                        .then(CommandManager.argument("path", StringArgumentType.greedyString())
+                            .executes(ctx -> cmdArabicImport(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "path").trim()))))
+                    // /cb arabic give <letter> <color>
+                    .then(CommandManager.literal("give")
+                        .then(CommandManager.argument("letter", StringArgumentType.word())
+                            .suggests((ctx, b) -> {
+                                com.customblocks.arabic.ArabicLetterMap.LETTER_TO_CHAR.keySet()
+                                    .forEach(b::suggest);
+                                return b.buildFuture();
+                            })
+                            .then(CommandManager.argument("color", StringArgumentType.word())
+                                .suggests((ctx, b) -> {
+                                    b.suggest("black"); b.suggest("yellow");
+                                    b.suggest("green"); b.suggest("red");
+                                    return b.buildFuture();
+                                })
+                                .executes(ctx -> cmdArabicGive(ctx.getSource(),
+                                    StringArgumentType.getString(ctx, "letter"),
+                                    StringArgumentType.getString(ctx, "color"))))))
+                    // /cb arabic text <color> <arabic_text>
+                    .then(CommandManager.literal("text")
+                        .then(CommandManager.argument("color", StringArgumentType.word())
+                            .suggests((ctx, b) -> {
+                                b.suggest("black"); b.suggest("yellow");
+                                b.suggest("green"); b.suggest("red");
+                                return b.buildFuture();
+                            })
+                            .then(CommandManager.argument("text", StringArgumentType.greedyString())
+                                .executes(ctx -> cmdArabicText(ctx.getSource(),
+                                    StringArgumentType.getString(ctx, "color"),
+                                    StringArgumentType.getString(ctx, "text").trim()))))));
 
             dispatcher.register(DidYouMean.appendFallbackBranch(tree));
             dispatcher.register(CommandManager.literal("cb")
@@ -3371,11 +3454,32 @@ public class CustomBlockCommand {
     /** Undo the last block modification (retexture, setface, setglow, delete, create, …). */
     private static int cmdUndo(ServerCommandSource src) { return cmdUndo(src, false); }
     private static int cmdUndo(ServerCommandSource src, boolean silent) {
-        if (UndoManager.undoSize(getPlayerUuid(src)) == 0) {
+        UUID uuid = getPlayerUuid(src);
+        if (UndoManager.undoSize(uuid) == 0) {
             if (!silent) ChatHelper.info(src, ChatHelper.formattedKey("cmd.undo_nothing"));
             return 1;
         }
-        UndoManager.UndoEntry entry = UndoManager.popUndo(getPlayerUuid(src));
+
+        // UND1 — if the top of the undo stack is a batch operation, require a confirmation
+        // before executing it (two /cb undo calls within 10 seconds = confirmed).
+        if (UndoManager.peekIsUndoBatch(uuid)) {
+            Long armedAt = BATCH_UNDO_ARMED.get(uuid);
+            boolean confirmed = armedAt != null && (System.currentTimeMillis() - armedAt) < BATCH_UNDO_ARM_MS;
+            if (!confirmed) {
+                BATCH_UNDO_ARMED.put(uuid, System.currentTimeMillis());
+                int batchSize = UndoManager.peekUndoBatchSize(uuid);
+                String batchDesc = UndoManager.peekUndoBatchDescription(uuid);
+                ChatHelper.warn(src, "§e[CB] Next undo is a bulk operation: §f" + batchDesc
+                    + " §e(§f" + batchSize + " §eblocks). Run §f/cb undo §eagain within 10s to confirm.");
+                return 1;
+            }
+            // Confirmed — execute the batch undo
+            BATCH_UNDO_ARMED.remove(uuid);
+            return cmdUndoBatch(src, uuid, silent);
+        }
+
+        BATCH_UNDO_ARMED.remove(uuid); // clear any stale arm if user switched to a normal undo
+        UndoManager.UndoEntry entry = UndoManager.popUndo(uuid);
         if (entry == null) { if (!silent) ChatHelper.info(src, ChatHelper.formattedKey("cmd.undo_nothing")); return 1; }
 
         MinecraftServer server = src.getServer();
@@ -3397,9 +3501,9 @@ public class CustomBlockCommand {
                 new SlotUpdatePayload("remove", idx, entry.customId(), null, null, 0, 0, "stone"));
             if (!silent) {
                 ChatHelper.success(src, ChatHelper.formattedKey("cmd.undo_create_done", entry.customId(),
-                    UndoManager.undoSize(getPlayerUuid(src))));
-                if (UndoManager.undoSize(getPlayerUuid(src)) > 0)
-                    ChatHelper.info(src, ChatHelper.formattedKey("cmd.undo_next_hint", UndoManager.peekUndoDescription(getPlayerUuid(src))));
+                    UndoManager.undoSize(uuid)));
+                if (UndoManager.undoSize(uuid) > 0)
+                    ChatHelper.info(src, ChatHelper.formattedKey("cmd.undo_next_hint", UndoManager.peekUndoDescription(uuid)));
                 { ServerPlayerEntity _up = src.getPlayer(); if (_up != null) { String _h = FirstUseHints.hint(_up.getUuid(), "first_undo"); if (_h != null) _up.sendMessage(Text.literal(_h), false); } }
             }
             return 1;
@@ -3407,16 +3511,22 @@ public class CustomBlockCommand {
 
         // ── Undo a mutation or a deletion ────────────────────────────────────
         SlotData prev = entry.previousState();
-        // Save current state for redo
-        SlotData curForRedo = SlotManager.getById(prev.customId);
-        if (curForRedo != null) {
-            UndoManager.UndoEntry redoEntry = new UndoManager.UndoEntry(entry.customId(), snapshotForCmd(curForRedo), entry.description(), entry.wasDeleted());
-            UndoManager.pushRedo(redoEntry);
+        // For mutations: capture current state for redo BEFORE restore (block still exists)
+        if (!entry.wasDeleted()) {
+            SlotData curForRedo = SlotManager.getById(prev.customId);
+            if (curForRedo != null) {
+                UndoManager.UndoEntry redoEntry = new UndoManager.UndoEntry(entry.customId(), snapshotForCmd(curForRedo), entry.description(), false, uuid);
+                UndoManager.pushRedo(redoEntry);
+            }
         }
         boolean restored = SlotManager.restoreSnapshot(prev, entry.wasDeleted());
         if (!restored) {
             ChatHelper.error(src, ChatHelper.formattedKey("cmd.undo_slot_busy", entry.customId()));
             return 0;
+        }
+        // For deletions: push redo AFTER restore — block now exists, redo = delete it again
+        if (entry.wasDeleted()) {
+            UndoManager.pushRedo(new UndoManager.UndoEntry(entry.customId(), null, "delete", false, uuid));
         }
         SlotManager.saveAll();
 
@@ -3454,21 +3564,92 @@ public class CustomBlockCommand {
         }
         if (!silent) {
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.undo_mutation_done", entry.description(), entry.customId(),
-                UndoManager.undoSize(getPlayerUuid(src)), UndoManager.redoSize(getPlayerUuid(src))));
-            if (UndoManager.undoSize(getPlayerUuid(src)) > 0)
-                ChatHelper.info(src, ChatHelper.formattedKey("cmd.undo_next_hint", UndoManager.peekUndoDescription(getPlayerUuid(src))));
+                UndoManager.undoSize(uuid), UndoManager.redoSize(uuid)));
+            if (UndoManager.undoSize(uuid) > 0)
+                ChatHelper.info(src, ChatHelper.formattedKey("cmd.undo_next_hint", UndoManager.peekUndoDescription(uuid)));
             { ServerPlayerEntity _up = src.getPlayer(); if (_up != null) { String _h = FirstUseHints.hint(_up.getUuid(), "first_undo"); if (_h != null) _up.sendMessage(Text.literal(_h), false); } }
+        }
+        return 1;
+    }
+
+    /**
+     * UND1 — Execute a confirmed batch undo (restore all blocks in the batch at once).
+     * Called from cmdUndo after the player has confirmed the batch (double /cb undo within 10s).
+     */
+    private static int cmdUndoBatch(ServerCommandSource src, UUID uuid, boolean silent) {
+        java.util.List<UndoManager.UndoEntry> entries = UndoManager.popUndoBatch(uuid);
+        if (entries.isEmpty()) {
+            ChatHelper.info(src, ChatHelper.formattedKey("cmd.undo_nothing"));
+            return 1;
+        }
+        MinecraftServer server = src.getServer();
+        int restored = 0;
+        int failed = 0;
+        java.util.List<UndoManager.UndoEntry> redoEntries = new java.util.ArrayList<>();
+        for (UndoManager.UndoEntry entry : entries) {
+            if (entry.wasDeleted() && entry.previousState() != null) {
+                SlotData prev = entry.previousState();
+                boolean ok = SlotManager.restoreSnapshot(prev, true);
+                if (ok) {
+                    SlotData d = SlotManager.getById(prev.customId);
+                    if (d != null) {
+                        NetworkManager.broadcastUpdate(server,
+                            new SlotUpdatePayload("add", d.index, d.customId, d.displayName, d.texture,
+                                d.lightLevel, d.hardness, d.soundType, null, null, d.animMeta));
+                        for (var fe : d.faceTextures.entrySet())
+                            NetworkManager.broadcastUpdate(server,
+                                new SlotUpdatePayload("setface", d.index, d.customId, null, fe.getValue(),
+                                    d.lightLevel, d.hardness, d.soundType, fe.getKey()));
+                        if (d.isShaped()) broadcastShape(server, d);
+                    }
+                    restored++;
+                    // REDO2: each restored block can be re-deleted by a batch redo
+                    redoEntries.add(new UndoManager.UndoEntry(entry.customId(), null, "delete", false));
+                } else {
+                    failed++;
+                }
+            }
+        }
+        if (restored > 0) {
+            SlotManager.saveAll();
+            // REDO2: push batch redo so /cb redo can re-delete all restored blocks
+            if (!redoEntries.isEmpty()) {
+                UndoManager.pushRedoBatch("bulk-redelete " + restored, redoEntries, uuid);
+            }
+        }
+        if (!silent) {
+            ChatHelper.success(src, "§a[CB] Bulk undo complete — restored §f" + restored + " §ablock(s)."
+                + (failed > 0 ? " §c" + failed + " block(s) could not be restored (slot conflict)." : ""));
         }
         return 1;
     }
 
     /** Redo the last undone action. */
     private static int cmdRedo(ServerCommandSource src) {
-        if (UndoManager.redoSize(getPlayerUuid(src)) == 0) {
+        UUID uuid = getPlayerUuid(src);
+        if (UndoManager.redoSize(uuid) == 0) {
             ChatHelper.info(src, ChatHelper.formattedKey("cmd.redo_nothing"));
             return 1;
         }
-        UndoManager.UndoEntry entry = UndoManager.popRedo(getPlayerUuid(src));
+
+        // REDO2 — if top of redo stack is a batch, require confirmation (double /cb redo within 10s)
+        if (UndoManager.peekIsRedoBatch(uuid)) {
+            Long armedAt = BATCH_REDO_ARMED.get(uuid);
+            boolean confirmed = armedAt != null && (System.currentTimeMillis() - armedAt) < BATCH_UNDO_ARM_MS;
+            if (!confirmed) {
+                BATCH_REDO_ARMED.put(uuid, System.currentTimeMillis());
+                int batchSize = UndoManager.peekRedoBatchSize(uuid);
+                String batchDesc = UndoManager.peekRedoBatchDescription(uuid);
+                ChatHelper.warn(src, "§e[CB] Next redo is a bulk operation: §f" + batchDesc
+                    + " §e(§f" + batchSize + " §eblocks). Run §f/cb redo §eagain within 10s to confirm.");
+                return 1;
+            }
+            BATCH_REDO_ARMED.remove(uuid);
+            return cmdRedoBatch(src, uuid);
+        }
+
+        BATCH_REDO_ARMED.remove(uuid);
+        UndoManager.UndoEntry entry = UndoManager.popRedo(uuid);
         if (entry == null) { ChatHelper.info(src, ChatHelper.formattedKey("cmd.redo_nothing")); return 1; }
 
         MinecraftServer server = src.getServer();
@@ -3485,9 +3666,9 @@ public class CustomBlockCommand {
                     new SlotUpdatePayload("remove", d.index, entry.customId(), null, null, 0, 0, "stone"));
             }
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.redo_delete_done", entry.customId(),
-                UndoManager.redoSize(getPlayerUuid(src))));
-            if (UndoManager.redoSize(getPlayerUuid(src)) > 0)
-                ChatHelper.info(src, ChatHelper.formattedKey("cmd.redo_next_hint", UndoManager.peekRedoDescription(getPlayerUuid(src))));
+                UndoManager.redoSize(uuid)));
+            if (UndoManager.redoSize(uuid) > 0)
+                ChatHelper.info(src, ChatHelper.formattedKey("cmd.redo_next_hint", UndoManager.peekRedoDescription(uuid)));
             return 1;
         }
 
@@ -3531,9 +3712,44 @@ public class CustomBlockCommand {
             }
         }
         ChatHelper.success(src, ChatHelper.formattedKey("cmd.redo_mutation_done", entry.description(), entry.customId(),
-            UndoManager.redoSize(getPlayerUuid(src)), UndoManager.undoSize(getPlayerUuid(src))));
-        if (UndoManager.redoSize(getPlayerUuid(src)) > 0)
-            ChatHelper.info(src, ChatHelper.formattedKey("cmd.redo_next_hint", UndoManager.peekRedoDescription(getPlayerUuid(src))));
+            UndoManager.redoSize(uuid), UndoManager.undoSize(uuid)));
+        if (UndoManager.redoSize(uuid) > 0)
+            ChatHelper.info(src, ChatHelper.formattedKey("cmd.redo_next_hint", UndoManager.peekRedoDescription(uuid)));
+        return 1;
+    }
+
+    /** REDO2 — Execute a confirmed batch redo (re-delete all blocks in the redo batch). */
+    private static int cmdRedoBatch(ServerCommandSource src, UUID uuid) {
+        java.util.List<UndoManager.UndoEntry> entries = UndoManager.popRedoBatch(uuid);
+        if (entries.isEmpty()) {
+            ChatHelper.info(src, ChatHelper.formattedKey("cmd.redo_nothing"));
+            return 1;
+        }
+        MinecraftServer server = src.getServer();
+        int deleted = 0;
+        int failed = 0;
+        java.util.List<UndoManager.UndoEntry> undoEntries = new java.util.ArrayList<>();
+        for (UndoManager.UndoEntry entry : entries) {
+            SlotData d = SlotManager.getById(entry.customId());
+            if (d != null) {
+                undoEntries.add(new UndoManager.UndoEntry(entry.customId(), snapshotForCmd(d), "delete", true));
+                int idx = d.index;
+                SlotManager.remove(entry.customId());
+                NetworkManager.broadcastUpdate(server,
+                    new SlotUpdatePayload("remove", idx, entry.customId(), null, null, 0, 0, "stone"));
+                deleted++;
+            } else {
+                failed++;
+            }
+        }
+        if (deleted > 0) {
+            SlotManager.saveAll();
+            if (!undoEntries.isEmpty()) {
+                UndoManager.pushUndoBatch("bulk-delete " + deleted + " (redo)", undoEntries, uuid);
+            }
+        }
+        ChatHelper.success(src, "§a[CB] Bulk redo complete — deleted §f" + deleted + " §ablock(s)."
+            + (failed > 0 ? " §c" + failed + " block(s) not found (already gone)." : ""));
         return 1;
     }
 
@@ -4093,7 +4309,7 @@ public class CustomBlockCommand {
 
     public static int cmdGiveSquareInternal(ServerCommandSource src, String color) {
         String c = color.toLowerCase().trim();
-        if (!c.equals("black") && !c.equals("yellow") && !c.equals("green")) {
+        if (!c.equals("black") && !c.equals("yellow") && !c.equals("green") && !c.equals("red")) {
             ChatHelper.error(src, ChatHelper.formattedKey("cmd.give_color_bad_bwy", color)); return 0;
         }
         net.minecraft.util.Identifier id = net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, c + "_square");
@@ -4102,7 +4318,7 @@ public class CustomBlockCommand {
         try {
             src.getPlayerOrThrow().getInventory().insertStack(withToolLore(item,
                 "§7Right-click a placed custom block to §eswap§7 it to the matching color variant.",
-                "§8Use §f/cb square <color>§8 for black, yellow, or green."));
+                "§8Use §f/cb square <color>§8 for black, yellow, green, or red."));
             String disp = Character.toUpperCase(c.charAt(0)) + c.substring(1);
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.give_square_done", disp));
             { ServerPlayerEntity _sp = src.getPlayer(); if (_sp != null) { String _h = FirstUseHints.hint(_sp.getUuid(), "hold_square"); if (_h != null) _sp.sendMessage(Text.literal(_h), false); } }
@@ -4112,7 +4328,7 @@ public class CustomBlockCommand {
 
     public static int cmdGiveTriangleInternal(ServerCommandSource src, String color) {
         String c = color.toLowerCase().trim();
-        if (!c.equals("black") && !c.equals("yellow") && !c.equals("green")) {
+        if (!c.equals("black") && !c.equals("yellow") && !c.equals("green") && !c.equals("red")) {
             ChatHelper.error(src, ChatHelper.formattedKey("cmd.give_color_bad_bwy", color)); return 0;
         }
         net.minecraft.util.Identifier id = net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, c + "_triangle");
@@ -4188,6 +4404,17 @@ public class CustomBlockCommand {
                 "§7Air-click: §eopen block picker"));
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.give_amethyst_chisel_done"));
         } catch (Exception ex) { CustomBlocksMod.LOGGER.error("[CB] cmdGiveChisel failed", ex); ChatHelper.error(src, ChatHelper.formattedKey("cmd.gui_open_failed", ex.getMessage())); return 0; }
+        return 1;
+    }
+
+    public static int cmdGiveDeleterInternal(ServerCommandSource src) { // NF2
+        net.minecraft.util.Identifier id = net.minecraft.util.Identifier.of(CustomBlocksMod.MOD_ID, "deleter");
+        net.minecraft.item.Item item = net.minecraft.registry.Registries.ITEM.get(id);
+        if (item == null || item == net.minecraft.item.Items.AIR) { ChatHelper.error(src, "Deleter item not found."); return 0; }
+        try {
+            src.getPlayerOrThrow().getInventory().insertStack(new net.minecraft.item.ItemStack(item, 1));
+            ChatHelper.success(src, "§aGiven Deleter tool.");
+        } catch (Exception ex) { ChatHelper.error(src, "Failed: " + ex.getMessage()); return 0; }
         return 1;
     }
 
@@ -4513,6 +4740,19 @@ public class CustomBlockCommand {
             new java.util.concurrent.ConcurrentHashMap<>();
     private static final long SYNC_COOLDOWN_MS = 10_000L;
 
+    // REL1 — prevent concurrent /cb reload calls
+    private static final java.util.concurrent.atomic.AtomicBoolean RELOAD_IN_PROGRESS =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    // UND1 — batch-undo confirmation arming (UUID -> arm timestamp)
+    private static final java.util.concurrent.ConcurrentHashMap<java.util.UUID, Long> BATCH_UNDO_ARMED =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long BATCH_UNDO_ARM_MS = 10_000L;
+
+    // REDO2 — batch-redo confirmation arming (UUID -> arm timestamp)
+    private static final java.util.concurrent.ConcurrentHashMap<java.util.UUID, Long> BATCH_REDO_ARMED =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     private static int cmdSync(ServerCommandSource src) {
         ServerPlayerEntity player = src.getPlayer();
         if (player == null) {
@@ -4573,51 +4813,80 @@ public class CustomBlockCommand {
     }
 
     private static int cmdReload(ServerCommandSource src) {
-        // 1.27 — Full reload: config + blocks + resource pack rebuild + push to all players
+        // REL1 — guard: refuse if block batch-loading is still in progress
+        if (SlotManager.isStartupLoadInProgress()) {
+            ChatHelper.warn(src, "§e[CB] Block loading is still in progress — please wait a moment before reloading.");
+            return 0;
+        }
+        // REL1 — guard: refuse if another reload is already running
+        if (!RELOAD_IN_PROGRESS.compareAndSet(false, true)) {
+            ChatHelper.warn(src, "§e[CB] A reload is already in progress — please wait for it to finish.");
+            return 0;
+        }
+
         ChatHelper.success(src, "§7[CB] Reloading config, blocks, and resource pack...");
-        SlotManager.flushSave();
+        // REL1 — use flushSaveForReload() instead of flushSave() so IO_EXECUTOR stays alive
+        SlotManager.flushSaveForReload();
         net.minecraft.server.MinecraftServer server = src.getServer();
         int onlineCount = server.getPlayerManager().getPlayerList().size();
         new Thread(() -> {
-            // Step 1 — Config
             try {
-                com.customblocks.CustomBlocksConfig.load();
-            } catch (Exception e) {
-                IncidentRecorder.record("reload", "CustomBlocksConfig.load", e);
-                server.execute(() ->
-                    ChatHelper.error(src, "§c[CB] Config reload failed: §f" + e.getMessage()
-                        + "§c. Previous config remains active."));
-                return;
-            }
-            // Step 2 — Block data
-            try {
-                SlotManager.loadAll();
-            } catch (Exception e) {
-                IncidentRecorder.record("reload", "SlotManager.loadAll", e);
-                server.execute(() ->
-                    ChatHelper.error(src, "§c[CB] Block reload failed: §f" + e.getMessage()));
-                return;
-            }
-            // Step 3 — Resource pack rebuild + push
-            try {
-                com.customblocks.ResourcePackManager.scheduleRebuild(server);
-            } catch (Exception e) {
-                IncidentRecorder.record("reload", "ResourcePackManager.scheduleRebuild", e);
-                server.execute(() ->
-                    ChatHelper.error(src, "§c[CB] Reload failed during pack generation: §f" + e.getMessage()
-                        + "§c. Blocks were reloaded but pack was NOT pushed."));
-                return;
-            }
-            // Step 4 — Broadcast data sync
-            server.execute(() -> {
-                CustomBlocksMod.broadcastFullSync(server);
-                if (onlineCount == 0) {
-                    ChatHelper.success(src, "§a[CB] Reload complete. No players online — pack will be sent on next join.");
-                } else {
-                    ChatHelper.success(src, "§a[CB] Reload complete. Config §a✓ §fBlocks §a✓ §fResource pack pushed to §f"
-                        + onlineCount + "§a player(s).");
+                // Step 1 — Config
+                try {
+                    com.customblocks.CustomBlocksConfig.load();
+                } catch (Exception e) {
+                    IncidentRecorder.record("reload", "CustomBlocksConfig.load", e);
+                    server.execute(() ->
+                        ChatHelper.error(src, "§c[CB] Config reload failed: §f" + e.getMessage()
+                            + "§c. Previous config remains active."));
+                    return;
                 }
-            });
+                // Step 2 — Block data
+                try {
+                    SlotManager.loadAll();
+                } catch (Exception e) {
+                    IncidentRecorder.record("reload", "SlotManager.loadAll", e);
+                    server.execute(() ->
+                        ChatHelper.error(src, "§c[CB] Block reload failed: §f" + e.getMessage()));
+                    return;
+                }
+                // Step 2b — REL1: wait for the tick-based batch loader to finish before rebuilding pack
+                // (loadAll() queues slots for batch processing on server ticks; rebuilding before
+                // they are all processed would generate a pack with incomplete block data)
+                long deadline = System.currentTimeMillis() + 30_000L;
+                while (SlotManager.isStartupLoadInProgress() && System.currentTimeMillis() < deadline) {
+                    try { Thread.sleep(100); } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt(); break;
+                    }
+                }
+                if (SlotManager.isStartupLoadInProgress()) {
+                    server.execute(() -> ChatHelper.warn(src,
+                        "§e[CB] Block loading took over 30s — pack may be incomplete. Run /cb reload again once loading is done."));
+                    return;
+                }
+                // Step 3 — Resource pack rebuild + push
+                try {
+                    com.customblocks.ResourcePackManager.scheduleRebuild(server);
+                } catch (Exception e) {
+                    IncidentRecorder.record("reload", "ResourcePackManager.scheduleRebuild", e);
+                    server.execute(() ->
+                        ChatHelper.error(src, "§c[CB] Reload failed during pack generation: §f" + e.getMessage()
+                            + "§c. Blocks were reloaded but pack was NOT pushed."));
+                    return;
+                }
+                // Step 4 — Broadcast data sync
+                server.execute(() -> {
+                    CustomBlocksMod.broadcastFullSync(server);
+                    if (onlineCount == 0) {
+                        ChatHelper.success(src, "§a[CB] Reload complete. No players online — pack will be sent on next join.");
+                    } else {
+                        ChatHelper.success(src, "§a[CB] Reload complete. Config §a✓ §fBlocks §a✓ §fResource pack pushed to §f"
+                            + onlineCount + "§a player(s).");
+                    }
+                });
+            } finally {
+                RELOAD_IN_PROGRESS.set(false);
+            }
         }, "CustomBlocks-Reload").start();
         return 1;
     }
@@ -6224,6 +6493,180 @@ public class CustomBlockCommand {
             ChatHelper.warn(src, "§e" + key + " §7changed in memory but config save failed: §f" + e.getMessage() +
                 "§7. Changes will not persist through restart.");
         }
+    }
+
+    // ── /cb arabic handlers ──────────────────────────────────────────────────
+
+    private static int cmdArabicImport(ServerCommandSource src, String basePath) {
+        String[] COLORS  = {"black", "yellow", "green", "red"};
+        String[] FOLDERS = {"BLACK", "YELLOW", "GREEN", "RED"};
+        ChatHelper.info(src, "§7Starting Arabic import from §f" + basePath + "§7...");
+
+        EXECUTOR.submit(() -> {
+            int imported = 0, skipped = 0, failed = 0;
+
+            // Letter color folders: BLACK/, YELLOW/, GREEN/, RED/
+            for (int ci = 0; ci < COLORS.length; ci++) {
+                String color  = COLORS[ci];
+                Path folder = Path.of(basePath, FOLDERS[ci]);
+                if (!Files.isDirectory(folder)) {
+                    final String msg = "Folder not found: " + folder + " — skipping " + color;
+                    src.getServer().execute(() -> ChatHelper.warn(src, msg));
+                    continue;
+                }
+                try (var stream = Files.list(folder)) {
+                    for (Path file : stream.filter(f -> f.getFileName().toString().endsWith(".png")).toList()) {
+                        String fname      = file.getFileName().toString();
+                        // fname = "<letter_name>_<color>.png"
+                        String letterName = fname.replace("_" + color + ".png", "");
+                        String customId   = "arabic_" + letterName + "_" + color;
+                        String dispName   = "Arabic " +
+                            com.customblocks.arabic.ArabicLetterMap.displayName(letterName) + " " +
+                            Character.toUpperCase(color.charAt(0)) + color.substring(1);
+
+                        if (SlotManager.getById(customId) != null) { skipped++; continue; }
+                        try {
+                            byte[] bytes = Files.readAllBytes(file);
+                            SlotData created = SlotManager.assign(customId, dispName, bytes);
+                            if (created == null) { failed++; continue; }
+                            boolean nonJoin = com.customblocks.arabic.ArabicLetterMap.isNonJoining(letterName);
+                            SlotManager.update(customId, d -> d
+                                .withIsLetter(true)
+                                .withLetterConnectsLeft(!nonJoin)
+                                .withLetterGroup("arabic_" + letterName)
+                                .withLetterForm("isolated"));
+                            com.customblocks.arabic.ArabicBlockRegistry.register(letterName, color, customId);
+                            imported++;
+                        } catch (Exception e) {
+                            failed++;
+                            CustomBlocksMod.LOGGER.error("[CB/Arabic] Failed to import {}: {}", file, e.getMessage());
+                        }
+                    }
+                } catch (Exception e) {
+                    final String msg = "Error scanning " + folder + ": " + e.getMessage();
+                    src.getServer().execute(() -> ChatHelper.warn(src, msg));
+                }
+            }
+
+            // arabic_numbers_png/ folder: a0_black.png, a0_green.png, etc.
+            Path numFolder = Path.of(basePath, "arabic_numbers_png");
+            if (Files.isDirectory(numFolder)) {
+                try (var stream = Files.list(numFolder)) {
+                    for (Path file : stream.filter(f -> f.getFileName().toString().endsWith(".png")).toList()) {
+                        String fname = file.getFileName().toString().replace(".png", "");
+                        // fname = "a0_black", "a9_red", etc.
+                        int ul = fname.lastIndexOf('_');
+                        if (ul < 0) { failed++; continue; }
+                        String letterName = fname.substring(0, ul);      // e.g. "a0"
+                        String color      = fname.substring(ul + 1).toLowerCase(Locale.ROOT); // e.g. "black"
+                        String customId   = "arabic_" + letterName + "_" + color;
+                        String dispName   = "Arabic " + letterName.toUpperCase() + " " +
+                            Character.toUpperCase(color.charAt(0)) + color.substring(1);
+
+                        if (SlotManager.getById(customId) != null) { skipped++; continue; }
+                        try {
+                            byte[] bytes = Files.readAllBytes(file);
+                            SlotData created = SlotManager.assign(customId, dispName, bytes);
+                            if (created != null) {
+                                SlotManager.update(customId, d -> d
+                                    .withIsLetter(true)
+                                    .withLetterGroup("arabic_" + letterName)
+                                    .withLetterForm("isolated"));
+                                com.customblocks.arabic.ArabicBlockRegistry.register(letterName, color, customId);
+                                imported++;
+                            } else { failed++; }
+                        } catch (Exception e) { failed++; }
+                    }
+                } catch (Exception ignore) {}
+            }
+
+            // Trigger resource pack rebuild so clients see the new blocks
+            NetworkManager.broadcastFullSync(src.getServer());
+
+            final int fi = imported, fs = skipped, ff = failed;
+            src.getServer().execute(() -> {
+                ChatHelper.success(src, "Arabic import done: §f" + fi + " §aimported, §f" +
+                    fs + " §askipped, §f" + ff + " §cfailed.");
+                if (fi > 0)
+                    ChatHelper.info(src, "§7Resource pack rebuilding — reconnect in ~10s to see new blocks.");
+            });
+        });
+        return 1;
+    }
+
+    private static int cmdArabicGive(ServerCommandSource src, String letterName, String color) {
+        ServerPlayerEntity p = src.getPlayer();
+        if (p == null) { ChatHelper.error(src, "Player only."); return 0; }
+        String col = color.toLowerCase(Locale.ROOT);
+        String customId = com.customblocks.arabic.ArabicBlockRegistry.lookup(letterName, col);
+        if (customId == null) {
+            ChatHelper.error(src, "§fArabic " + letterName + " (" + col +
+                ") §cnot imported. Run §f/cb arabic import <path> §cfirst.");
+            return 0;
+        }
+        SlotData d = SlotManager.getById(customId);
+        if (d == null) {
+            ChatHelper.error(src, "Block §f" + customId + " §cis in the registry but not in SlotManager.");
+            return 0;
+        }
+        com.customblocks.block.SlotBlock.SlotItem si = CustomBlocksMod.safeSlotItem(d.index);
+        if (si == null) { ChatHelper.error(src, "Block §f" + customId + " §chas no registered item."); return 0; }
+        ItemStack stack = new ItemStack(si);
+        if (!p.getInventory().insertStack(stack)) {
+            p.dropItem(stack, false);
+            ChatHelper.info(src, "Inventory full — §f" + d.displayName + " §7dropped at your feet.");
+        } else {
+            ChatHelper.success(src, "Gave §f" + d.displayName + "§a.");
+        }
+        return 1;
+    }
+
+    private static int cmdArabicText(ServerCommandSource src, String color, String text) {
+        ServerPlayerEntity p = src.getPlayer();
+        if (p == null) { ChatHelper.error(src, "Player only."); return 0; }
+        if (!com.customblocks.arabic.ArabicBlockRegistry.hasAny()) {
+            ChatHelper.error(src, "No Arabic blocks imported yet. Run §f/cb arabic import <path> §cfirst.");
+            return 0;
+        }
+        String col = color.toLowerCase(Locale.ROOT);
+        List<String> blockIds = new ArrayList<>();
+        List<Character> missing = new ArrayList<>();
+
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (Character.isWhitespace(ch)) continue;
+            String blockId = com.customblocks.arabic.ArabicBlockRegistry.lookupByChar(ch, col);
+            if (blockId == null) {
+                // Try Western digit as a-style: '5' -> "a5"
+                if (ch >= '0' && ch <= '9')
+                    blockId = com.customblocks.arabic.ArabicBlockRegistry.lookup("a" + ch, col);
+            }
+            if (blockId == null) { missing.add(ch); continue; }
+            blockIds.add(blockId);
+        }
+
+        if (blockIds.isEmpty()) {
+            ChatHelper.error(src, "No imported letters found for \"" + text + "\" in " + col + ".");
+            return 0;
+        }
+
+        // Reverse so the player places left-to-right for RTL reading order
+        Collections.reverse(blockIds);
+        int given = 0;
+        for (String id : blockIds) {
+            SlotData d = SlotManager.getById(id);
+            if (d == null) continue;
+            com.customblocks.block.SlotBlock.SlotItem si = CustomBlocksMod.safeSlotItem(d.index);
+            if (si == null) continue;
+            ItemStack stack = new ItemStack(si);
+            if (!p.getInventory().insertStack(stack)) p.dropItem(stack, false);
+            given++;
+        }
+        ChatHelper.success(src, "Gave §f" + given + " §aletter block" + (given == 1 ? "" : "s") +
+            "§a. Place left→right for correct Arabic reading order.");
+        if (!missing.isEmpty())
+            ChatHelper.warn(src, "§7" + missing.size() + " character(s) not found in the " + col + " set.");
+        return 1;
     }
 
     // ── Phase 10.5 — /cb screenshot ───────────────────────────────────────────

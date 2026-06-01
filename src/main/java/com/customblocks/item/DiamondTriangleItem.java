@@ -81,7 +81,6 @@ public class DiamondTriangleItem extends Item {
     public ActionResult useOnBlock(ItemUsageContext ctx) {
         World        world  = ctx.getWorld();
         PlayerEntity player = ctx.getPlayer();
-        if (world.isClient) return ActionResult.PASS;
         if (!(player instanceof ServerPlayerEntity sp)) return ActionResult.PASS;
         if (!PermissionHelper.canUseTool(sp)) {
             sp.sendMessage(PermissionHelper.toolPermissionDeniedMessage(), true);

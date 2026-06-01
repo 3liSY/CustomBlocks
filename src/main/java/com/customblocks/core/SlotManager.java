@@ -1317,6 +1317,33 @@ public final class SlotManager {
         }
     }
 
+    /**
+     * REL1 — Flush pending saves for /cb reload WITHOUT shutting down IO_EXECUTOR.
+     * flushSave() is for server shutdown (shuts down the executor permanently).
+     * This method is for mid-session reload: saves dirty state and waits for IO to settle,
+     * but keeps the executor alive so subsequent saves continue to work.
+     */
+    public static void flushSaveForReload() {
+        if (dirty) {
+            dirty = false;
+            saveAllAsync();
+        }
+        // Submit a sentinel task and block until it completes — guarantees all
+        // previously queued IO tasks have finished (single-threaded executor = FIFO).
+        try {
+            IO_EXECUTOR.submit(() -> {}).get(10, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            LOGGER.warn("[CustomBlocks] flushSaveForReload: IO did not settle within 10s");
+        } catch (Exception e) {
+            LOGGER.warn("[CustomBlocks] flushSaveForReload: interrupted: {}", e.getMessage());
+        }
+    }
+
+    /** REL1 — Returns true while the tick-based batch loader is still processing slots after loadAll(). */
+    public static boolean isStartupLoadInProgress() {
+        return startupLoadInProgress;
+    }
+
 
 
     public static void saveAllAsync() {

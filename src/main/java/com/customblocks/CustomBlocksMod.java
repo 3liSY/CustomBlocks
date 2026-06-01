@@ -32,6 +32,7 @@ import com.customblocks.item.LuminaBrushItem;
 import com.customblocks.item.AmethystChiselItem;
 
 import com.customblocks.item.DiamondTriangleItem;
+import com.customblocks.item.DeleterItem;
 
 import com.customblocks.network.FullSyncPayload;
 
@@ -233,7 +234,13 @@ public class CustomBlocksMod implements ModInitializer {
 
         // ── Color Triangle items ─────────────────────────────────────────────
 
-        int[][] triColors = {{10,10,10}, {240,200,20}, {30,140,30}, {238,51,51}};
+        // NF4: parse RGB from config hex strings so admins can change tool colors
+        int[][] triColors = {
+            parseHexRgb(CustomBlocksConfig.triangleBlackHex,  10,  10,  10),
+            parseHexRgb(CustomBlocksConfig.triangleYellowHex, 240, 200,  20),
+            parseHexRgb(CustomBlocksConfig.triangleGreenHex,   30, 140,  30),
+            parseHexRgb(CustomBlocksConfig.triangleRedHex,    238,  51,  51)
+        };
 
         String[][] triMeta = {{"black", "Black"}, {"yellow", "Yellow"}, {"green", "Green"}, {"red", "Red"}};
 
@@ -306,6 +313,10 @@ public class CustomBlocksMod implements ModInitializer {
         Registry.register(Registries.ITEM, diamondId, diamondItem);
 
 
+
+        // ── Deleter Tool (NF2) ───────────────────────────────────────────────
+        Registry.register(Registries.ITEM, Identifier.of(MOD_ID, "deleter"),
+            new DeleterItem(new Item.Settings().maxCount(1)));
 
         // ── Tab icon item ────────────────────────────────────────────────────
         TAB_ICON_ITEM = Registry.register(
@@ -812,6 +823,7 @@ public class CustomBlocksMod implements ModInitializer {
         com.customblocks.core.WelcomeManager.load();
         com.customblocks.core.SnapshotManager.start(CustomBlocksConfig.autoSnapshotMinutes);
         com.customblocks.core.TrashManager.load(); // V4-18
+        com.customblocks.arabic.ArabicBlockRegistry.load(); // Arabic letter blocks
 
         // ── Display Block Hooks ──────────────────────────────────────────────
         // Detect placement of a tagged display block, intercept right-clicks
@@ -909,6 +921,18 @@ public class CustomBlocksMod implements ModInitializer {
     /** Returns the registered SLOT_ITEMS length (0 if not yet initialised). */
     public static int slotRegistrySize() {
         return SLOT_ITEMS == null ? 0 : SLOT_ITEMS.length;
+    }
+
+    /** NF4: parse a hex color string like "#EE3333" into [r,g,b]. Falls back to defaults on bad input. */
+    public static int[] parseHexRgb(String hex, int defaultR, int defaultG, int defaultB) {
+        if (hex != null) {
+            String h = hex.startsWith("#") ? hex.substring(1) : hex;
+            try {
+                int rgb = Integer.parseInt(h, 16);
+                return new int[]{(rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF};
+            } catch (NumberFormatException ignored) {}
+        }
+        return new int[]{defaultR, defaultG, defaultB};
     }
 
 

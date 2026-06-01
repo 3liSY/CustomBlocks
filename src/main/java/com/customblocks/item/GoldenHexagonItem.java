@@ -101,19 +101,19 @@ public class GoldenHexagonItem extends Item {
         BlockPos     pos    = ctx.getBlockPos();
         PlayerEntity player = ctx.getPlayer();
 
-        if (world.isClient) return ActionResult.PASS;
-
         BlockState state = world.getBlockState(pos);
         if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
 
         if (player != null && !PermissionHelper.canUseTool(player)) {
-            player.sendMessage(PermissionHelper.toolPermissionDeniedMessage(), true);
+            if (!world.isClient) player.sendMessage(PermissionHelper.toolPermissionDeniedMessage(), true);
             if (world instanceof ServerWorld sw)
                 sw.playSound(null, player.getBlockPos(),
                     net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),
                     net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
             return ActionResult.FAIL;
         }
+
+        if (world.isClient) return ActionResult.PASS;
 
         SlotData data = SlotManager.getBySlot(sb.getSlotKey());
         if (data == null) return ActionResult.PASS;

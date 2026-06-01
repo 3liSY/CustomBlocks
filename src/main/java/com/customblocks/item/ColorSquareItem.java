@@ -63,12 +63,27 @@ public class ColorSquareItem extends Item {
 
     @Override
     public Text getName() {
-        return Text.literal(colorName + " Square");
+        String hex = builtInHex(colorWord);
+        return Text.literal(colorName + " Square" + (hex.isEmpty() ? "" : " §8[" + hex + "]"));
+    }
+
+    private String builtInHex(String word) {
+        return switch (word) {
+            case "black"  -> CustomBlocksConfig.triangleBlackHex  != null ? CustomBlocksConfig.triangleBlackHex  : "";
+            case "yellow" -> CustomBlocksConfig.triangleYellowHex != null ? CustomBlocksConfig.triangleYellowHex : "";
+            case "green"  -> CustomBlocksConfig.triangleGreenHex  != null ? CustomBlocksConfig.triangleGreenHex  : "";
+            case "red"    -> CustomBlocksConfig.triangleRedHex    != null ? CustomBlocksConfig.triangleRedHex    : "";
+            default -> "";
+        };
     }
 
     @Override
     public Text getName(ItemStack stack) {
         SquareColor color = resolveColor(stack);
+        if (!isCustomSquare(stack)) {
+            String hex = builtInHex(colorWord);
+            if (!hex.isEmpty()) return Text.literal(color.label() + " Square §8[" + hex + "]");
+        }
         return Text.literal(color.label() + " Square");
     }
 
@@ -124,7 +139,29 @@ public class ColorSquareItem extends Item {
         BlockPos pos = ctx.getBlockPos();
         PlayerEntity player = ctx.getPlayer();
 
-        if (world.isClient) return ActionResult.PASS;
+        if (world.isClient) {
+            BlockState clientState = world.getBlockState(pos);
+            if (!(clientState.getBlock() instanceof SlotBlock csb)) return ActionResult.PASS;
+            SlotData clientCurrent = SlotManager.getBySlot(csb.getSlotKey());
+            if (clientCurrent == null) return ActionResult.PASS;
+            SquareColor clientColor = resolveColor(ctx.getStack());
+            String clientTargetId = resolveTargetId(clientCurrent.customId, clientColor.key(), null, clientCurrent.cachedColorFamily);
+            if (!clientTargetId.equals(clientCurrent.customId)) {
+                SlotData clientTarget = SlotManager.getById(clientTargetId);
+                if (clientTarget == null) {
+                    String baseId = findBaseId(clientTargetId, clientColor.key());
+                    clientTarget = baseId != null ? SlotManager.getById(baseId) : null;
+                }
+                if (clientTarget != null) {
+                    SlotBlock clientTargetBlock = CustomBlocksMod.safeSlotBlock(clientTarget.index);
+                    if (clientTargetBlock != null) {
+                        world.setBlockState(pos, clientTargetBlock.getDefaultState(),
+                            Block.NOTIFY_LISTENERS | Block.FORCE_STATE);
+                    }
+                }
+            }
+            return ActionResult.SUCCESS;
+        }
 
         BlockState state = world.getBlockState(pos);
         if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
@@ -190,18 +227,17 @@ public class ColorSquareItem extends Item {
                 return ActionResult.FAIL;
             }
             target = baseBlock;
-            // Self-same check: fallback resolved to the same block — no variant exists
+            // COL11 — Self-same check: base block IS the target color, no variant needed
             if (target.customId.equals(current.customId)) {
                 if (player != null) {
-                    player.sendMessage(Text.literal(
-                        "§c[CB] §fNo §c" + color.label() + "§f variant found for '§f" + current.displayName + "§f'."), true);
+                    player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_square_already_color", color.label())), true);
                     if (world instanceof ServerWorld sw) {
                         sw.playSound(null, player.getBlockPos(),
-                            net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),
-                            net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
+                            net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_CHIME.value(),
+                            net.minecraft.sound.SoundCategory.PLAYERS, 0.5f, 1.2f);
                     }
                 }
-                return ActionResult.FAIL;
+                return ActionResult.SUCCESS;
             }
         }
 
@@ -255,14 +291,8 @@ public class ColorSquareItem extends Item {
             }
         }
 
-        // Layer 2 — use pre-cached family if available; otherwise run pixel analysis
+        // Layer 2 — use pre-cached family only; lazy pixel analysis removed (COL2)
         String dominantFamily = cachedFamily;
-        if (dominantFamily == null && textureBytes != null && textureBytes.length > 0) {
-            ColorDetection.DetectionResult result = ColorDetection.detect(textureBytes);
-            if (result.confident() && result.primary != null) {
-                dominantFamily = result.primary;
-            }
-        }
         if (dominantFamily != null) {
             for (int i = 0; i < segments.length; i++) {
                 if (segments[i].equalsIgnoreCase(dominantFamily)) {
@@ -327,7 +357,7 @@ public class ColorSquareItem extends Item {
                 (labA[2]-labB[2])*(labA[2]-labB[2]));
             if (dE < bestDist) { bestDist = dE; closest = c.name(); }
         }
-        return (closest != null && bestDist < 25.0) ? closest : "";
+        return (closest != null && bestDist < 25.0) ? closest : "Hex #" + hexForRgb(rgb);
     }
 
     private static String keyForRgb(int rgb) {

@@ -105,9 +105,16 @@ public class ColorTriangleItem extends Item {
         this.colorName = colorName;
     }
 
-    @Override public Text getName()                { return Text.literal(colorName + " Triangle"); }
+    @Override public Text getName()                {
+        String hex = String.format(Locale.ROOT, "#%02X%02X%02X", targetR, targetG, targetB);
+        return Text.literal(colorName + " Triangle §8[" + hex + "]");
+    }
     @Override public Text getName(ItemStack stack) {
         TriangleColor color = resolveColor(stack);
+        if (!isCustomTriangle(stack)) {
+            String hex = String.format(Locale.ROOT, "#%02X%02X%02X", color.r(), color.g(), color.b());
+            return Text.literal(color.label() + " Triangle §8[" + hex + "]");
+        }
         return Text.literal(color.label() + " Triangle");
     }
 
@@ -163,18 +170,16 @@ public class ColorTriangleItem extends Item {
         BlockPos     pos    = ctx.getBlockPos();
         PlayerEntity player = ctx.getPlayer();
 
-        if (world.isClient) return ActionResult.PASS;
-
         BlockState state = world.getBlockState(pos);
         if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
 
         if (player != null && !PermissionHelper.canUseTool(player)) {
-            player.sendMessage(PermissionHelper.toolPermissionDeniedMessage(), true);
+            if (!world.isClient) player.sendMessage(PermissionHelper.toolPermissionDeniedMessage(), true);
             if (world instanceof ServerWorld sw) sw.playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(), net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
             return ActionResult.FAIL;
         }
         if (!CustomBlocksConfig.isColorToolModeConfigured()) {
-            if (player != null) {
+            if (player != null && !world.isClient) {
                 player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_color_not_configured")), true);
                 player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_color_config_hint")), true);
             }
@@ -186,15 +191,22 @@ public class ColorTriangleItem extends Item {
 
         // ── 3.5 Shift+right-click → confirmation GUI before creating color variant ──
         if (player != null && player.isSneaking()) {
+            if (!(player instanceof net.minecraft.server.network.ServerPlayerEntity sp)) return ActionResult.PASS;
             TriangleColor color = resolveColor(ctx.getStack());
             String baseId  = stripColorSuffix(source.customId);
             String newId   = baseId + "_" + color.key();
             String newName = deriveDisplayName(source.displayName, color.label());
             var job = new com.customblocks.gui.GuiManager.RecolorJob(
                 source.customId, newId, newName, color.r(), color.g(), color.b());
-            com.customblocks.gui.GuiManager.openRecolorConfirmGui(
-                (net.minecraft.server.network.ServerPlayerEntity) player, job);
+            com.customblocks.gui.GuiManager.openRecolorConfirmGui(sp, job);
             return ActionResult.SUCCESS;
+        }
+
+        if (world.isClient) return ActionResult.PASS;
+
+        if ("none".equals(com.customblocks.CustomBlocksConfig.colorToolBackgroundMode)) {
+            if (player != null) player.sendMessage(Text.literal("§e[CB] Colour Triangle is disabled in 'No Background Removal' mode. Change mode in §f/cb config§e."), true);
+            return ActionResult.PASS;
         }
 
         TriangleColor color = resolveColor(ctx.getStack());
@@ -520,23 +532,22 @@ public class ColorTriangleItem extends Item {
         for (int x = 0; x < w; x++) {
             for (int y = 0; y < h; y++) {
                 if (visited[x][y] || scanned[x][y]) continue;
-                if (!isHoleCandidate(img, x, y)) {
-                    scanned[x][y] = true;
-                    continue;
-                }
+                // We start BFS from any unvisited pixel, candidate or not.
+                // The region will only be filled if it contains at least one candidate.
 
                 List<int[]> component = new ArrayList<>();
                 Queue<int[]> q = new ArrayDeque<>();
                 q.add(new int[]{x, y});
                 scanned[x][y] = true;
                 boolean touchesEdge = false;
-                boolean hasNonCandidate = false;
+                boolean hasCandidate = false;
 
                 while (!q.isEmpty()) {
                     int[] p = q.poll();
                     int cx = p[0], cy = p[1];
                     component.add(p);
                     if (cx == 0 || cy == 0 || cx == w - 1 || cy == h - 1) touchesEdge = true;
+                    if (isHoleCandidate(img, cx, cy)) hasCandidate = true;
 
                     for (int[] d : dirs) {
                         int nx = cx + d[0], ny = cy + d[1];
@@ -544,13 +555,12 @@ public class ColorTriangleItem extends Item {
                         if (visited[nx][ny]) continue;
                         if (scanned[nx][ny]) continue;
                         scanned[nx][ny] = true;
-                        if (isHoleCandidate(img, nx, ny)) q.add(new int[]{nx, ny});
-                        else hasNonCandidate = true;
+                        q.add(new int[]{nx, ny});
                     }
                 }
 
                 if (touchesEdge) continue;
-                if (hasNonCandidate) continue;
+                if (!hasCandidate) continue;
                 if (component.size() > maxPixels) continue;
                 for (int[] p : component) {
                     img.setRGB(p[0], p[1], newArgb);
@@ -712,7 +722,7 @@ public class ColorTriangleItem extends Item {
                 (labA[2]-labB[2])*(labA[2]-labB[2]));
             if (dE < bestDist) { bestDist = dE; closest = c.name(); }
         }
-        return (closest != null && bestDist < 25.0) ? closest : "";
+        return (closest != null && bestDist < 25.0) ? closest : "Hex #" + String.format(Locale.ROOT, "%06X", rgb & 0xFFFFFF);
     }
 
     private static String keyForRgb(int rgb) {

@@ -578,11 +578,16 @@ public class ResourcePackGenerator {
 
             // ── Color Square items — flat 16x16 coloured squares ─────────────────────
 
-            String[][] squares = {{"black_square",  "10,10,10"},
-
-                                   {"yellow_square", "240,200,20"},
-
-                                   {"green_square",  "30,140,30"}};
+            // NF4: use config hex values so changing colors in /cb config regenerates icons
+            int[] bk = com.customblocks.CustomBlocksMod.parseHexRgb(com.customblocks.CustomBlocksConfig.triangleBlackHex,  10,  10,  10);
+            int[] ye = com.customblocks.CustomBlocksMod.parseHexRgb(com.customblocks.CustomBlocksConfig.triangleYellowHex, 240, 200,  20);
+            int[] gr = com.customblocks.CustomBlocksMod.parseHexRgb(com.customblocks.CustomBlocksConfig.triangleGreenHex,   30, 140,  30);
+            int[] rd = com.customblocks.CustomBlocksMod.parseHexRgb(com.customblocks.CustomBlocksConfig.triangleRedHex,    238,  51,  51);
+            String[][] squares = {
+                {"black_square",  bk[0]+","+bk[1]+","+bk[2]},
+                {"yellow_square", ye[0]+","+ye[1]+","+ye[2]},
+                {"green_square",  gr[0]+","+gr[1]+","+gr[2]},
+                {"red_square",    rd[0]+","+rd[1]+","+rd[2]}};
 
             for (String[] sq : squares) {
 
@@ -622,11 +627,11 @@ public class ResourcePackGenerator {
 
             // Color Triangle items
 
-            String[][] triangles = {{"black_triangle",  "10,10,10"},
-
-                                     {"yellow_triangle", "240,200,20"},
-
-                                     {"green_triangle",  "30,140,30"}};
+            String[][] triangles = {
+                {"black_triangle",  bk[0]+","+bk[1]+","+bk[2]},
+                {"yellow_triangle", ye[0]+","+ye[1]+","+ye[2]},
+                {"green_triangle",  gr[0]+","+gr[1]+","+gr[2]},
+                {"red_triangle",    rd[0]+","+rd[1]+","+rd[2]}};
 
             for (String[] tr : triangles) {
 

@@ -83,13 +83,11 @@ public class LuminaBrushItem extends Item {
         BlockPos     pos    = ctx.getBlockPos();
         PlayerEntity player = ctx.getPlayer();
 
-        if (world.isClient) return ActionResult.PASS;
-
         BlockState state = world.getBlockState(pos);
         if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
 
         if (player != null && !PermissionHelper.canUseTool(player)) {
-            player.sendMessage(PermissionHelper.toolPermissionDeniedMessage(), true);
+            if (!world.isClient) player.sendMessage(PermissionHelper.toolPermissionDeniedMessage(), true);
             if (world instanceof ServerWorld sw)
                 sw.playSound(null, player.getBlockPos(),
                     net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),

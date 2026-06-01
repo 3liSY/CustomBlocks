@@ -203,7 +203,7 @@ public final class ImageProcessor {
     private static boolean isFringeWithTolerance(int argb, int tolerance) {
         if (tolerance < 0) return false;
         int a = (argb >> 24) & 0xFF;
-        if (a < OPAQUE_THRESHOLD) return true;
+        if (a < OPAQUE_THRESHOLD) return false;
         if (tolerance == 0) return false;
         return CustomBlocksConfig.bgRemovalUseYcbcr
             ? isNearWhiteYcbcr(argb, tolerance)
@@ -215,6 +215,8 @@ public final class ImageProcessor {
      * tolerance. Pass -1 to skip the fringe dilation pass entirely.
      */
     public static byte[] replaceBackgroundWithFringeTolerance(byte[] pngBytes, int fringeTol) throws IOException {
+        if (!com.customblocks.CustomBlocksConfig.bgRemovalEnabled) return pngBytes;
+        if ("none".equals(com.customblocks.CustomBlocksConfig.colorToolBackgroundMode)) return pngBytes;
         BufferedImage img = ImageIO.read(new ByteArrayInputStream(pngBytes));
         if (img == null) return pngBytes;
         int w = img.getWidth(), h = img.getHeight();
@@ -281,6 +283,7 @@ public final class ImageProcessor {
                 int pixel = argb.getRGB(x, y);
                 int a = (pixel >> 24) & 0xFF;
                 if (a == 255) continue;
+                if (a == 0) { argb.setRGB(x, y, BLACK); continue; } // fully transparent, not flood-filled → black
                 int r = (int)(((pixel >> 16) & 0xFF) * a / 255.0 + bgR * (255 - a) / 255.0 + 0.5);
                 int g = (int)(((pixel >>  8) & 0xFF) * a / 255.0 + bgG * (255 - a) / 255.0 + 0.5);
                 int b = (int)( (pixel        & 0xFF) * a / 255.0 + bgB * (255 - a) / 255.0 + 0.5);
@@ -520,6 +523,8 @@ public final class ImageProcessor {
      * The result is always a 100% opaque image with a clean black background.
      */
     public static byte[] replaceBackground(byte[] pngBytes) throws IOException {
+        if (!com.customblocks.CustomBlocksConfig.bgRemovalEnabled) return pngBytes;
+        if ("none".equals(com.customblocks.CustomBlocksConfig.colorToolBackgroundMode)) return pngBytes;
         BufferedImage img = ImageIO.read(new ByteArrayInputStream(pngBytes));
         if (img == null) return pngBytes;
         int w = img.getWidth(), h = img.getHeight();
@@ -532,9 +537,7 @@ public final class ImageProcessor {
         // Determine effective tolerance — auto-detect or config value
         final int effectiveTol;
         if (CustomBlocksConfig.bgRemovalAutoDetect) {
-            int autoTol = autoTolerance(argb);
-            int cfgTol  = CustomBlocksConfig.bgRemovalTolerance;
-            effectiveTol = (cfgTol > 0) ? Math.min(autoTol, cfgTol) : autoTol;
+            effectiveTol = autoTolerance(argb);
         } else {
             effectiveTol = CustomBlocksConfig.bgRemovalTolerance;
         }
@@ -606,6 +609,7 @@ public final class ImageProcessor {
                 int pixel = argb.getRGB(x, y);
                 int a = (pixel >> 24) & 0xFF;
                 if (a == 255) continue; // already fully opaque — skip
+                if (a == 0) { argb.setRGB(x, y, BLACK); continue; } // fully transparent, not flood-filled → black
                 // Composite against white: out = src * (a/255) + white * ((255-a)/255)
                 int r = (int)(((pixel >> 16) & 0xFF) * a / 255.0 + bgR * (255 - a) / 255.0 + 0.5);
                 int g = (int)(((pixel >>  8) & 0xFF) * a / 255.0 + bgG * (255 - a) / 255.0 + 0.5);
@@ -628,6 +632,8 @@ public final class ImageProcessor {
      * @param rgb      target fill colour as 0xRRGGBB (alpha is ignored — always fully opaque)
      */
     public static byte[] replaceBackgroundWithColor(byte[] pngBytes, int rgb) throws IOException {
+        if (!com.customblocks.CustomBlocksConfig.bgRemovalEnabled) return pngBytes;
+        if ("none".equals(com.customblocks.CustomBlocksConfig.colorToolBackgroundMode)) return pngBytes;
         int fillR = (rgb >> 16) & 0xFF;
         int fillG = (rgb >>  8) & 0xFF;
         int fillB =  rgb        & 0xFF;
@@ -692,7 +698,7 @@ public final class ImageProcessor {
      */
     public static boolean isBackground(int argb) {
         int a = (argb >> 24) & 0xFF;
-        if (a < OPAQUE_THRESHOLD) return true;
+        if (a < OPAQUE_THRESHOLD) return false;
         if (CustomBlocksConfig.bgRemovalTolerance <= 0) return false;
         int tolerance = CustomBlocksConfig.bgRemovalTolerance;
         return CustomBlocksConfig.bgRemovalUseYcbcr
@@ -703,7 +709,7 @@ public final class ImageProcessor {
     /** Overload used by replaceBackground() when an explicit per-image tolerance is active. */
     private static boolean isBackground(int argb, int tolerance) {
         int a = (argb >> 24) & 0xFF;
-        if (a < OPAQUE_THRESHOLD) return true;
+        if (a < OPAQUE_THRESHOLD) return false;
         if (tolerance <= 0) return false;
         return CustomBlocksConfig.bgRemovalUseYcbcr
             ? isNearWhiteYcbcr(argb, tolerance)
@@ -713,7 +719,7 @@ public final class ImageProcessor {
     /** Fringe check with explicit tolerance (used when per-image tolerance is active). */
     private static boolean isFringe(int argb, int tolerance) {
         int a = (argb >> 24) & 0xFF;
-        if (a < OPAQUE_THRESHOLD) return true;
+        if (a < OPAQUE_THRESHOLD) return false;
         if (tolerance <= 0) return false;
         return CustomBlocksConfig.bgRemovalUseYcbcr
             ? isNearWhiteYcbcr(argb, tolerance)
@@ -759,8 +765,8 @@ public final class ImageProcessor {
         if (scores.isEmpty()) return 20;
         java.util.Collections.sort(scores);
         int p90idx = Math.min((int) Math.round(scores.size() * 0.90), scores.size() - 1);
-        int autoTol = (int) Math.ceil(scores.get(p90idx)) + 5;
-        return Math.max(5, Math.min(45, autoTol));
+        int autoTol = (int) Math.ceil(scores.get(p90idx));
+        return Math.max(0, Math.min(100, autoTol));
     }
 
     // ── Phase 9: Video-to-texture (MP4/MOV) ────────────────────────────────────
@@ -1339,11 +1345,7 @@ public final class ImageProcessor {
         if (img.getWidth() == targetSize && img.getHeight() == targetSize) return pngBytes;
         BufferedImage out = new BufferedImage(targetSize, targetSize, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = out.createGraphics();
-        // Phase 4A.9 — adaptive interpolation: nearest-neighbor for pixel art (<64px), bicubic otherwise
-        int srcWidth = img.getWidth(), srcHeight = img.getHeight();
-        Object interpHint = (srcWidth < 64 || srcHeight < 64)
-                ? RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR
-                : RenderingHints.VALUE_INTERPOLATION_BICUBIC;
+        Object interpHint = RenderingHints.VALUE_INTERPOLATION_BICUBIC;
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, interpHint);
         g.setRenderingHint(RenderingHints.KEY_RENDERING,     RenderingHints.VALUE_RENDER_QUALITY);
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,  RenderingHints.VALUE_ANTIALIAS_ON);
@@ -1465,7 +1467,7 @@ public final class ImageProcessor {
      */
     private static boolean isFringe(int argb) {
         int a = (argb >> 24) & 0xFF;
-        if (a < OPAQUE_THRESHOLD) return true;
+        if (a < OPAQUE_THRESHOLD) return false;
         if (CustomBlocksConfig.bgRemovalTolerance <= 0) return false;
         int tolerance = CustomBlocksConfig.bgRemovalTolerance + 15;
         return CustomBlocksConfig.bgRemovalUseYcbcr

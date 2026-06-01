@@ -700,7 +700,24 @@ public class CustomBlocksClient implements ClientModInitializer {
 
                     serverMaxSlots = payload.maxSlots();
 
-
+                // COL1d — Pre-warm cachedColorFamily for blocks that already have textures
+                // (retained from a previous session). Runs on a daemon thread so it never
+                // blocks the render thread. New blocks (null texture) are skipped here and
+                // get their family computed when their texture arrives via SlotUpdatePayload.
+                Thread prewarm = new Thread(() -> {
+                    for (SlotData d : SlotManager.allSlots()) {
+                        if (d.texture != null && d.texture.length > 0 && d.cachedColorFamily == null) {
+                            com.customblocks.core.ColorDetection.DetectionResult r =
+                                com.customblocks.core.ColorDetection.detect(d.texture);
+                            if (r != null && r.confident() && r.primary != null) {
+                                d.cachedColorFamily = r.primary;
+                            }
+                        }
+                    }
+                });
+                prewarm.setDaemon(true);
+                prewarm.setName("cb-color-prewarm");
+                prewarm.start();
 
                 // 1.20 — Start the sync-wait thread. The SyncCompletePayload (sent by the
                 // server after all textures are enqueued) will wake this thread early via
@@ -1316,6 +1333,23 @@ public class CustomBlocksClient implements ClientModInitializer {
 
                 }
 
+                // COL1d — After all "add" payloads have arrived, compute cachedColorFamily
+                // for any block that now has a texture but hasn't been analysed yet.
+                Thread prewarmPost = new Thread(() -> {
+                    for (SlotData d : SlotManager.allSlots()) {
+                        if (d.texture != null && d.texture.length > 0 && d.cachedColorFamily == null) {
+                            com.customblocks.core.ColorDetection.DetectionResult r =
+                                com.customblocks.core.ColorDetection.detect(d.texture);
+                            if (r != null && r.confident() && r.primary != null) {
+                                d.cachedColorFamily = r.primary;
+                            }
+                        }
+                    }
+                });
+                prewarmPost.setDaemon(true);
+                prewarmPost.setName("cb-color-prewarm-post");
+                prewarmPost.start();
+
                 return;
 
             }
@@ -1375,6 +1409,25 @@ public class CustomBlocksClient implements ClientModInitializer {
                     } catch (Exception ignored) {}
                 }
 
+                // COL1d — real-time update outside join burst (single block add)
+                if (!joinBurst && payload.texture() != null && payload.texture().length > 0) {
+                    final String addId = payload.customId();
+                    final byte[] addTex = payload.texture();
+                    Thread t = new Thread(() -> {
+                        SlotData d = SlotManager.getById(addId);
+                        if (d != null && d.cachedColorFamily == null) {
+                            com.customblocks.core.ColorDetection.DetectionResult r =
+                                com.customblocks.core.ColorDetection.detect(addTex);
+                            if (r != null && r.confident() && r.primary != null) {
+                                d.cachedColorFamily = r.primary;
+                            }
+                        }
+                    });
+                    t.setDaemon(true);
+                    t.setName("cb-color-prewarm-add");
+                    t.start();
+                }
+
             }
 
             case "retexture" -> {
@@ -1387,6 +1440,25 @@ public class CustomBlocksClient implements ClientModInitializer {
 
                 if (TextureCache.invalidateIfChanged(payload.customId(), payload.texture()))
                     TextureCache.schedulePreload(payload.customId(), payload.texture());
+
+                // COL1d — update color family when texture changes
+                if (payload.texture() != null && payload.texture().length > 0) {
+                    final String rtxId = payload.customId();
+                    final byte[] rtxTex = payload.texture();
+                    Thread t = new Thread(() -> {
+                        SlotData d = SlotManager.getById(rtxId);
+                        if (d != null) {
+                            com.customblocks.core.ColorDetection.DetectionResult r =
+                                com.customblocks.core.ColorDetection.detect(rtxTex);
+                            if (r != null && r.confident() && r.primary != null) {
+                                d.cachedColorFamily = r.primary;
+                            }
+                        }
+                    });
+                    t.setDaemon(true);
+                    t.setName("cb-color-prewarm-rtx");
+                    t.start();
+                }
 
             }
 
