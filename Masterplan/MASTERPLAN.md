@@ -11,13 +11,13 @@
 | RT1 | Rectangle tool race fix — PACK1 now confirmed, ready to test |
 | COL9 | Hex change → "Update N blocks?" confirm screen (built Session 6, never tested) |
 | IMG1 | Download headers + auto-detect tolerance (built Session 6, never tested) |
+| TOL1 | Tolerance 80 = same as 30 — `Math.min` caps manual value |
+| PIX1 | New blocks come out pixelated |
+| COL3/4 | Enclosed holes not filling, halos remain |
 
 **Still broken (fix these first next session):**
 | ID | One-liner | Note |
 |----|-----------|------|
-| TOL1 | Tolerance 80 = same as 30 — `Math.min` caps manual value | Fix + 0–100 scale + toggle in `/cb settings` GUI. |
-| PIX1 | New blocks come out pixelated | Root cause confirmed (Nearest Neighbor). |
-| COL3/4 | Enclosed holes not filling, halos remain | Enclosed logic skips colored pixels. |
 | COL12 | Random blocks say 'No texture data to recolour' | Needs deep investigation on NBT/SlotManager disconnect. |
 | IMG2 | Uploading with background + enclosed mode broken | Re-test now that PACK1 is confirmed fixed. |
 | NF4 | Config tool colors turns tools into dyes, delayed | Model generator fallback issue. |
@@ -64,22 +64,27 @@
 - **2026-05-30 — Session 5b (in-game results + root causes).** Confirmed in-game: IMG4-S3, REDO2, UND1. Built REDO1 second fix (missing UUID). Fully confirmed the PACK1 root cause (blocks REL1 + RT1). Confirmed the TOL1 root cause. Noted the COL11 correction. UND1b design confirmed.
 - **2026-05-31 — Session 6 (quick features + NF2).** Confirmed in-game: CMD1 (`/cb settings` primary, `/cb config` alias), COL8b (red shade hex editor), AR1 (Arabic letter browser). Built COL9 (hex change → bulk recolor confirm screen using `recolourTextureForPlayer` + new `HEX_RECOLOR_CONFIRM` GuiMode). Built NF2 (Deleter Tool — `DeleterItem.java`, `/cb deleter` command, confirm GUI, shift=instant delete, trash fix for bulk delete, clickable undo link). Also discussed and cleared: NF2, AR2, AR3, COL8b, COL9, CMD1. SNP1 parked. AR2+AR3 deferred to a fresh session. Not committed.
 - **2026-06-01 — Session 7 (PACK1 investigation & testing).** Confirmed in-game: NF2, COL1/2, PACK1, PACK2, COL11. Fixed and verified PACK2, COL11, and NF2 polish in game.
-- **Git:** working tree DIRTY + UNCOMMITTED through Session 7. Rebuild before the next in-game test.
+- **2026-06-01 — Session 8 (TOL1, PIX1, COL3/4).** Fixed TOL1 (auto-detect cap), PIX1 (pixelation due to nearest neighbor), and COL3/4 (BFS traversal + 1.5x expand threshold). Built and ready for testing.
+- **Git:** working tree DIRTY + UNCOMMITTED through Session 8. Rebuild before the next in-game test.
 
 ---
 
-## 2. 🔴 Broken / Fix First (The Queue)
+## 2. 🟢 Ready for Testing (Built)
+
+### TOL1 — Tolerance Capped by Auto-Detect (80 == 30)
+**State:** 🟢 BUILT — needs in-game test.
+**File:** `core/ImageProcessor.java`, `gui/GuiManager.java`
+**Fix:** `effectiveTol` correctly falls back to `cfgTol` when auto-detect is off. Removed arbitrary `Math.min()` clamping.
+
 ### PIX1 — New Blocks Come Out Pixelated
-**State:** 🔴 BROKEN — root cause confirmed. Not built.
+**State:** 🟢 BUILT — needs in-game test.
 **Files:** `core/ImageProcessor.java`
-**Priority:** 🔴
+**Fix:** Removed the `< 64` check and ALWAYS use `RenderingHints.VALUE_INTERPOLATION_BICUBIC` for resizing, producing smooth scaling regardless of input size.
 
-**Screenshot Proof & Knowledge (2026-05-31):**
-- The screenshot of the sheep shows heavy aliasing/pixelation (sharp, jagged edges) instead of smooth interpolation.
-- **Root cause (confirmed):** `ImageProcessor.resizeTo()` has an adaptive check `(srcWidth < 64 || srcHeight < 64) ? NEAREST_NEIGHBOR : BICUBIC`. If an uploaded image is smaller than 64x64, it uses Nearest Neighbor to scale it up to 128x128. Since 128 is rarely a clean multiple of the original size, Nearest Neighbor produces badly distorted, jagged pixels.
-- **Fix:** Remove the `< 64` check and ALWAYS use `RenderingHints.VALUE_INTERPOLATION_BICUBIC` for resizing, producing smooth scaling regardless of input size.
-
----
+### COL3/4 — Enclosed holes not filling, halos remain
+**State:** 🟢 BUILT — needs in-game test.
+**Files:** `item/ColorTriangleItem.java`
+**Fix:** Fixed BFS to check for hole candidates during flood fill and raised `expandThreshold` to `1.5` to eliminate the 1px halo effect.
 
 ---
 
