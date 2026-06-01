@@ -42,3 +42,18 @@
 * The block does not visually delete on the client-side (requires a block update via `GuiManager.java`).
 * `executeBulkOpFromGui` case `"delete"` skips `TrashManager.addToTrash`.
 * Texture (generated via `GenerateDeleterTexture.java`) needs to be edited better.
+
+---
+
+## 4. COL11 Regression: "Already Red" Bug & Hex Fallbacks
+[ ] **Code Written**
+[ ] **Tested In-Game**
+
+**State:** ?? BROKEN — Bug introduced by the previous COL11 fix.
+**Files:** item/ColorSquareItem.java
+**Technical Details:** 
+* The previous COL11 fix checked if the fallback base block equalled the current block, and incorrectly assumed that meant it was *already* the target color. This hid the "No variant exists" error entirely.
+* Additionally, when a user creates a named variant (e.g., discord_red), using a Hex Square (e.g., #EE3333) fails because it specifically looks for discord_hex_ee3333.
+**The Fix:** 
+1. Re-implement the base block check to only report "Already [Color]" if current.cachedColorFamily *actually matches* the target color.
+2. Implement **Hex Fallbacks**: If a Hex Square cannot find its exact hex variant, it will fall back to searching for a standard named variant (like _red) that matches the hex's closest label.

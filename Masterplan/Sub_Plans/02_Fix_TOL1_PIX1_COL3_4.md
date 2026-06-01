@@ -12,21 +12,24 @@
 **Files:** `core/ImageProcessor.java`, `gui/GuiManager.java`
 **Technical Details:** 
 * When trying to set tolerance higher than 30, it behaved the same as 30 because the code used `Math.min(autoTol, cfgTol)` under the hood where `autoTol` was typically around 30.
-* The `/cb settings` GUI has a toggle for auto-detect which bypasses this, but we fixed the math logic so it correctly uses `autoTol` only when the toggle is enabled, and scales to 0-100 properly.
-**The Fix:** Removed the hard cap and separated the `autoTolerance` logic from the manual config tolerance.
+* **The 0-100% Scale Issue:** The GUI slider (0-100) doesn't mathematically map to 0-100% of the color spectrum properly. A 90% tolerance wasn't actually covering 90% of colors because the YCbCr luma/chroma multipliers (`1.8` and `0.85`) fall short of the true maximums.
+* **Black Border Issue:** The flood-fill algorithm requires the white background to actually touch the absolute edges of the image. Images with black borders (like the T-Rex test) will block the flood-fill entirely.
+**The Fix:** 
+1. Remove the hard cap and separate the `autoTolerance` logic from the manual config tolerance. (Done)
+2. **Rewrite the tolerance math** so that 0-100 on the slider correctly maps to 0-100% of the full YCbCr / Lab color space, ensuring 90% tolerance actually behaves like 90%.
 
 ---
 
 ## 2. PIX1: New Blocks Come Out Pixelated
-[x] **Code Written**
+[ ] **Code Written**
 [ ] **Tested In-Game**
 
-**State:** 🟢 FIXED — `< 64` check removed.
+**State:** 🔴 BROKEN — Needs smart scaling.
 **Files:** `core/ImageProcessor.java`
 **Technical Details:** 
-* `ImageProcessor.resizeTo()` had an adaptive check `(srcWidth < 64 || srcHeight < 64) ? NEAREST_NEIGHBOR : BICUBIC`.
-* If an uploaded image was smaller than 64x64, it used Nearest Neighbor to scale it up to 128x128. Since 128 is rarely a clean multiple, Nearest Neighbor produced badly distorted, jagged pixels.
-**The Fix:** Removed the `< 64` check and forced `RenderingHints.VALUE_INTERPOLATION_BICUBIC` for all resizing.
+* We previously forced everything to use Bicubic interpolation. While this makes photos look smooth and beautiful, it ruins small pixel art (like 16x16 logos) by making them blurry.
+* We need a smart approach that scales based on the input size, so pixel art stays sharp and photos stay smooth.
+**The Fix:** Implement an auto-detect in `ImageProcessor.resizeTo()`. If both `srcWidth` and `srcHeight` are `<= 64`, use `NEAREST_NEIGHBOR` (sharp). Otherwise, use `BICUBIC` (smooth).
 
 ---
 
