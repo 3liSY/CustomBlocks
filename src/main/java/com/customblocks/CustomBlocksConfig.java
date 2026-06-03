@@ -45,6 +45,7 @@ public final class CustomBlocksConfig {
      * back to CIE-Lab Delta-E.
      */
     public static volatile boolean bgRemovalUseYcbcr = true;
+    public static volatile boolean hasChosenBgMode = false;
     /**
      * When true, tolerance is computed per-image from border pixel analysis instead
      * of using bgRemovalTolerance directly. bgRemovalTolerance acts as an upper
@@ -347,6 +348,8 @@ public final class CustomBlocksConfig {
             defaultTextureSize = getInt(root, "defaultTextureSize", defaultTextureSize);
             bgRemovalTolerance = getInt(root, "bgRemovalTolerance", bgRemovalTolerance);
             bgRemovalUseYcbcr = getBool(root, "bgRemovalUseYcbcr", bgRemovalUseYcbcr);
+            colorToolBackgroundMode = getString(root, "colorToolBackgroundMode", colorToolBackgroundMode);
+            hasChosenBgMode = getBool(root, "hasChosenBgMode", hasChosenBgMode);
             bgRemovalAutoDetect = getBool(root, "bgRemovalAutoDetect", bgRemovalAutoDetect);
             bgRemovalEnabled = getBool(root, "bgRemovalEnabled", bgRemovalEnabled);
             shadowThreshold = getFloat(root, "shadowThreshold", shadowThreshold);
@@ -531,7 +534,8 @@ public final class CustomBlocksConfig {
             }
             if (!colorToolBackgroundMode.equals("unset")
                     && !colorToolBackgroundMode.equals("corners_only")
-                    && !colorToolBackgroundMode.equals("corners_and_trapped")) {
+                    && !colorToolBackgroundMode.equals("corners_and_trapped")
+                    && !colorToolBackgroundMode.equals("none")) {
                 LOGGER.warn("[CustomBlocks] Invalid colorToolBackgroundMode '{}', defaulting to 'unset'",
                         colorToolBackgroundMode);
                 colorToolBackgroundMode = "unset";
@@ -567,6 +571,8 @@ public final class CustomBlocksConfig {
             root.addProperty("defaultTextureSize", defaultTextureSize);
             root.addProperty("bgRemovalTolerance", bgRemovalTolerance);
             root.addProperty("bgRemovalUseYcbcr", bgRemovalUseYcbcr);
+            root.addProperty("colorToolBackgroundMode", colorToolBackgroundMode);
+            root.addProperty("hasChosenBgMode", hasChosenBgMode);
             root.addProperty("bgRemovalAutoDetect", bgRemovalAutoDetect);
             root.addProperty("bgRemovalEnabled", bgRemovalEnabled);
             root.addProperty("shadowThreshold", shadowThreshold);

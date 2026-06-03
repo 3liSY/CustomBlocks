@@ -325,9 +325,19 @@ public final class ImageProcessor {
         return new ProcessResult(processed, null, 1, null);
     }
 
+    private static String scrapeTenorUrl(String url) {
+        try {
+            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
+            HttpResponse<String> res = java.net.http.HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString());
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("content=\"(https://media\\.tenor\\.com/[^\"]+\\.gif)\"").matcher(res.body());
+            if (m.find()) return m.group(1);
+        } catch (Exception ignored) {}
+        return url;
+    }
+
     /**
      * Download with CDN URL rewriting.
-     * Supports Discord, Imgur, and handles redirects.
+     * Supports Discord, Imgur, Tenor, and handles redirects.
      * Max 10 MB.
      */
     @SuppressFBWarnings("DE_MIGHT_IGNORE") // best-effort stream close in error paths — original exception is always re-thrown
@@ -337,15 +347,19 @@ public final class ImageProcessor {
 
         String fetchUrl = url;
 
-        // Discord CDN — append ?format=png so Discord auto-converts WebP to PNG
-        if ((url.contains("cdn.discordapp.com") || url.contains("media.discordapp.net"))
-                && url.toLowerCase().contains(".webp")) {
-            fetchUrl = url.replaceAll("[?&]format=[^&]*", "");
+        // Scrape Tenor GIF from HTML page
+        if (fetchUrl.contains("tenor.com/view/")) {
+            fetchUrl = scrapeTenorUrl(fetchUrl);
+        }
+
+        // Discord CDN — force format=png so Discord auto-converts WebP to PNG
+        if (fetchUrl.contains("cdn.discordapp.com") || fetchUrl.contains("media.discordapp.net")) {
+            fetchUrl = fetchUrl.replaceAll("[?&]format=[^&]*", "");
             fetchUrl += (fetchUrl.contains("?") ? "&" : "?") + "format=png&quality=lossless";
         }
         // Imgur .webp → .png
-        if (url.contains("i.imgur.com") && url.toLowerCase().endsWith(".webp"))
-            fetchUrl = url.substring(0, url.length() - 5) + ".png";
+        if (fetchUrl.contains("i.imgur.com") && fetchUrl.toLowerCase().endsWith(".webp"))
+            fetchUrl = fetchUrl.substring(0, fetchUrl.length() - 5) + ".png";
 
         // Extract domain for friendly messages
         String domain;
@@ -534,25 +548,30 @@ public final class ImageProcessor {
         final int[][] DIRS = {{1,0},{-1,0},{0,1},{0,-1}};
         boolean[][] isBg   = new boolean[w][h];
 
-        // Determine effective tolerance — auto-detect or config value
-        final int effectiveTol;
-        if (CustomBlocksConfig.bgRemovalAutoDetect) {
-            effectiveTol = autoTolerance(argb);
-        } else {
-            effectiveTol = CustomBlocksConfig.bgRemovalTolerance;
-        }
+        // Determine effective tolerance — use config value
+        final int effectiveTol = CustomBlocksConfig.bgRemovalTolerance;
+
+        // "Tolerance 0 = No Background Removal"
+        if (effectiveTol <= 0) return pngBytes;
+
+        int bgArgb = sampleCornerBackground(argb, w, h);
+        int cornerA = (bgArgb >> 24) & 0xFF;
+        int cornerR = (bgArgb >> 16) & 0xFF;
+        int cornerG = (bgArgb >> 8)  & 0xFF;
+        int cornerB =  bgArgb        & 0xFF;
+        double[] bgLab = rgbToLab(bgArgb);
 
         // ── Stage 1: BFS flood-fill from ALL border pixels ───────────────────
         // Seed from every pixel on the 4 edges (not just corners) so that white
         // outlines touching any edge are caught, not just the 4 corner pixels.
         Queue<int[]> queue = new ArrayDeque<>();
         for (int x = 0; x < w; x++) {
-            if (!isBg[x][0]   && isBackground(argb.getRGB(x, 0),   effectiveTol)) { isBg[x][0]   = true; queue.add(new int[]{x, 0});   }
-            if (!isBg[x][h-1] && isBackground(argb.getRGB(x, h-1), effectiveTol)) { isBg[x][h-1] = true; queue.add(new int[]{x, h-1}); }
+            if (!isBg[x][0]   && isBackgroundDynamic(argb.getRGB(x, 0),   effectiveTol, cornerA, cornerR, cornerG, cornerB, bgLab)) { isBg[x][0]   = true; queue.add(new int[]{x, 0});   }
+            if (!isBg[x][h-1] && isBackgroundDynamic(argb.getRGB(x, h-1), effectiveTol, cornerA, cornerR, cornerG, cornerB, bgLab)) { isBg[x][h-1] = true; queue.add(new int[]{x, h-1}); }
         }
         for (int y = 1; y < h - 1; y++) {
-            if (!isBg[0][y]   && isBackground(argb.getRGB(0, y),   effectiveTol)) { isBg[0][y]   = true; queue.add(new int[]{0, y});   }
-            if (!isBg[w-1][y] && isBackground(argb.getRGB(w-1, y), effectiveTol)) { isBg[w-1][y] = true; queue.add(new int[]{w-1, y}); }
+            if (!isBg[0][y]   && isBackgroundDynamic(argb.getRGB(0, y),   effectiveTol, cornerA, cornerR, cornerG, cornerB, bgLab)) { isBg[0][y]   = true; queue.add(new int[]{0, y});   }
+            if (!isBg[w-1][y] && isBackgroundDynamic(argb.getRGB(w-1, y), effectiveTol, cornerA, cornerR, cornerG, cornerB, bgLab)) { isBg[w-1][y] = true; queue.add(new int[]{w-1, y}); }
         }
 
         if (!queue.isEmpty()) {
@@ -562,7 +581,7 @@ public final class ImageProcessor {
                 for (int[] d : DIRS) {
                     int nx = x + d[0], ny = y + d[1];
                     if (nx >= 0 && nx < w && ny >= 0 && ny < h
-                            && !isBg[nx][ny] && isBackground(argb.getRGB(nx, ny), effectiveTol)) {
+                            && !isBg[nx][ny] && isBackgroundDynamic(argb.getRGB(nx, ny), effectiveTol, cornerA, cornerR, cornerG, cornerB, bgLab)) {
                         isBg[nx][ny] = true;
                         queue.add(new int[]{nx, ny});
                     }
@@ -586,7 +605,7 @@ public final class ImageProcessor {
                             break;
                         }
                     }
-                    if (adjacentToBg && isFringe(argb.getRGB(x, y), fringeTol))
+                    if (adjacentToBg && isBackgroundDynamic(argb.getRGB(x, y), fringeTol, cornerA, cornerR, cornerG, cornerB, bgLab))
                         fringe[x][y] = true;
                 }
             }
@@ -726,6 +745,45 @@ public final class ImageProcessor {
             : deltaE(rgbToLab(argb), LAB_WHITE) <= tolerance;
     }
 
+    public static int sampleCornerBackground(BufferedImage img, int w, int h) {
+        java.util.List<Integer> samples = new java.util.ArrayList<>();
+        int[][] corners = {{0,0},{Math.max(0,w-3),0},{0,Math.max(0,h-3)},{Math.max(0,w-3),Math.max(0,h-3)}};
+        for (int[] c : corners) {
+            for (int dx = 0; dx < 3 && c[0]+dx < w; dx++) {
+                for (int dy = 0; dy < 3 && c[1]+dy < h; dy++) {
+                    samples.add(img.getRGB(c[0]+dx, c[1]+dy));
+                }
+            }
+        }
+        samples.sort(java.util.Comparator.naturalOrder());
+        return samples.get(samples.size() / 2);
+    }
+
+    private static boolean isBackgroundDynamic(int px, int tolerance, int bgA, int bgR, int bgG, int bgB, double[] bgLab) {
+        int a = (px >> 24) & 0xFF;
+        if (a < OPAQUE_THRESHOLD) return true;
+        if (bgA < OPAQUE_THRESHOLD) return a < OPAQUE_THRESHOLD;
+        
+        if (CustomBlocksConfig.bgRemovalUseYcbcr) {
+            int r = (px >> 16) & 0xFF;
+            int g = (px >> 8)  & 0xFF;
+            int b =  px        & 0xFF;
+            double y1 = 0.299 * r + 0.587 * g + 0.114 * b;
+            double cb1 = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+            double cr1 = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+
+            double y2 = 0.299 * bgR + 0.587 * bgG + 0.114 * bgB;
+            double cb2 = 128 - 0.168736 * bgR - 0.331264 * bgG + 0.5 * bgB;
+            double cr2 = 128 + 0.5 * bgR - 0.418688 * bgG - 0.081312 * bgB;
+
+            double dist = Math.sqrt(Math.pow(y1 - y2, 2) + Math.pow(cb1 - cb2, 2) + Math.pow(cr1 - cr2, 2));
+            return dist <= (tolerance * 1.5);
+        } else {
+            double[] lab = rgbToLab(px);
+            return deltaE(lab, bgLab) <= tolerance;
+        }
+    }
+
     /**
      * Compute how "not-white" a pixel is, using the same YCbCr math as isNearWhiteYcbcr.
      * Returns the effective tolerance value needed to classify this pixel as background.
@@ -745,29 +803,7 @@ public final class ImageProcessor {
         return Math.max(lumaGap / 1.8, chromaDistance / 0.85);
     }
 
-    /**
-     * Analyse border pixels to determine the optimal background removal tolerance for this image.
-     * Samples every pixel on the 4 edges, ranks them by whiteness score, and returns a value
-     * calibrated to remove only the background — not image content that happens to be near-white.
-     * Result is clamped to [5, 45].
-     */
-    static int autoTolerance(BufferedImage img) {
-        int w = img.getWidth(), h = img.getHeight();
-        java.util.ArrayList<Double> scores = new java.util.ArrayList<>((w + h) * 2);
-        for (int x = 0; x < w; x++) {
-            scores.add(whitenessScore(img.getRGB(x, 0)));
-            scores.add(whitenessScore(img.getRGB(x, h - 1)));
-        }
-        for (int y = 1; y < h - 1; y++) {
-            scores.add(whitenessScore(img.getRGB(0, y)));
-            scores.add(whitenessScore(img.getRGB(w - 1, y)));
-        }
-        if (scores.isEmpty()) return 20;
-        java.util.Collections.sort(scores);
-        int p90idx = Math.min((int) Math.round(scores.size() * 0.90), scores.size() - 1);
-        int autoTol = (int) Math.ceil(scores.get(p90idx));
-        return Math.max(0, Math.min(100, autoTol));
-    }
+
 
     // ── Phase 9: Video-to-texture (MP4/MOV) ────────────────────────────────────
 

@@ -1,46 +1,44 @@
 # CustomBlocks — Master Plan (Kanban)
 
-## ▶ Resume Here (end of Session 7 — 2026-06-01)
+## ▶ Resume Here (Session 9 ended — start fresh session for Session 10)
 
-**Confirmed in-game this session:** NF2, COL1/2, PACK1, PACK2, COL11.
+**Confirmed in-game (2026-06-02):** PACK2, COL12, G1, REL1, COL1b/c/d, G3, IMG1, IMG2, PIX1, COL3, NF4, TOL1, COL4, BGR1.
+**Partially confirmed:** COL5/COL8 tooltips — fresh items only; old inventory drop+repick from creative.
 
-**Built this session — needs in-game test:**
-| ID | What was built |
-|----|----------------|
-| REL1 | `/cb reload` data-loss fix — PACK1 now confirmed, ready to test |
-| RT1 | Rectangle tool race fix — PACK1 now confirmed, ready to test |
-| COL9 | Hex change → "Update N blocks?" confirm screen (built Session 6, never tested) |
-| IMG1 | Download headers + auto-detect tolerance (built Session 6, never tested) |
-| TOL1 | Tolerance 80 = same as 30 — `Math.min` caps manual value |
-| PIX1 | New blocks come out pixelated |
-| COL3/4 | Enclosed holes not filling, halos remain |
+**Built 2026-06-03 — NONE confirmed in-game yet:**
+| Task ID | What | Failure history |
+|---------|------|----------------|
+| COL9 | Wizard trigger fix | Round 1: Color.decode raw input → fixed |
+| COL9 | Dry Run safety | Round 1: Close Preview fired real batch → fixed |
+| COL9 | BG mode selector slot 53 | Built cleanly first try |
+| COL9 | recolourTextureForBatch (edge mode forced) | Round 2: player PLAYER_MODE "full" destroyed designs → fixed |
+| COL9 | recolourTextureDirectSwap (direct old-hex swap) | Round 3: edge flood fill missed pixels → replaced with direct comparison |
+| COL9 | Config sync timing fix | Round 3: ConfigSyncPayload fired before batch → moved to after batch |
+| NF4 | ConfigSyncPayload (live item update) | Round 4: server pack never reached modded client → new packet built |
+| NF4 | ServerPackGenerator colored PNGs | Built early but alone wasn't enough — needed ConfigSyncPayload too |
+| COL Square | matchesColor() texture fallback | Built cleanly |
+| COL Square | bg mode guard removed | Built cleanly |
+| bg mode | "none" persists on restart | Built cleanly — "none" was missing from validation whitelist |
 
-**Still broken (fix these first next session):**
-| ID | One-liner | Note |
-|----|-----------|------|
-| COL12 | Random blocks say 'No texture data to recolour' | Needs deep investigation on NBT/SlotManager disconnect. |
-| IMG2 | Uploading with background + enclosed mode broken | Re-test now that PACK1 is confirmed fixed. |
-| NF4 | Config tool colors turns tools into dyes, delayed | Model generator fallback issue. |
-| LANG1 | `<unknown_cb_tail>` and missing/modified `[CB]` prefixes | Missing translation keys. |
-| COL5 | Tooltips wrong/incomplete across all tools | Tooltips show garbage/commands instead of useful info. |
-| COL8 | Red default tools broken | Wrong hex, dye texture, bad lore. |
-| AR1 | Arabic letter import + browser GUI | Clunky folder structure, confusing dye items in GUI. |
+**Still broken (priority order):**
+| Priority | Task ID | One-liner |
+|----------|---------|-----------|
+| 🔴 #1 | **SNP1** | Snapshots revert to wrong state, blocks go concrete — BROKEN. Read 08_SNP1.md before touching. |
+| 🔴 #2 | **RT1** | Purple block 30+ seconds after rectangle tool |
+| 🟡 #3 | **COL9/NF4** | Full hex update system — needs complete end-to-end in-game confirmation |
+| 🟡 #4 | **LANG1** | `[<unknown_cb_tail>]` in action bar |
+| 🔵 #5 | **MM1** | Full rework |
+| 🔵 #6 | **AR1** | Arabic blocks not detected in /cb create, importfolder |
 
-**PACK1 confirmed — REL1 and RT1 are now unblocked.** Both built and ready for in-game test.
+**DO NOT build without discussing first:** LIC1, AR2, AR3, IMG6.
 
-**Next up after broken items:** REDO1 (add buttons), then BGR1 (dev's #1), then UND1b, then AR2 + AR3.
-
-**AR2 + AR3 — start in a FRESH conversation.** The Arabic word generator (Java2D rendering, font bundling, 8-step GUI) and auto-joining system are large. Start a new chat after testing this session's builds so accuracy stays high.
-
-**DO NOT build without discussing first:** SNP1, LIC1 (also "do not build until dev says build").
-
-**Git state:** Working tree DIRTY + UNCOMMITTED. All Session 2–7 changes uncommitted. Last commit `a456aad`. Rebuild before next in-game test.
+**Latest JAR:** End of 2026-06-03. See active_session.md for full failure+fix history. NOTHING from 2026-06-03 confirmed in-game.
 
 ---
 
 ## State Legend
 
-- 🎮 **BUILT AND TESTED IN GAME** — developer confirmed working in-game. The ONLY "done".
+- ✅ **BUILT AND TESTED IN GAME** — developer confirmed working in-game. The ONLY "done".
 - 🏗️ **UNDER CONSTRUCTION AND FIXING** — currently writing code or patching.
 - 🔴 **BROKEN** — confirmed broken in-game, or a regression we introduced. Must fix before shipping.
 - ⏳ **READY FOR IN-GAME VERIFICATION** — code written, build passes, NOT tested in-game. State unknown.
@@ -64,402 +62,166 @@
 - **2026-05-30 — Session 5b (in-game results + root causes).** Confirmed in-game: IMG4-S3, REDO2, UND1. Built REDO1 second fix (missing UUID). Fully confirmed the PACK1 root cause (blocks REL1 + RT1). Confirmed the TOL1 root cause. Noted the COL11 correction. UND1b design confirmed.
 - **2026-05-31 — Session 6 (quick features + NF2).** Confirmed in-game: CMD1 (`/cb settings` primary, `/cb config` alias), COL8b (red shade hex editor), AR1 (Arabic letter browser). Built COL9 (hex change → bulk recolor confirm screen using `recolourTextureForPlayer` + new `HEX_RECOLOR_CONFIRM` GuiMode). Built NF2 (Deleter Tool — `DeleterItem.java`, `/cb deleter` command, confirm GUI, shift=instant delete, trash fix for bulk delete, clickable undo link). Also discussed and cleared: NF2, AR2, AR3, COL8b, COL9, CMD1. SNP1 parked. AR2+AR3 deferred to a fresh session. Not committed.
 - **2026-06-01 — Session 7 (PACK1 investigation & testing).** Confirmed in-game: NF2, COL1/2, PACK1, PACK2, COL11. Fixed and verified PACK2, COL11, and NF2 polish in game.
-- **2026-06-01 — Session 8 (TOL1, PIX1, COL3/4).** Fixed TOL1 (auto-detect cap), PIX1 (pixelation due to nearest neighbor), and COL3/4 (BFS traversal + 1.5x expand threshold). Built and ready for testing.
-- **Git:** working tree DIRTY + UNCOMMITTED through Session 8. Rebuild before the next in-game test.
+- **2026-06-01 — Session 8 (TOL1, PIX1, COL3/4).** Fixed TOL1 (auto-detect cap), PIX1 (pixelation due to nearest neighbor), and COL3/4 (BFS traversal + 1.5x expand threshold).
+- **2026-06-02 — Session 9 (audit + batch testing).** Deep audit of 7 issues. Fixed: PACK2 (modded client guard), COL12 (disk fallback), G1 (2 back buttons), LANG1 partial (size_label rename), COL5 tooltips, RT1 broadcast order. Confirmed in-game: PACK2, COL12, G1, REL1, COL1b/c/d, G3, IMG1, IMG2, PIX1, COL3, NF4, TOL1, COL4, BGR1. Still broken: RT1 (30+ seconds), COL Square detection, LANG1 unknown_cb_tail. New subplans created: 05–11.
+- **2026-06-03 — Session 9 continued (COL9 + NF4 — 4 rounds of fixes, nothing confirmed).** ROUND 1: COL9 wizard never opened (Color.decode raw input silent fail) + Dry Run Close Preview fired real batch (slot 49 collision with uiPage==9999 sentinel) — both fixed. Wizard confirmed opening in-game. ROUND 2: After confirming, blocks turned to yellow concrete — player PLAYER_MODE="full" ate all design pixels via recolourTextureForPlayer. Fixed: recolourTextureForBatch forces edge mode always. NEW RULE: never call recolourTextureForPlayer in batch ops. ROUND 3: Items updated but blocks didn't / two pack reloads — ConfigSyncPayload fired before wizard, causing early item-only reload. Fixed: moved broadcastConfigSync to end of runHexUpdateBatch. Also: edge flood fill missed background pixels → replaced with recolourTextureDirectSwap (direct per-pixel comparison against stored old hex, threshold 30). ROUND 4: Item textures never reached modded client — PACK2 guard blocks HTTP pack entirely. Modded clients generate textures locally from stale config. Fixed: ConfigSyncPayload broadcasts new hex values after batch; client updates config + calls scheduleGenerateAndReload → one combined pack reload. Also built this session: BG mode selector in wizard slot 53 (never touches global config), COL Square matchesColor() texture fallback, bg mode "none" persists on restart. End of session: developer reported /cb snapshots broken (blocks going concrete) — not investigated, SNP1 moved to top priority.
+- **Git:** working tree DIRTY + UNCOMMITTED. JAR built end of 2026-06-03. NOTHING confirmed in-game.
 
 ---
 
 ## 2. 🟢 Ready for Testing (Built)
 
-### TOL1 — Tolerance Capped by Auto-Detect (80 == 30)
-**State:** 🟢 BUILT — needs in-game test.
+---
+Task ID: TOL1
+---
+### TOL1 — Tolerance Has No Effect
+**State:** ✅ CONFIRMED IN-GAME (2026-06-02) — Tolerance correctly samples edge pixels (including non-white backgrounds like grey). Mode prompt logic implemented for setting tolerance > 0.
 **File:** `core/ImageProcessor.java`, `gui/GuiManager.java`
-**Fix:** `effectiveTol` correctly falls back to `cfgTol` when auto-detect is off. Removed arbitrary `Math.min()` clamping.
 
+---
+Task ID: PIX1
+---
 ### PIX1 — New Blocks Come Out Pixelated
-**State:** 🟢 BUILT — needs in-game test.
+**State:** ✅ CONFIRMED IN-GAME (2026-06-02) — bicubic scaling working. Slight pixelation when zoomed very close is a Minecraft platform limit. Accepted, no further fix.
 **Files:** `core/ImageProcessor.java`
-**Fix:** Removed the `< 64` check and ALWAYS use `RenderingHints.VALUE_INTERPOLATION_BICUBIC` for resizing, producing smooth scaling regardless of input size.
 
-### COL3/4 — Enclosed holes not filling, halos remain
-**State:** 🟢 BUILT — needs in-game test.
+---
+Task ID: COL3
+---
+### COL3 — Enclosed Holes Not Recoloring
+**State:** ✅ CONFIRMED IN-GAME (2026-06-02) — enclosed holes fill correctly.
 **Files:** `item/ColorTriangleItem.java`
-**Fix:** Fixed BFS to check for hole candidates during flood fill and raised `expandThreshold` to `1.5` to eliminate the 1px halo effect.
+
+---
+Task ID: COL4
+---
+### COL4 — Yellow Pixel Outline After Recoloring
+**State:** ✅ CONFIRMED IN-GAME (2026-06-02) — edge halo removal confirmed working alongside the TOL1 fix.
+**Files:** `item/ColorTriangleItem.java`
 
 ---
 
-### COL12 — Random Blocks Lose Texture Data
-**State:** 🔴 BROKEN — investigate
-**Priority:** 🔴
-
-**Screenshot Proof & Knowledge (2026-05-31):**
-- A newly imported Discord block throws `This block has no texture data to recolour` when using the color triangle on it.
-- **Root cause understanding:** This is highly concerning. It indicates that the `SlotManager` randomly lost the PNG bytes or disconnected the block data for a block that was just imported via `/cb create`. Needs deep investigation.
-
----
-
----
-
-### LANG1 — Missing Translation Keys & Hardcoded Prefixes
-**State:** 🔴 BROKEN
-**Priority:** 🔴
-
-**Screenshot Proof & Knowledge (2026-05-31):**
-- Redo hover text: Shows `<unknown_cb_tail>`, missing `en_us.json` translation.
-- Deleter prefix: Shows plain red `[CB]` instead of standard Aqua/White formatting (`§8[§bCB§8]`).
+## COL12 — Random Blocks Lose Texture Data
+**State:** ✅ CONFIRMED IN-GAME (2026-06-02) — disk fallback in `ColorVariantService.resolvePrimaryTexture()` working. No further action needed.
 
 ---
 
 ---
 
-### ~~[MOVED to Fix_NF2_COL11_PACK2.md] PACK2 — /cb rp pause Broken; Magic Items Become Dyes~~
-**State:** 🔴 BROKEN — root cause fully confirmed by deep investigation. Not built yet.
+---
+Task ID: LANG1
+---
+### LANG1 — `[<unknown_cb_tail>]` Shows in Command Action Bar
+**State:** 🔴 BROKEN — confirmed in-game 2026-06-02. Typing `/cb resize` shows `[<unknown_cb_tail>]` in the action bar hint.
+**Priority:** 🟡
+**File:** `command/DidYouMean.java` (line 52)
+**Subplan:** `02_LANG1.md`
+
+**Root cause:** `DidYouMean.java` registers a catch-all argument literally named `"unknown_cb_tail"`. Brigadier displays argument names directly, so this shows verbatim.
+**Fix:** Rename `"unknown_cb_tail"` → `"subcommand"` in both the argument definition (line 52) and retrieval (line 55).
+
+**Note:** The `size_text` → `size_label` rename in `CustomBlockCommand.java` was already applied in this session (2026-06-02). That part is done.
+
+---
+
+---
+
+---
+Task ID: PACK2
+---
+### PACK2 — Modded Clients Receiving Vanilla Fallback Pack
+**State:** ✅ CONFIRMED IN-GAME (2026-06-02) — guard in `ResourcePackServer.sendPackToPlayer()` working. Tools no longer show as dyes. Survives `/cb reload`. Also resolved NF4 as side effect.
 **Files:** `network/ResourcePackServer.java`
-**Priority:** 🔴 #1 (fix immediately after PACK1)
-
----
-
-#### Symptoms (what the developer sees)
-- After `/cb rp pause`, deleting or modifying any block makes placed custom blocks turn **transparent**.
-- Custom tools and magic items in the inventory turn into **vanilla dyes**.
-- `/cb reload` requires a **full rejoin** to see blocks again instead of applying instantly.
-- Running `/cb rp resume` does NOT fix the dyes/transparency — the damage is already done.
-
----
-
-#### Why PACK1 Made This Worse
-Before PACK1: the server pack had a race condition — it sent a download URL before the ZIP was ready, so clients got HTTP 404 and silently ignored the pack. Blocks stayed on the local mod pack. Everything *looked* fine (accidentally).
-
-After PACK1: the race is fixed — clients now **successfully download and apply** the server pack. This is correct for vanilla clients, but it exposed the real PACK2 bug: **modded clients should never receive the vanilla fallback pack at all.**
-
----
-
-#### Root Cause (fully confirmed — traced through the code)
-
-**Step 1 — What the server pack contains:**
-`ServerPackGenerator.java` builds the ZIP with fallback item models for non-modded clients. For example:
-- `color_square_black` → maps to `minecraft:item/black_dye`
-- `color_triangle_red` → maps to `minecraft:item/red_dye`
-- Custom block slots → missing textures (show as purple/black or transparent)
-
-These fallbacks exist intentionally so vanilla players who join don't crash. They are WRONG for modded clients.
-
-**Step 2 — What happens during pause:**
-```
-1. Developer runs /cb rp pause
-   → cmdRpPause() sends RpPausePayload(true) to all clients
-   → Clients set rpPaused = true  ✓
-   → SERVER does nothing else — no state stored, no guard added
-
-2. Developer deletes or modifies a block
-   → SlotManager.saveSlots() runs async
-   → Sees packDirty = true
-   → Line ~1455: calls ResourcePackServer.updatePackWithSnapshot(snapshot)
-   → NO PAUSE CHECK — pack rebuilds anyway  ✗
-
-3. Rebuild completes inside PACK_BUILDER thread
-   → currentPackFile and currentHash are updated
-   → sendUpdateToAllPlayers() is called (lines 264 / 268 / 272)
-   → ResourcePackSendS2CPacket is sent to EVERY connected player
-
-4. Modded client receives the packet
-   → Has rpPaused = true from step 1
-   → Tries to suppress the reload... but it's too late
-   → Minecraft has already queued the pack download
-   → Pack downloads and APPLIES (thanks to PACK1 fix)
-   → Vanilla fallback models load: dyes instead of tools, transparent blocks
-
-5. Developer runs /cb rp resume
-   → Clients try to reload their local mod pack
-   → But the server pack has higher priority in Minecraft's pack stack
-   → Local mod pack is still overridden
-   → Blocks remain transparent, tools remain dyes
-```
-
-**The real problem in one sentence:** `sendPackToPlayer()` sends the vanilla fallback pack to ALL clients, including modded ones who have their own local pack and never need the fallback.
-
----
-
-#### The Fix (small, surgical, no risk)
-
-**Where:** `network/ResourcePackServer.java` — method `sendPackToPlayer(ServerPlayerEntity player)`
-
-**What to add:** Before sending the packet, check if the player has the CustomBlocks mod installed. If yes, skip. Modded clients generate their own pack locally and must NEVER receive the server's vanilla fallback.
-
-**How to detect a modded client:** `ServerPlayNetworking.canSend(player, SlotUpdatePayload.ID)` — returns `true` only if the client can receive the `SlotUpdatePayload` custom packet, which is a CustomBlocks-only packet that vanilla Minecraft doesn't know about.
-
-**Exact code change — find this method:**
-```java
-private static boolean sendPackToPlayer(net.minecraft.server.network.ServerPlayerEntity player) {
-    String hash = currentHash;
-    if (hash == null || hash.isEmpty()) return false;
-    String url = getPackUrl(serverInstance);
-    // ... rest of method
-```
-
-**Add these lines immediately after the hash null-check:**
-```java
-// PACK2: Never send the vanilla fallback pack to modded clients.
-// Modded clients have the CustomBlocks mod installed (proven by ability to receive
-// SlotUpdatePayload) and generate their own local resource pack. Sending the server's
-// fallback pack to them causes the vanilla models (dyes, missing textures) to override
-// the mod pack, which has lower priority in Minecraft's pack stack.
-if (net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking
-        .canSend(player, com.customblocks.network.SlotUpdatePayload.ID)) {
-    CustomBlocksMod.LOGGER.info("[CustomBlocks] PACK2: skipping vanilla fallback for modded client {}",
-        player.getName().getString());
-    return false;
-}
-```
-
-**Verify this import exists at the top of `ResourcePackServer.java`** (it should already be there since the class uses Fabric networking elsewhere):
-```java
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
-```
-
-**Also verify `SlotUpdatePayload` import path** — grep the codebase for `class SlotUpdatePayload` to get the exact package, then add the import.
-
----
-
-#### Edge Cases
-
-**Vanilla clients (no mod installed):** `canSend(SlotUpdatePayload.ID)` returns `false` → pack IS sent → they see dyes/fallbacks → correct, expected behavior for non-modded players.
-
-**Mixed server (some modded, some vanilla):** Modded players skip the pack. Vanilla players get it. Both work independently. No conflict.
-
-**New player joining during pause:** The check runs at send-time, not at pause-time — a new modded player who joins while paused will correctly skip the pack, just like existing players.
-
-**Player disconnects and rejoins:** On reconnect, `sendPackToPlayer()` is called again. Check still runs. Modded client still skips. Correct.
-
-**`/cb rp resume` after the fix:** Since the vanilla pack was never sent to modded clients in the first place, resume just triggers a normal local-pack reload — no override to fight against. Should work cleanly.
-
----
-
-#### Test Plan (in-game, in this order)
-
-**Test 1 — Basic pause/resume:**
-1. Join with mod installed. Place 3 custom blocks. Confirm they're visible.
-2. `/cb rp pause`
-3. Delete one block via `/cb delete <id>`
-4. ✅ Remaining 2 blocks stay visible (no transparency)
-5. ✅ Tools in inventory stay colored (no dyes)
-6. `/cb rp resume`
-7. ✅ Everything still correct
-
-**Test 2 — Pack rebuild during pause:**
-1. `/cb rp pause`
-2. Import a new block: `/cb create <url>`
-3. ✅ New block appears immediately (no purple/missing texture)
-4. ✅ Existing blocks unaffected
-5. `/cb rp resume` → ✅ All blocks still correct
-
-**Test 3 — `/cb reload` during pause:**
-1. `/cb rp pause`
-2. `/cb reload`
-3. ✅ All blocks stay visible — no rejoin required
-4. `/cb rp resume` → ✅ Still correct
-
-**Test 4 — `/cb reload` outside of pause (regression check):**
-1. No pause active
-2. `/cb reload`
-3. ✅ All blocks reload correctly, no rejoin needed (PACK1 + PACK2 both working)
-
-**Test 5 — Log confirmation:**
-After any of the above tests, check server console. Should see:
-```
-[CustomBlocks] PACK2: skipping vanilla fallback for modded client [yourname]
-```
-If this line never appears, the check isn't running.
-
-**Test 6 — Regression: blocks still appear on first join:**
-1. Relog completely
-2. ✅ All custom blocks load their textures on join (no purple)
-3. ✅ Tools show correct colors (not dyes)
-This confirms the fix didn't accidentally break normal pack delivery.
+**Subplan:** `05_PACK1-2_REL1_RT1.md`
 
 ---
 
 ---
 
-### COL1 — Color Square Client-Side Prediction (Instant Feel)
-**State:** 🔨 BUILT — investigate.
-**File:** `item/ColorSquareItem.java` (`useOnBlock()`)
-**Priority:** 🟠
-
-**Root cause:** Visual delay is network latency (100–300ms). Server processes instantly but the client waits for `BlockUpdateS2CPacket`. Fix: swap the block on the CLIENT the moment the player clicks, then the server confirms.
-
-Uses Layer 1 (name scan) only — no `ImageIO.read()` on the client thread. The client guard `if (world.isClient) return ActionResult.PASS;` was replaced with:
-```java
-if (world.isClient) {
-    BlockState state = world.getBlockState(pos);
-    if (!(state.getBlock() instanceof SlotBlock sb)) return ActionResult.PASS;
-    SlotData current = SlotManager.getBySlot(sb.getSlotKey());
-    if (current == null) return ActionResult.PASS;
-    SquareColor color = resolveColor(ctx.getStack());
-    String targetId = resolveTargetId(current.customId, color.key(), null, current.cachedColorFamily);
-    if (!targetId.equals(current.customId)) {
-        SlotData target = SlotManager.getById(targetId);
-        if (target != null) {
-            com.customblocks.block.SlotBlock targetBlock =
-                com.customblocks.CustomBlocksMod.safeSlotBlock(target.index);
-            if (targetBlock != null) {
-                world.setBlockState(pos, targetBlock.getDefaultState(),
-                    Block.NOTIFY_LISTENERS | Block.FORCE_STATE);
-            }
-        }
-    }
-    return ActionResult.SUCCESS;
-}
-```
-**Why safe:** Client and server run identical `resolveTargetId` logic on identical data → always agree → no snap-back. Server path untouched. `cachedColorFamily` is `transient` and NOT sent over the network — see COL1d for the client pre-warm that makes first use work.
-
-**Test:** Right-click a custom block with a color square — zero visual delay. Test rapidly on 5 blocks in a row.
-
-**User Confirmation (2026-05-31):**
-- The user clarified that the "glitch/double-click" actually manifests as the tool being "broken again and slow and delay".
-- **Root cause understanding:** The client-side prediction is failing, forcing the client to wait for the server round-trip. This perfectly matches the symptoms of `COL1d` and `COL2` where the client lacks the `cachedColorFamily` pre-warm data, falling back to server-only processing.
-
 ---
-
+Task ID: COL3
 ---
-
 ### COL3 — Landlocked Same-Color Areas Not Recoloring
-**State:** 🔴 BROKEN — holes do not fill properly.
-**File:** `item/ColorTriangleItem.java` (`recolourBackground()`)
-**Priority:** 🟡
-
-**Problem:** For enclosed regions (the hole inside a "9" or "8"), `fillTrappedBackgroundRegions()` uses `isHoleCandidate()`, which only returns `true` for transparent / near-black / neutral-grey pixels — never colored pixels. So a red enclosed area inside a red-bg "9" is silently skipped in `corners_and_trapped` mode.
-
-**Fix (verified already present in source):** Inside the `fillTrapped` block, a Pass 1 recolors any unvisited pixel matching the background color (using `isBackgroundLab`, respecting tolerance), then Pass 2 runs the existing `fillTrappedBackgroundRegions`:
-```java
-if (fillTrapped) {
-    for (int x = 0; x < w; x++) {
-        for (int y = 0; y < h; y++) {
-            if (!visited[x][y] && isBackgroundLab(img, x, y, bgA, bgLab, labThreshold)) {
-                img.setRGB(x, y, newArgb);
-                visited[x][y] = true;
-            }
-        }
-    }
-    fillTrappedBackgroundRegions(img, visited, newArgb);
-}
-```
-
-**Test:** Set `corners_and_trapped`, recolor a "9"/"8" block with an enclosed same-color region — both outer and enclosed areas change. A block with no enclosed areas still recolors with no regression.
+**State:** ✅ CONFIRMED IN-GAME (2026-06-02) — enclosed holes fill correctly.
+**File:** `item/ColorTriangleItem.java`
 
 ---
 
 ---
 
-### COL4 — Edge Halo After Recoloring
-**State:** 🔴 BROKEN — faint halos remain on edges.
-**File:** `item/ColorTriangleItem.java` (`recolourBackground()`)
-**Priority:** 🟡
-
-**Problem:** The BFS only recolors pixels where `isBackgroundLab()` is true. Anti-aliased border pixels are close to the bg color but past `labThreshold`, leaving a faint fringe of old color.
-
-**Fix (already present, as an edge blend pass before the PNG write):**
-```java
-double blendThreshold = labThreshold * 1.5;
-for (int x = 0; x < w; x++) {
-    for (int y = 0; y < h; y++) {
-        if (visited[x][y]) continue;
-        int px = img.getRGB(x, y);
-        int pa = (px >> 24) & 0xFF;
-        if (pa < 50 || bgA < 50) continue;
-        int pr = (px >> 16) & 0xFF, pg = (px >> 8) & 0xFF, pb = px & 0xFF;
-        double[] pLab = rgbToLab(pr, pg, pb);
-        double dE = Math.sqrt(
-            (pLab[0]-bgLab[0])*(pLab[0]-bgLab[0]) +
-            (pLab[1]-bgLab[1])*(pLab[1]-bgLab[1]) +
-            (pLab[2]-bgLab[2])*(pLab[2]-bgLab[2]));
-        if (dE > blendThreshold) continue;
-        double t = 1.0 - (dE / blendThreshold);
-        int blendR = (int) Math.round(newR * t + pr * (1.0 - t));
-        int blendG = (int) Math.round(newG * t + pg * (1.0 - t));
-        int blendB = (int) Math.round(newB * t + pb * (1.0 - t));
-        img.setRGB(x, y, (pa << 24) | (blendR << 16) | (blendG << 8) | blendB);
-    }
-}
-```
-
-**Test:** Recolor a sharp-edged design on a solid background — clean border, no halo. A clean block stays clean (no regression).
+---
+Task ID: COL4
+---
+### COL4 — Yellow Pixel Outline After Recoloring
+**State:** ✅ CONFIRMED IN-GAME (2026-06-02) — confirmed working.
+**File:** `item/ColorTriangleItem.java`
 
 ---
 
 ---
 
-### COL5 — Color Tool Tooltips Show Mode + Tolerance
-**State:** 🔴 BROKEN — Tooltips show garbage/commands instead of useful info.
-**Files:** `item/ColorTriangleItem.java`, `item/ColorSquareItem.java`
-**Priority:** 🟡
-
-> `formatColorToolMode()` returning plain-English names is already done in GuiManager ("Background + Enclosed Areas", "Background Only", "Not Configured").
-
-Both items already add the `Mode: ... Tolerance: ...` lore line + the `/cb config` hint, and both `inventoryTick()` methods call `FirstUseHints.hint(...)`. Helpers `formatModeForTooltip()` / `getToleranceForTooltip()` exist in both. (`FirstUseHints` signature is `hint(UUID, String)` — read it before using.)
-
-**Test:** Hover a custom triangle — tooltip shows current mode + tolerance. New player picking up a triangle gets a one-time chat hint that doesn't reappear on relog.
+---
+Task ID: COL5
+---
+### ~~COL5~~ — Merged into COL8 (2026-06-02)
+**State:** ✅ Tooltip/lore work done — absorbed into COL8 scope.
 
 ---
 
 ---
 
-### COL8 — Red Triangle / Red Square Defaults Broken
-**State:** 🔴 BROKEN — hex not reflecting config, pink dye texture, garbage lore, doesn't match creative menu.
-**Files:** `command/CustomBlockCommand.java`, `network/ServerPackGenerator.java`, `client/ResourcePackGenerator.java`
-**Priority:** 🟡
+---
+Task ID: COL8
+---
+### COL8 — All Magic Items Turn Into Dyes (was: Red only)
+**State:** ✅ PACK2 CONFIRMED IN-GAME (2026-06-02). COL8 tooltip ⚠️ PARTIAL — double tooltip on old inventory items (old LoreComponent still cached). Fresh items from creative show correctly.
+**Files:** `network/ResourcePackServer.java` (via PACK2 fix)
+**Priority:** 🟡 (blocked by PACK2)
 
-The items `red_square`/`red_triangle` were already registered. The breakage was hardcoded black/yellow/green in three places, all fixed:
-- `CustomBlockCommand.java`: `cmdGiveSquareInternal` + `cmdGiveTriangleInternal` validation now also allow `"red"`; `.suggests(...)` for `/cb square`, `/cb triangle`, and bulkrecolor/bulkcolor all add `b.suggest("red")`. (Bulk recolor color resolution already handled red via ColorLibrary fallback.)
-- `ServerPackGenerator.java` `addGeneratedItemModel(...)`: added `red_square`/`red_triangle` → `minecraft:item/red_dye`.
-- `client/ResourcePackGenerator.java`: red added to the `squares`/`triangles` arrays — note these arrays were LATER changed by NF4 to be generated from config hex, so red still flows through.
+**Merged from COL5 (2026-06-02):** Tooltip/lore is ⏳ done (needs in-game confirm) — unified `appendTooltip` on all Triangle/Square items, spammy chat hints removed from `inventoryTick`.
+
+**Audit note (2026-06-02):** Dye mappings in `ServerPackGenerator.java` are intentional vanilla fallbacks. Bug is that modded clients receive this pack via `sendPackToPlayer()` with no mod-check guard. PACK2 subplan: `05_PACK1-2_REL1_RT1.md`.
 
 > `CustomBlocksConfig.triangleRedHex` default is `"#EE3333"`. COL8b adds a Red hex editor in `/cb config`. See also CMD1.
 
-**Test:** `/cb square red`, `/cb triangle red` — items appear red, swap blocks correctly.
+**Test (after PACK2):** Pick up any color triangle or square — shows correct colored tool texture (not a dye). `/cb square red` appears red and swaps blocks correctly.
 
 ---
 
 ---
 
-### COL9 — Hex Change → Prompt to Update Existing Blocks
-**State:** 🔴 BROKEN — prompt doesn't show at all.
+---
+Task ID: COL9
+---
+### COL9 — Hex Change → Update Existing Blocks
+**State:** ⏳ READY FOR IN-GAME TEST — full rework was written in previous session; two bugs found and fixed 2026-06-03. All 10 flaws addressed in code. See subplan `01_COL1-12_NF4_COL-LIMITS.md` for full detail and test steps.
 **File:** `gui/GuiManager.java`
 **Priority:** 🟡
+**Subplan:** `01_COL1-12_NF4_COL-LIMITS.md`
 
-After saving a new green/yellow/red hex (hook the hex-save block in the config text handler — read it fully first):
-1. Scan `SlotManager.allSlots()` for blocks whose `customId` contains the color key (`_green`, `_red`, `_yellow`).
-2. If any found, show a GUI confirmation: "N blocks have '[color]' in their name. Update their textures to the new shade? [Confirm] [Skip]".
-3. Confirm → re-run texture generation per block + rebuild pack. Skip → just save config.
-
-Build new `buildHexRecolorConfirmGui()` + `handleHexRecolorConfirmClick()`. Read `SlotManager.java` for the correct retexture method first.
+**Bugs fixed 2026-06-03:**
+1. Wizard never opened — `Color.decode(text.trim())` failed silently on inputs without `#`; fixed to `Color.decode(normalizeHexInput(text))`
+2. Dry Run "Close Preview" (slot 49) fired the real batch update — state sentinel `uiPage==9999` collided with Confirm handler; fixed with guard at top of slot 49 branch
 
 ---
 
 ---
 
+---
+Task ID: IMG2
+---
 ### IMG2 — Background Removal "None" Mode Toggle
-**State:** 🔴 BROKEN — actually caused by PACK1 404, not the mode itself.
-**Files:** `gui/GuiManager.java`, `item/ColorTriangleItem.java`, `item/ColorSquareItem.java`, `core/ImageProcessor.java`
-**Priority:** 🟡
-
-**Screenshot Proof & Knowledge (2026-05-31):**
-- Uploading an image with the `corners_and_trapped` or `none` mode results in a purple/black missing texture block.
-- **Root cause understanding:** The top right of the screenshot shows `1 out of 1 pack(s) failed to download`. The image uploaded perfectly on the server, but the client 404'd when trying to download the new texture pack due to the **PACK1** race condition. Fix PACK1 first to see if IMG2 actually works.
-**Priority:** 🟡
-
-Adds a `"none"` state to the bg-mode cycle so imports can leave a background fully alone.
-- `GuiManager.formatColorToolMode()`: `"none"` → "No Background Removal".
-- Mode cycle: `corners_only → corners_and_trapped → none → corners_only`; invalid/`unset` snaps to `corners_only`. Buttons at slots 10/13/16 (barrier = none), back at 22. Config text handler accepts `"none"`.
-- `ImageProcessor.replaceBackground()` / `replaceBackgroundWithColor()` / `replaceBackgroundWithFringeTolerance()`: `if ("none".equals(...colorToolBackgroundMode)) return pngBytes;` at the top (must also cover the animated-GIF frame loop).
-- `ColorTriangleItem` / `ColorSquareItem`: in "none" mode, action-bar "Color tools require background removal. Change mode in /cb config." and return PASS.
-
-**Test:** `/cb config` → mode "No Background Removal" → import keeps the background; a color triangle shows the message and does nothing. Switch back → works normally.
+**State:** ✅ CONFIRMED IN-GAME (2026-06-02) — "None" mode working. Pending: UI label renames in subplan `06_IMG1-6_S3_TOL1_PIX1_BGR1.md` (BGR1 section B).
+**Files:** `gui/GuiManager.java`
+**Pending rename:** `corners_only` → "Remove Background", `corners_and_trapped` → "Remove Background + Holes", `none` → "No Background Removal".
 
 ---
 
 ---
 
+---
+Task ID: IMG4
+---
 ### IMG4 — Transparent Pixels Wrongly Treated as Background
 **State:** 🔴 BROKEN (Fake Transparency)
 **File:** `core/ImageProcessor.java`
@@ -472,56 +234,49 @@ Adds a `"none"` state to the bg-mode cycle so imports can leave a background ful
 
 ---
 
-### ~~[MOVED to Fix_NF2_COL11_PACK2.md] NF2 — Deleter Tool Item~~
-**State:** 🔴 BROKEN — missing texture, block doesn't delete on client, prefix modified.
-**Priority:** 🔴
-
-**Screenshot Proof & Knowledge (2026-05-31):**
-- Tooltip shows `item.customblocks.deleter` (missing lang key).
-- Chat prefix shows plain red `[CB]` instead of standard Aqua/White formatting.
-- The block does not visually delete on the client-side despite the "Deleted" chat message (requires server to actually erase the block visually).
-
-**Behavior:** Right-click a placed custom block without shift → confirmation GUI; with shift → instant delete. Lore shows both. Item `customblocks:deleter`, always glinted.
-
-**Confirmation GUI:** block info at slot 13, `§c§l💀 Confirm Delete` at slot 29, `§a§l◀ Keep Block` at slot 33 (glass elsewhere).
-
-**On delete (both paths):** permission check → lock check (`§c⚿ Block is locked — unlock first`) → `UndoManager.pushUndoMutation` → `TrashManager.addToTrash(data)` → `SlotManager.remove(id)` + `LockManager.onBlockDeleted(id)` + category unassign → broadcast delete → schedule pack rebuild → action bar `§c§l✗ §r§cDeleted §f[name]` → chat with `[Click to undo]` (`ClickEvent.Action.RUN_COMMAND` → `/cb undo`).
-
-**Also fix:** `executeBulkOpFromGui` case `"delete"` currently skips `TrashManager.addToTrash` — add it so bulk-deleted blocks appear in `/cb deletedblocks`.
-
-**Texture (generated):** new Gradle task `generateItemTextures` runs `GenerateDeleterTexture.java` → `assets/customblocks/textures/item/deleter.png` (16×16 red recycle bin; palette outline `#330000`, shadow `#881100`, body `#CC2200`, highlight `#FF4422`, symbol `#FFFFFF`). Model `models/item/deleter.json` (`item/generated`, `layer0` → `customblocks:item/deleter`). PNG committed after first task run.
-
-**New command:** `/cb deleter` (like `/cb chisel`).
-
-**Files to create:** `item/DeleterItem.java`, `texturegen/GenerateDeleterTexture.java`, `models/item/deleter.json`, `textures/item/deleter.png`.
-**Files to modify:** `build.gradle` (task), `CustomBlocksMod.java` (register), `CustomBlockCommand.java` (command), `GuiManager.java` (confirm GUI + handler + Magic Items + Give All + the bulk trash bug).
+---
+Task ID: NF2
+---
+### NF2 — Deleter Tool Item
+**State:** ✅ CONFIRMED IN-GAME (Session 7, 2026-06-01) — Deleter tool working correctly.
 
 ---
 
 ---
 
+---
+Task ID: NF4
+---
 ### NF4 — Configurable Tool Colors
-**State:** 🔴 BROKEN — delayed application, turns tools into colored dyes.
-**Files:** `CustomBlocksConfig.java`, `CustomBlocksMod.java`, `client/ResourcePackGenerator.java`, `item/ColorSquareItem.java`, `item/ColorTriangleItem.java`
+**State:** 🔴 BROKEN for modded clients (confirmed 2026-06-03). ServerPackGenerator fix only helps vanilla clients. Modded clients generate textures locally and need a config sync packet.
+**Files:** `CustomBlocksConfig.java`, `CustomBlocksMod.java`, `client/ResourcePackGenerator.java`, `network/ServerPackGenerator.java`, `item/ColorSquareItem.java`, `item/ColorTriangleItem.java`
 **Priority:** 🔵
 
-**Screenshot Proof & Knowledge (2026-05-31):**
-- Changing the config hex caused the triangles/squares to turn into Lapis Lazuli / Cyan Dye textures.
-- **Root cause understanding:** The custom model generator failed or was delayed, causing Minecraft to fall back to the base item texture (which is a Dye item for these tools).
+**What works:** `ServerPackGenerator` now generates real colored PNGs from config hex (built 2026-06-03). This works for vanilla (non-modded) clients.
 
-- **3a:** `CustomBlocksConfig` — `triangleBlackHex = "#0A0A0A"` (next to green/yellow/red), wired into load/save with `normalizeHexColor(...)`.
-- **3b:** `CustomBlocksMod` — new helper `parseHexRgb(String hex, int dR, int dG, int dB)`; `triColors` built from `parseHexRgb(CustomBlocksConfig.triangleBlack/Yellow/Green/RedHex, ...)` instead of hardcoded ints. (Config loads before item registration — safe.)
-- **3c:** `ResourcePackGenerator` — `squares`/`triangles` arrays built from `parseHexRgb(...)` of the four config hex strings; changing a hex + restart regenerates icons.
-- **3e:** `ColorSquareItem.getName()` appends ` §8[hex]` via `builtInHex(colorWord)`; `ColorTriangleItem.getName()` appends ` §8[#RRGGBB]` from the item's RGB.
+**What's broken for modded clients — TWO root causes:**
+1. **Name/hex text stale:** Client has its own `CustomBlocksConfig` copy. Server hex change never reaches client. `getName()` reads stale client config → old hex in name forever until reconnect.
+2. **Visual texture stale:** PACK2 guard (`sendPackToPlayer` returns false for modded clients) means the new server pack ZIP never reaches the modded client. Modded client runs `ResourcePackGenerator` locally from its own stale config → generates old colored textures.
 
-**Test:** Change `triangleRedHex` to `#FF6600`, restart → orange triangle icon + name shows `[#FF6600]`, paints orange.
+**Fix needed (not yet built):**
+- `ConfigSyncPayload` — new network packet carrying the four hex values
+- Server broadcasts it to all online clients when any hex changes in config
+- Client handler updates `CustomBlocksConfig` → fixes name instantly
+- Client then re-triggers `ResourcePackGenerator` → fixes visual (causes brief texture flash)
+- Developer decision pending: accept the brief flash, or accept visual stays old until reconnect
+
+**COL9 — Per-batch BG mode selector (planned, not yet built 2026-06-03):**
+`runHexUpdateBatch` hardcodes `false` for `useTrappedHoleFill`. Developer wants a cycling button at slot 53 of the wizard to pick bg mode for this batch only — does NOT affect `/cb config`. Three states: `corners_only` (Lime Dye), `corners_and_trapped` (Lime Concrete), `none` (Light Gray Concrete). Default = current config value. Only `gui/GuiManager.java` changes. Full plan in subplan `01_COL1-12_NF4_COL-LIMITS.md`.
 
 ---
 
 ---
 
+---
+Task ID: AR1
+---
 ### AR1 — Import Pre-made Letter PNGs + Browser GUI
-**State:** 🔴 BROKEN — Import command folder structure is too strict/clunky. GUI uses confusing vanilla dye items instead of proper icons.
+**State:** ⚠️ PARTIAL — Browser GUI confirmed working in-game (2026-06-02). Known issue: Arabic blocks not auto-detected in `/cb create`, `/cb importfolder`, or existing block lists. Fix: unify Arabic letter detection across all import paths.
 
 `/cb arabic import <base_path>` scans `BLACK/ YELLOW/ GREEN/ RED/` for `<letter>_<color>.png` + `arabic_numbers_png/` for `a<digit>_<color>.png`, reads bytes directly (no processing), calls `SlotManager.assign(customId, displayName, bytes)`, sets letter metadata (`isLetter=true`, `letterGroup="arabic_<name>"`, `letterForm="isolated"`, `letterConnectsLeft` per letter — alef/dal/ra/waw etc. do not join), saves the registry, rebuilds the pack.
 
@@ -535,12 +290,14 @@ Adds a `"none"` state to the bg-mode cycle so imports can leave a background ful
 
 ## 3. 🏗️ Under Construction
 
-
 ---
 
 ## 4. ⏳ Ready for In-Game Verification
+---
+Task ID: REL1
+---
 ### REL1 — `/cb reload` Data-Loss / Blocks Break Visually
-**State:** 🔨 BUILT — blocked by PACK1. Retest after PACK1 is fixed.
+**State:** ✅ CONFIRMED IN-GAME (2026-06-02) — /cb reload works, no data loss, no rejoin needed.
 **Files:** `core/SlotManager.java`, `command/CustomBlockCommand.java`
 **Priority:** 🔴
 
@@ -554,23 +311,30 @@ Adds a `"none"` state to the bg-mode cycle so imports can leave a background ful
 
 ---
 
-### G1 — All Back Buttons Call openMain Instead of handleEscBack
-**State:** 🧪 UNKNOWN — built, never tested in-game.
+---
+Task ID: G1
+---
+### G1 — Back Buttons Go to Main Menu Instead of Previous Screen
+**State:** ✅ CONFIRMED IN-GAME (2026-06-02) — both violations fixed, back buttons working.
 **File:** `gui/GuiManager.java`
 **Priority:** 🔴
+**Subplan:** `09_GUI1-3.md`
 
-**Rule:** If a tooltip says `◀ Back` → change to `handleEscBack(player)`. If it says `Main Menu` → leave as `openMain`. Read the tooltip text at each location before changing.
+**Violations (confirmed by audit 2026-06-02):**
+- Line 1368: WELCOME_MENU back button calls `openMain(player, 0)` → should be `handleEscBack(player)`
+- Line 2990: UNDO_PICKER back button calls `openMain(player, 0)` → should be `handleEscBack(player)`
 
-Known locations (from live source): slots near lines 558, 644, 805, 2249, 2643, 2693, 2871, 2949, 3021, 3035, 3510, 3544, 4058, 4154, 9396 (each currently `openMain`). After fixing, search the file for `"§c◀ Back"` + `openMain` to catch any others.
-
-**Test:** Open any screen with a Back button. Click it. Should go to the previous screen, not always main menu.
+**Test:** Open welcome screen → Back → goes to previous screen. Open `/cb undogui` → Back → goes to previous screen.
 
 ---
 
 ---
 
+---
+Task ID: G3
+---
 ### G3 — 10 Missing Cases in restoreState()
-**State:** 🧪 UNKNOWN — built, never tested in-game.
+**State:** ✅ CONFIRMED IN-GAME (2026-06-02) — Back/ESC working on all 10 screens.
 **File:** `gui/GuiManager.java` (`restoreState()`)
 **Priority:** 🟠
 
@@ -584,8 +348,11 @@ For each: find the corresponding `open*()` method, read its real parameter signa
 
 ---
 
+---
+Task ID: COL1b
+---
 ### COL1b — Remove Client Skip from ALL 7 Tools
-**State:** 🧪 UNKNOWN — built, never tested.
+**State:** ✅ CONFIRMED IN-GAME (2026-06-02) — tools feel instant, no delay.
 **Files:** `ColorSquareItem`, `ColorTriangleItem`, `RectangleToolItem`, `AmethystChiselItem`, `LuminaBrushItem`, `GoldenHexagonItem`, `DiamondTriangleItem`
 **Priority:** 🟠
 
@@ -597,6 +364,9 @@ Each tool had `if (world.isClient) return ActionResult.PASS;` in `useOnBlock()`,
 
 ---
 
+---
+Task ID: COL1c
+---
 ### COL1c — Client Permission Bypass
 **State:** 🧪 UNKNOWN — built, never tested.
 **File:** `command/PermissionHelper.java` (`canUseTool`)
@@ -608,6 +378,9 @@ Add `if (player.getWorld().isClient) return true;` as the FIRST line of `canUseT
 
 ---
 
+---
+Task ID: COL1d
+---
 ### COL1d — Pre-warm cachedColorFamily on Client
 **State:** 🧪 UNKNOWN — built, never tested. COL1's first-click prediction depends on this.
 **File:** `client/CustomBlocksClient.java`
@@ -627,19 +400,9 @@ All four use the same `ColorDetection.detect()` the server uses in `postProcessL
 
 ---
 
-### COL2 — Remove Runtime ImageIO Fallback in resolveTargetId
-**State:** 🧪 UNKNOWN — built, never tested.
-**File:** `item/ColorSquareItem.java` (`resolveTargetId()`)
-**Priority:** 🟠
-
-Removed the `if (dominantFamily == null && textureBytes != null && textureBytes.length > 0) { ColorDetection.detect(...) }` block. Now it uses only the passed-in `cachedFamily`. The cached value from `postProcessLoadedSlots()` is authoritative; lazy detect at click time produced the identical "not confident" result and wasted 50–200ms on the server thread.
-
-**Test:** Right-click a custom block with a color square — zero delay every click, including first click after restart.
-
 ---
-
+Task ID: LIC1
 ---
-
 ### LIC1 — License Display
 **State:** 💬 DISCUSS — **DO NOT build until the developer says "build".** (The fabric.mod.json label fix is the one buildable part; the MM1 entry covers what's already done there.)
 **Files:** `CustomBlockss/LICENSE` (+ `LICENSE-ar`), `fabric.mod.json`, `gui/GuiManager.java` (`buildMain`), `command/CustomBlockCommand.java`
@@ -663,6 +426,9 @@ Removed the `if (dominantFamily == null && textureBytes != null && textureBytes.
 
 ---
 
+---
+Task ID: AR2
+---
 ### AR2 — Word Block Generator
 **State:** 💬 DESIGN APPROVED — ready to build samples. Font + style + background modes confirmed.
 **Files:** new `item/ArabicWordBlockItem.java` (or `/cb arabic word` command path), new `texturegen/ArabicWordBlockRenderer.java`, `gui/GuiManager.java`, `CustomBlocksConfig.java`
@@ -683,6 +449,9 @@ Removed the `if (dominantFamily == null && textureBytes != null && textureBytes.
 
 ---
 
+---
+Task ID: AR3
+---
 ### AR3 — Auto-Joining Letter Blocks (Toggleable)
 **State:** 💬 DESIGN APPROVED — ready after AR2 confirmed. Form generation + neighbor detection locked.
 **Files:** form generation task, `core/ArabicAutoJoinManager.java`, `core/SlotData.java` (add `letterForm`), `CustomBlocksConfig.java` (add `arabicAutoJoin` toggle)
@@ -701,35 +470,6 @@ Removed the `if (dominantFamily == null && textureBytes != null && textureBytes.
 
 ---
 
-
-
-## Group 9 — Backlog
-
-Real issues, not urgent. Do not start until Groups 1–8 are cleared.
-
-| ID | Issue | File |
-|----|-------|------|
-| BL-R9 | `/cb config ai-key`, `ai-provider`, `ai-variations`, `ai-style` subcommands | `CustomBlockCommand.java` |
-| BL-R11 | ColorTriangleItem recolor preview GUI (Phase 3.5) | `ColorTriangleItem.java` |
-| BL-R12 | Script vs. Macro storage separation (share MacroManager + dir now) | `MacroManager` |
-| BL-R13 | WELCOME_MENU content (currently minimal) | `GuiManager.java` |
-| BL-R14 | Verify `DropConfigManager.load()` is called at server startup | `DropConfigManager.java` |
-| BL-R15 | Race condition in `getPackUrl()` volatile double-read | `ResourcePackServer.java` |
-| BL-R16 | HTTP connection leak in `getExternalIp()` — no try-with-resources, no timeout | `NetworkManager.java` |
-| BL-R18 | DiagnosticsHelper GUI audit uses hardcoded stub list | `DiagnosticsHelper.java` |
-| BL-R19 | `FACE_IMPORTS` map entries not TTL-evicted for crashed clients | `GuiManager.java` |
-| BL-R27 | `validateUrlSecurity()` passes URLs when DNS resolution fails (SSRF edge case) | `ImageProcessor.java` |
-| BL-R28 | `generateSingleSlot()` stale per-face/variant file cleanup | `ResourcePackGenerator.java` |
-| BL-R29 | Client-side ResourcePackGenerator skips power-of-2 validation | `ResourcePackGenerator.java` |
-| BL-R31 | POST /pack Cloudflare Worker route has no rate limiting | `cloud-vault-worker/src/index.js` |
-| BL-R32 | KV pack TTL is 24h — should be removed or extended to 30d | `cloud-vault-worker/src/index.js` |
-| BL-H2a | `bulkConfirmThreshold` config field + second-confirm click for bulk ops | `GuiManager.java` |
-| BL-H2b | Safe delete undo link for `/cb delete` COMMAND path (single, not bulk) | `CustomBlockCommand.java` |
-| BL-Q1 | `/cb recover` — deleted blocks from UndoManager with restore buttons | `CustomBlockCommand.java` |
-| BL-Q2 | `/cb panic` — timestamp-based 5-second re-confirm window | `CustomBlockCommand.java` |
-
----
-
 ## Known Undiagnosable Issue
 
 **Random texture breaks (purple/black blocks)** — Cannot fix without server logs. When it happens: note the block ID and check `logs/latest.log` for `[ResourcePackServer]` or `[CB]` lines.
@@ -739,21 +479,24 @@ Real issues, not urgent. Do not start until Groups 1–8 are cleared.
 ---
 
 ## 5. 💬 Blocked / Needs Discussion
-### RT1 — Rectangle Tool Block Flash / Stays Purple
-**State:** 🔨 BUILT (race fixed) — blocked by PACK1. Brief purple during pack rebuild is expected.
-**Files:** `item/RectangleToolItem.java`
+---
+Task ID: RT1
+---
+### RT1 — Rectangle Tool Block Stays Purple 30+ Seconds
+**State:** 🔴 BROKEN — confirmed in-game 2026-06-02. Block stays purple for 30+ seconds after placement or never resolves without rejoin. NOT normal rebuild delay. HIGH PRIORITY.
+**Files:** `item/RectangleToolItem.java`, `network/ResourcePackServer.java`
 **Priority:** 🔴
+**Subplan:** `05_PACK1-2_REL1_RT1.md`
 
-**Root cause:** `setBlockState` was called before `broadcastUpdate("add")`, so clients briefly saw an unknown block slot.
-
-**Fix built:** Swapped the order — broadcast the variant to all clients FIRST, then place the block. A brief purple flash *during* the pack rebuild is EXPECTED (the new slot has no pack texture until the rebuild completes). The block staying purple *even after rejoin* is PACK1 (the new slot texture never gets delivered).
-
-**Test (after PACK1):** Rectangle tool block appears with its texture, no lasting purple. (RT1b: discuss whether a faster pack trigger is worth it — the rebuild window feels long.)
+**Hypothesis:** 30-second debounce timer in ResourcePackServer is delaying the pack rebuild notification after rectangle tool use. Needs deep investigation of the full pack rebuild trigger chain.
 
 ---
 
 ---
 
+---
+Task ID: RECENT1
+---
 ### RECENT1 — /cb recent Full Rework
 **State:** 💬 DISCUSS — developer wants a full rework, not enough detail yet. Flagged for next session.
 **Priority:** 🟠
@@ -762,14 +505,28 @@ Real issues, not urgent. Do not start until Groups 1–8 are cleared.
 
 ---
 
-### SNP1 — Snapshots Complete Rework
-**State:** 💬 DISCUSS.
-**File:** `core/SnapshotManager.java`
-**Priority:** 🔵
+---
+Task ID: SNP1
+---
+### SNP1 — Snapshots: BROKEN + Full Rework Required
+**State:** 🔴 BROKEN — confirmed in-game 2026-06-03. VERY BAD. Top priority. DO NOT TOUCH until investigation is complete.
+**File:** `core/SnapshotManager.java`, `gui/GuiManager.java` (snapshots GUI)
+**Priority:** 🔴 #1
+**Subplan:** `08_SNP1.md`
 
-**Current system:** a snapshot = full GZip JSON of ALL slots (`SlotManager.serializeSnapshotToJson`), stored in `config/customblocks/snapshots/`, max 20, auto every N min + manual + pre-op. `/cb snapshots` → `openSnapshotsGui`; `/cb panic` = 2-step rollback; restore is all-or-nothing.
+**Confirmed bug (2026-06-03):** Snapshots keep reverting to a different one after every server restart or rejoin, regardless of which snapshot the developer selects. The system does not respect the chosen state — it keeps loading from a snapshot it "desires" on its own.
 
-**Developer wants:** per-BLOCK rollback (not all-or-nothing), a GUI button to CREATE a snapshot, better renaming, a better naming system (timestamps are bad), and a search system. Deeper design discussion still pending.
+**This needs DEEP INVESTIGATION before any code is written.** Do NOT guess at a fix. Read `SnapshotManager.java` fully, trace the auto-restore path, and identify exactly why the wrong snapshot is being loaded on startup.
+
+**Known questions to answer during investigation:**
+- Is there an auto-restore on startup that ignores the manually selected snapshot?
+- Is the "selected" snapshot being saved to disk, or only held in memory (lost on restart)?
+- Is there a race condition between the auto-snapshot and the restore path?
+- Is `/cb panic` or a pre-op snapshot silently overwriting the manual restore?
+
+**Current system (what exists):** snapshot = full GZip JSON of ALL slots (`SlotManager.serializeSnapshotToJson`), stored in `config/customblocks/snapshots/`, max 20, auto every N min + manual + pre-op. `/cb snapshots` → `openSnapshotsGui`; `/cb panic` = 2-step rollback; restore is all-or-nothing.
+
+**Developer wants (after the bug is fixed):** per-block rollback, a GUI button to CREATE a named snapshot, better naming system (timestamps are bad), search, and a "lock" so a snapshot can't be auto-overwritten.
 
 ---
 
@@ -780,127 +537,11 @@ Real issues, not urgent. Do not start until Groups 1–8 are cleared.
 ---
 
 ## 6. ❌ Backlog / Not Started
-### REDO1 — `/cb redo` Says "Nothing to Redo" After Undoing a Deletion
-**State:** ✅ CONFIRMED — logic works perfectly, but missing translation key <unknown_cb_tail> (LANG1).
-**Files:** `command/CustomBlockCommand.java` (`cmdUndo`)
-**Priority:** 🔴
-
-**Root cause (two bugs):**
-1. *(First, pre-existing.)* In `cmdUndo`, `curForRedo = SlotManager.getById(prev.customId)` was captured BEFORE `restoreSnapshot()`. For deleted blocks the block doesn't exist yet → returns null → `pushRedo` was skipped. Fix: for `wasDeleted = true`, push the redo entry AFTER `restoreSnapshot()` using `new UndoEntry(id, null, "delete", false)` (`previousState=null` is the signal `cmdRedo` uses to re-delete the block).
-2. *(Second, found Session 5b.)* Both redo pushes used the 4-arg `UndoEntry` constructor → `playerUuid=null`. `pushRedo` skips null-UUID entries in per-player mode → redo stack stayed empty → "Nothing to redo." Fix: both pushes now use the 5-arg constructor passing `uuid`.
-
-**Test:** Delete a block → `/cb undo` → `/cb redo` → block disappears again.
-**Note:** Also need to add a `[Click to Redo]` chat button after `/cb undo`, and a `[Click to Undo]` button after `/cb redo`.
-
----
-
-
-
----
-
----
-
-### G7 — Unified /cb history Screen (Undo + Redo, Split View, Paginated)
-**State:** ❌ NOT STARTED.
-**Files:** `gui/GuiManager.java`, `command/CustomBlockCommand.java`
-**Priority:** 🟡
-
-Kill the existing view-only `/cb history` (`buildHistoryGui`) and `buildUndoPicker`. Replace both with one unified screen. `/cb history`, `/cb undogui`, `/cb redogui`, `/cb historygui` all open it.
-
-**Layout (54-slot):**
-```
-Row 0: [glass][§6↩UNDO label][glass][glass][header][glass][glass][§b↪REDO label][glass]
-Row 1: [u0][u1][u2][u3] | [divider] | [r0][r1][r2][r3]
-Row 2: [u4][u5][u6][u7] | [divider] | [r4][r5][r6][r7]
-Row 3: [u8][u9][u10][u11] | [divider] | [r8][r9][r10][r11]
-Row 4: [u12][u13][u14][u15] | [divider] | [r12][r13][r14][r15]
-Row 5: [back][glass][glass][prev][page-info][next][glass][glass][glass]
-```
-- 16 undo (left, cols 0–3) + 16 redo (right, cols 5–8) per page; divider at col 4.
-- Click undo entry N: apply all undos from top down to N. Click redo entry N: apply redo N from top.
-- On click: apply, refresh in place.
-
----
-
----
-
-### G8 — Help GUI Redesign
-**State:** ❌ NOT STARTED.
-**File:** `gui/GuiManager.java` (`buildHelpGui()`, `buildMain()`)
-**Priority:** 🟡
-
-**Change A — Add `?` Help button in buildMain().** Slot 8 is in use (HUD Editor). Read `buildMain()` fully to find an empty slot, then:
-```java
-inv.setStack(/* verified empty slot */, ui(Items.WRITTEN_BOOK, "§b§l? Help", "§7What can I do on this screen?"));
-```
-Its click handler should call `openHelpGui(player)`.
-
-**Change B — Replace buildHelpGui() content.** Remove any item showing raw `/cb` syntax, any "Keyboard Shortcuts" item, any `minecraft:writable_book` named item. Replace with 5 plain-English category buttons:
-| Slot | Label | Explains |
-|------|-------|---------|
-| 1 | How do I change a block's color? | Color square/triangle tools |
-| 2 | How do I make a block glow or change its sound? | Properties screen |
-| 3 | How do I fix a broken or purple block? | Broken Blocks screen |
-| 4 | How do I undo something? | Undo button in main GUI |
-| 5 | How do I share or back up my blocks? | Export, snapshots, trash |
-
-Each category screen: plain English only. No command syntax, no raw IDs.
-
----
-
----
-
-### G9 — Bulk Op Picker Full Upgrade
-**State:** ❌ NOT STARTED.
-**File:** `gui/GuiManager.java` (`buildBulkOpPicker`, `handleBulkOpPickerClick`)
-**Priority:** 🔵
-
-Applies to ALL bulk operations (delete, recolor, rename) since they share the builder + handler.
-
-**New top bar (row 0, slots 0–8):**
-```
-[0:←Back] [1:🔍Search] [2:🔤Pattern] [3:🔀Sort] [4:📂Category] [5:🏷PropFilter] [6:✓All] [7:✗All] [8:▶Execute]
-```
-Block grid: slots 9–44. Nav row: 45 (prev), 49 (page info), 53 (next).
-
-**New data structures (add to GuiManager):**
-```java
-private static final Map<UUID, String>  BULK_SEARCH_FILTER = new ConcurrentHashMap<>();
-private static final Map<UUID, String>  BULK_PROP_FILTER   = new ConcurrentHashMap<>();
-private static final Map<UUID, String>  BULK_SORT_MODE     = new ConcurrentHashMap<>();
-private static final Map<UUID, Integer> BULK_LAST_CLICKED  = new ConcurrentHashMap<>();
-```
-Add cleanup for all four in `onPlayerDisconnect()`. New GuiMode values: `BULK_DELETE_REVIEW`, `BULK_CAT_JUMP` (add to `GuiMode.java` + factory methods in `GuiState.java`).
-
-**Sub-features:**
-- **Search (slot 1):** anvil prompt → filter grid by name/ID (case-insensitive), stored in `BULK_SEARCH_FILTER`. Label shows `§aSearch: §f<keyword>` + result count. Empty = clear.
-- **Pattern-select (slot 2):** anvil prompt → ADD every block whose ID contains the keyword to selection (doesn't replace). Action bar: `§aSelected N blocks matching '§f<pattern>§a'`.
-- **Sort (slot 3):** cycles Default → A→Z → Z→A → By Category. Stored in `BULK_SORT_MODE`. Applied before pagination.
-- **Category jump (slot 4):** opens `BULK_CAT_JUMP` 54-slot picker (one category per slot + count, "All" at slot 0). Click → filter + return.
-- **Property filter (slot 5):** cycles All → Animated → Locked → Favorites → Broken. Stored in `BULK_PROP_FILTER`.
-- **Shift-select range (slot 6/7 + grid):** left-click toggles single + records `lastClickedIdx`; shift+click (`slotActionType == QUICK_MOVE`) selects all between last and current (inclusive), across pages (indices into filtered+sorted pool).
-- **Lock protection:** locked blocks shown as `RED_STAINED_GLASS_PANE` + lore `§c⚿ Locked`; clicking shows action bar; skipped on pattern-select; removed from selection on Execute + `Skipped N locked blocks`.
-- **Review before execute (delete only):** when `opId == "delete"` and Execute clicked → review screen (read-only block list, Confirm at slot 53 always visible, Cancel at 45 preserves selection).
-- **Clickable undo link after delete:** chat `§c§l[CustomBlocks] §r§cDeleted §f47§c blocks. §e§n[Click to undo]§r (30s)` using `ClickEvent.Action.RUN_COMMAND` → `/cb undo`.
-
----
-
 ## Group 3 — Undo / Redo / History
 
 > See also **REDO1** (broken), **REDO2** (confirmed) in Group 1, and **G7** (history GUI) in Group 2.
 
 ---
-
----
-
-### UND1b — Rich Batch Undo/Redo Message
-**State:** ❌ NOT STARTED — design confirmed by developer. Build after REDO1 is confirmed.
-**Priority:** 🟠
-
-The batch undo/redo chat message currently shows a count only. Desired:
-- Show the list of block names (not just a count).
-- Right-click in chat to unfold the full list; show category info per block.
-- Visible in `/cb history`, `/cb undogui`, and the `/cb redo` confirm dialog.
 
 ---
 
@@ -910,26 +551,24 @@ The batch undo/redo chat message currently shows a count only. Desired:
 
 ---
 
-### ~~[MOVED to Fix_NF2_COL11_PACK2.md] COL11 — Color Tool on a Base Block: Graceful Variant Matching~~
-**State:** 🔨 BUILT — my Session 5 silent fix was wrong.
-**Files:** `item/ColorSquareItem.java` (`resolveTargetId` + self-same check), `item/ColorTriangleItem.java` (equivalent)
-**Priority:** 🔴
+---
+Task ID: COL11
+---
+### COL11 — Color Tool on a Base Block
+**State:** ✅ CONFIRMED IN-GAME (Session 7, 2026-06-01) — graceful fallback working.
 
-**Symptom (verbatim from screenshot):** `[CB] No Black variant found for 'BonBon'.` The block `BonBon` is a BASE block (no color prefix/suffix). Using a black square produced this error instead of working.
-
-**Root cause (confirmed):** When trying to color a base block that has no variant, it correctly falls back to itself. However, it currently hits `return ActionResult.SUCCESS;` silently, providing no feedback to the user.
-**Fix:** Before returning success on the self-same check, send `player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_square_already_color", color.label())), true)` so it prints `[CB] Already [color]` in chat.
-
-**The correction needed:** My Session 5 fix made the no-variant case silently do nothing. Correct behavior: show the same `"Already [color]"` action-bar message as the genuine same-color case. One-line change in the `ColorSquareItem.java` self-same check.
-
-> Read `resolveTargetId()` fully before writing the prefix/suffix-aware matcher.
-
-**Test:** Black square on a base block → no error, graceful fallback / "Already [color]" message. Suffix and prefix both swap correctly. Triangle preserves color position.
+**COL Square detection bugs (tracked separately — see COL Square entry and subplan `01_COL1-12_NF4_COL-LIMITS.md`):**
+- Reverse detection ("No black variant found" on a genuinely black block) — fixed 2026-06-03 via texture fallback in `matchesColor()`
+- Color Square no longer requires bg mode configured — fixed 2026-06-03
+Both fixes are ⏳ pending in-game confirmation.
 
 ---
 
 ---
 
+---
+Task ID: COL-LIMITS
+---
 ### Color Tools — Known Limitations (not planned)
 Possible but not planned; research required before any planning:
 - **Screen eyedrop** (sample any screen pixel) — requires LWJGL framebuffer access.
@@ -946,14 +585,20 @@ Possible but not planned; research required before any planning:
 
 ---
 
-### BGR1 — Smart Background Removal Rework ⭐ Developer's #1
-**State:** 💬 Design AGREED — build in small TESTED pieces, one at a time. NOT started.
-**Files:** `core/ImageProcessor.java` (`replaceBackground()`), `item/ColorTriangleItem.java` (`recolourBackground()`), `gui/GuiManager.java`, new `bg-learning.json`
-**Priority:** 🟠 ⭐
+---
+Task ID: BGR1
+---
+### BGR1 — Smart Background Removal Rework
+**State:** ✅ PARTIAL / DONE IN-GAME (2026-06-02) — Auto-detect removed, labels renamed. Future smart system C pending separate plan. See subplan `06_IMG1-6_S3_TOL1_PIX1_BGR1.md` (BGR1 section).
+**Files:** `core/ImageProcessor.java`, `gui/GuiManager.java`
+**Priority:** 🟠
+**Subplan:** `06_IMG1-6_S3_TOL1_PIX1_BGR1.md`
 
-**The problem — spans TWO code paths:**
-- **Import path** (`replaceBackground`, e.g. the SHEEP via `/cb create`): the remover ONLY erases pixels near WHITE (`isNearWhiteYcbcr` / `deltaE` from `LAB_WHITE`). It never samples the real background color. White sheep bars survive because the white isn't pure enough at the current tolerance.
-- **Triangle recolor path** (`ColorTriangleItem.recolourBackground`, e.g. the BASKETBALL via a red triangle): a different code path that eats the subject's black lines.
+**Immediate changes (confirmed 2026-06-02):**
+1. Removed auto-detect — always use manual `/cb tolerance` value, no guessing
+2. Renamed bg mode labels: `corners_only` → "Remove Background", `corners_and_trapped` → "Remove Background + Holes", `none` → "No Background Removal"
+
+**Future smart system (not started):** Smart border-color sampling, slider filmstrip preview, feedback buttons, before/after preview.
 
 Confirmed by developer: basketball = red triangle recolor; sheep = `/cb create` import. `tolerance <= 0` removes nothing. `padToSquare` runs before `replaceBackground` in the rectangle path, so padding is subject to removal.
 
@@ -981,16 +626,9 @@ Also route the triangle recolor path through the same detector (its own tested s
 
 ---
 
-### IMG4-S3 — Transparent-Background Images Showed White (Regression)
-**State:** ✅ CONFIRMED FIXED (2026-05-30, Session 5, screenshot — Discord logo now black).
-**File:** `core/ImageProcessor.java`
-
-**Root cause:** The IMG4 fix correctly stopped transparent pixels from seeding the flood fill, but Stage 3 of `replaceBackground()` composited ALL remaining transparent pixels against WHITE (`bgR/G/B = 255`). So a transparent-background PNG (Discord logo) was never flood-filled → never set to black → composited white. **Fix:** in Stage 3, `if (a == 0) { argb.setRGB(x, y, BLACK); continue; }` before the white composite. Same fix in `replaceBackgroundWithFringeTolerance()`.
-
 ---
-
+Task ID: IMG5
 ---
-
 ### IMG5 — Per-Upload Shift Key: Skip BG Removal for One Block
 **State:** 🔴 SCRAPPED — confusing/unusable, superseded by BGR1.
 **File:** `item/RectangleToolItem.java`
@@ -1005,6 +643,9 @@ Hold Shift while uploading a URL → background removal skipped for that one blo
 
 ---
 
+---
+Task ID: IMG5+
+---
 ### IMG5+ — Extend Shift-Skip to /cb create and /cb importfolder
 **State:** 🔴 SCRAPPED — superseded by BGR1.
 **File:** `command/CustomBlockCommand.java`
@@ -1020,27 +661,11 @@ Thread the `skipBgRemoval` flag through the `/cb create` and `/cb importfolder` 
 
 ---
 
-### NF3 — High-Speed Animation System (>20 fps)
-**State:** ❌ NOT STARTED — complex, dedicated session.
-**Priority:** 🔵
-
-**Root cause:** MC's MCMETA animation is tick-based (`tickTime = max(1, round(20/fps))`). All fps ≥ 20 produce `tickTime = 1` — identical. Setting 100fps does nothing.
-
-**Architecture:**
-- **2a:** blocks with fps > 20 get `"highFps": true` + `"targetFps": 60` in animMeta; `frametime` still 1 for compatibility, but the high-fps system takes over.
-- **2b — new `client/HighFpsAnimManager.java`:** `Map<Integer, HighFpsAnim>` keyed by slot index. `HighFpsAnim` fields: `NativeImage[] frames`, `int targetFps`, `int currentFrame`, `long lastUpdateNs`, `int atlasX/Y/Width/Height`. Methods: `register(...)`, `tick(long nowNs)` (advances when `(nowNs - lastUpdateNs) >= 1_000_000_000L / targetFps`, uploads via `GlStateManager._texSubImage2D`).
-- **2c:** register in `CustomBlocksClient.java` via `WorldRenderEvents.END` / `HudRenderCallback.EVENT` — fires every rendered frame.
-- **2d:** on `SlotUpdatePayload` with `"highFps": true`, extract frames and call `register()`.
-- **2e — AnimGui:** cap standard MCMETA at 20fps; values above route to high-fps; relabel ("60 fps (high-speed)" vs "10 fps (standard)"); remove 40/60/80/100 from the standard slider; add a "High Speed" section.
-
-**Files:** `client/CustomBlocksClient.java`, new `client/HighFpsAnimManager.java`, `gui/GuiManager.java`.
-
 ---
-
+Task ID: MM1
 ---
-
 ### MM1 — Mod Menu Entry (icon + extras)
-**State:** 🔨 PARTIAL — fields scaffolded (Session 3); needs rebuild + in-game Mod Menu confirmation. **Icon still missing → shows "?".**
+**State:** 🔴 FULL REWORK NEEDED (2026-06-02) — everything wrong: name, author, description, icon (missing), links. Needs complete redesign and rebuild.
 **Files:** `fabric.mod.json`, `assets/customblocks/icon.png` (missing), `en_us.json`
 **Priority:** 🟡
 
@@ -1063,182 +688,15 @@ Thread the `skipBgRemoval` flag through the `/cb create` and `/cb importfolder` 
 ---
 
 ## 7. 🗄️ Archive (✅ WORKING)
-### PACK1 — Pack Download Fails (HTTP 404) After Any Rebuild
-**State:** 🔨 BUILT — root cause fully confirmed (Session 5b). **Blocks REL1 and RT1.**
-**Files:** `network/ResourcePackServer.java`, `network/ResourcePackManager.java`
-**Priority:** 🔴 #1
-
-**Symptom:** After any pack rebuild (bulk delete, `/cb reload`, new block via rectangle tool), the client gets "1 out of 1 pack(s) failed to download." Rejoining fixes it.
-
-**Root cause (confirmed by reading both files):** `scheduleRebuild()` does this with no synchronization:
-```
-1. updatePack()              → queues ZIP build on a background thread, returns immediately
-2. sendUpdateToAllPlayers()  → starts a notify thread, sleeps 2 seconds, then sends the pack URL to all clients
-```
-The ZIP build takes **3–5+ seconds** with many blocks. The notify fires at the 2s mark. The client receives the URL, tries to download, and the server returns **HTTP 404** because the file isn't finished yet. Rejoin works because by then the ZIP is done and the client re-requests it successfully.
-
-**Fix:** 
-1. Remove the call to `sendUpdateToAllPlayers()` from `ResourcePackManager.scheduleRebuild()`.
-2. Move it inside `ResourcePackServer.updatePackWithSnapshot()`, AFTER `currentPackFile` and `currentHash` are updated.
-3. **CRITICAL CLOUD SYNC:** If `cloudShareEnabled` is true, the notification must be placed *inside* the `PACK_UPLOADER.submit()` callback so it waits until the upload to Cloud Vault is fully complete. Otherwise, players get a 404 from the cloud.
-
----
-
----
-
-### C1 — Null Check Crashes (21 locations)
-**State:** ✅ CONFIRMED WORKING IN-GAME
-**File:** `gui/GuiManager.java`
-**Priority:** 🔴
-
-Fix pattern for every location:
-```java
-SlotData d = SlotManager.getById(id);
-if (d == null) { send(player, "Block not found."); return; }
-// ... rest of logic using d
-```
-Lines that need this fix (verified): `601, 1422, 1648, 1695, 1696, 1698, 1719, 1738, 3353, 3375, 3463, 3474, 3479, 3487, 3488, 3496, 3524, 3774, 4228, 4567, 5762, 7216`
-
-Already safe — DO NOT touch: lines 3327 (`if (dd == null) return;`), 3850 / 4471 / 5991 (ternary null guards), 6954 (`if (target == null || source == null)`), 7525 (`d != null &&`).
-
-> Before editing any line, read the surrounding 10 lines to confirm the exact variable and method name. Line numbers may shift.
-
-**Test:** Delete a block while a GUI referencing it is open. Click buttons. Server should not crash — should show "Block not found."
-
----
-
 ## Group 2 — GUI Navigation
 
 ---
 
 ---
 
-### G2 — ESC from Bulk Delete Closes Everything
-**State:** ✅ CONFIRMED (2026-05-29, Session 2).
-**File:** `gui/GuiManager.java` (`openBulkOpPicker`)
-**Priority:** 🔴 — 1 line
-
-`openBulkOpPicker` set state directly without calling `pushBackStack`, so BULK_HUB was never saved → ESC found an empty stack → closed everything. Fixed by adding `pushBackStack(player.getUuid());` as the FIRST line of `openBulkOpPicker`.
-
 ---
-
+Task ID: COL10
 ---
-
-### G4 — Bulk Delete Has Two Entry Points
-**State:** ✅ CONFIRMED WORKING IN-GAME
-**Files:** `gui/GuiManager.java`, `command/CustomBlockCommand.java`
-**Priority:** 🟠 — 2 lines
-
-- `CustomBlockCommand.java`: `GuiManager.openBulkDelete(p, 0)` → `GuiManager.openBulkHub(p)`
-- `GuiManager.java` (main GUI slot 19): `openBulkDelete(player, 0)` → `openBulkHub(player)`
-
-Keep `openBulkDelete` and `buildBulkDeleteGui` in code — just remove the entry points.
-
----
-
----
-
-### G5 — Remove /cb helpgui
-**State:** ✅ CONFIRMED WORKING IN-GAME
-**File:** `command/CustomBlockCommand.java`
-**Priority:** 🟠 — 4 lines deleted
-
-Delete the `.then(CommandManager.literal("helpgui")...)` block. `/cb help` already does the same thing.
-
----
-
----
-
-### G6 — Unify /cb, /cb gui, /cb menu → openWelcomeGui
-**State:** ✅ CONFIRMED WORKING IN-GAME
-**File:** `command/CustomBlockCommand.java`
-**Priority:** 🟠
-
-- `cmdGui()`: always call `GuiManager.openWelcomeGui(player)` regardless of onboarding status — remove the if/else branch.
-- `/cb menu`: change whatever it calls → `GuiManager.openWelcomeGui(p)`.
-
----
-
----
-
-### UND1 — Bulk Undo as a Single Batch (with Confirm Dialog)
-**State:** ✅ CONFIRMED (2026-05-30, Session 5b). UND1b (rich message) still pending.
-**Files:** `core/UndoManager.java`, `gui/GuiManager.java`, `command/CustomBlockCommand.java`
-
-**Root cause:** Each deleted block pushed its own undo entry in a loop, so a bulk delete needed many `/cb undo`s.
-
-**Fix:** New `BatchDelta` type in UndoManager + `pushUndoBatch()` in the GuiManager bulk-delete path + a double-`/cb undo` confirm dialog. Confirmed working end-to-end.
-
----
-
----
-
-### REDO2 — Bulk Redo After Batch Undo
-**State:** ✅ CONFIRMED (2026-05-30, Session 5b, screenshot).
-
-**Root cause:** `cmdUndoBatch()` restored all blocks but never pushed anything to the redo stack.
-
-**Fix:** After restoring, push a `BatchDelta` to the redo stack via `pushRedoBatch()` + batch detection + confirm dialog in `/cb redo`. Confirmed: bulk delete → `/cb undo` (confirm) → blocks back → `/cb redo` (confirm) → blocks gone again.
-
----
-
----
-
-### COL6 — Variant Naming ("Dark Red", not "Hex #8B0000")
-**State:** ✅ CONFIRMED (Parts A/B) — actually names "Maroon", but acceptable. Part C ❌ NOT STARTED.
-**Files:** `item/ColorTriangleItem.java`, `item/ColorSquareItem.java`
-**Priority:** 🟡
-
-**Parts A/B (done, found present):** `NBT_CUSTOM_NAME` override in `resolveColor()` + a ColorLibrary delta-E `labelForRgb()` in both items. The only Session-2 change: `labelForRgb()` previously returned `""` when no library color was within delta-E 25 (names rendered as just " Triangle"/" Square"). Now falls back to `"Hex #" + hex`. Reference matcher:
-```java
-private static String labelForRgb(int rgb) {
-    int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
-    String closest = null; double bestDist = Double.MAX_VALUE;
-    for (com.customblocks.gui.ColorLibrary.LibColor c : com.customblocks.gui.ColorLibrary.ALL) {
-        int[] cr = com.customblocks.gui.ColorPickerHelper.hexToRgb(c.hex());
-        if (cr == null) continue;
-        double[] labA = rgbToLab(r, g, b), labB = rgbToLab(cr[0], cr[1], cr[2]);
-        double dE = Math.sqrt(
-            (labA[0]-labB[0])*(labA[0]-labB[0]) +
-            (labA[1]-labB[1])*(labA[1]-labB[1]) +
-            (labA[2]-labB[2])*(labA[2]-labB[2]));
-        if (dE < bestDist) { bestDist = dE; closest = c.name(); }
-    }
-    return (closest != null && bestDist < 25.0) ? closest : "Hex #" + hexForRgb(rgb);
-}
-```
-
-**Part C — Retroactive rename prompt (NOT started):** When a tool is renamed via the `/cb colors` hub (COL10), search `SlotManager.allSlots()` for blocks created with that tool, show a count + GUI prompt "Update X existing blocks? [Yes] [No]"; Yes → update `displayName` + rebuild pack. Read `SlotManager.java` for the correct rename/update method first.
-
-**Test:** Create a #8B0000 triangle → auto-named "Dark Red". Rename to "Blood Red" → new blocks use it. When renaming, get prompted about existing blocks → Yes updates them.
-
----
-
----
-
-### COL7 — Glint Always On
-**State:** ✅ CONFIRMED WORKING IN-GAME
-**Files:** `item/ColorSquareItem.java`, `item/ColorTriangleItem.java`
-
-**Knowledge (2026-05-31):**
-- Glint (shiny purple enchantment effect) successfully appears on all custom squares and triangles in the inventory.
-*(Note: The tooltip missing issue is tracked entirely under COL5)*
-
----
-
----
-
-### COL8b — Red Hex Editor in /cb config
-**State:** ✅ CONFIRMED WORKING IN-GAME
-**File:** `gui/GuiManager.java`
-**Priority:** 🟡
-
-Green/yellow already have a hex editor in the config GUI; red does not. Add a Red Shade hex config button (verify an empty slot by reading the config GUI builder before placing).
-
----
-
----
-
 ### COL10 — /cb colors Command + Hub Finish
 **State:** ⚠️ PARTIAL — command CONFIRMED working (2026-05-29 s2); hub layout/features pending ("needs some working on").
 **Files:** `command/CustomBlockCommand.java`, `gui/GuiManager.java`
@@ -1268,17 +726,9 @@ Green/yellow already have a hex editor in the config GUI; red does not. Add a Re
 
 ---
 
-### CMD1 — /cb settings Alias for /cb config
-**State:** ✅ CONFIRMED WORKING IN-GAME
-**File:** `command/CustomBlockCommand.java`
-**Priority:** 🟡
-
-Add `/cb settings` as an alias that opens the same screen as `/cb config`.
-
 ---
-
+Task ID: TOL1
 ---
-
 ### TOL1 — Tolerance Capped by Auto-Detect (80 == 30)
 **State:** 🔴 BROKEN — root cause confirmed (Session 5b). Not built.
 **File:** `core/ImageProcessor.java` (`replaceBackground()`), `gui/GuiManager.java` (`/cb config` GUI)
@@ -1294,8 +744,11 @@ Add `/cb settings` as an alias that opens the same screen as `/cb config`.
 
 ---
 
+---
+Task ID: IMG1
+---
 ### IMG1 — Download Headers + Auto-Detect Tolerance
-**State:** 🔨 BUILT — needs in-game test. CDN headers CONFIRMED working (2026-05-29); WixMP blocked at datacenter level (unfixable without a proxy).
+**State:** ✅ CONFIRMED DONE (2026-06-02). CDN headers work for Discord/most sites. WixMP permanently blocked at datacenter level — known limitation, error message already guides users. No further fix planned.
 **File:** `core/ImageProcessor.java`
 **Priority:** 🟡
 
@@ -1312,145 +765,26 @@ Add `/cb settings` as an alias that opens the same screen as `/cb config`.
 
 ---
 
-### IMG3 — bgRemovalEnabled Global Toggle
-**State:** ✅ CONFIRMED WORKING IN-GAME (2026-05-31)
-**Files:** `CustomBlocksConfig.java`, `core/ImageProcessor.java`
-**Priority:** 🟡
 
-- `CustomBlocksConfig`: `public static volatile boolean bgRemovalEnabled = true;` wired into load/save.
-- `ImageProcessor`: all three `replaceBackground*` variants get `if (!CustomBlocksConfig.bgRemovalEnabled) return pngBytes;` at the very top (above the "none" check).
+## 8. Legacy Royal Directive Verification Data (2026-05-26)
 
-**Test:** `bgRemovalEnabled: false` → any image arrives as-is. `true` → removal works.
+### Verified Working
+| Feature | Confirmed by |
+|---------|-------------|
+| Blocks load with correct textures on join | Screenshot |
+| HUD overlay shows block info when looking at a custom block | Screenshot |
+| Creating a new block | Developer confirmed |
+| Block editor opens and shows correct info | Developer confirmed |
+| Color square/triangle applies recolor | Developer confirmed (has delay issue) |
+| Blocks survive server restart | Developer confirmed |
+| Build compiles clean | `./gradlew build` passes |
 
----
+### Known Broken or Missing
+| # | Feature | Problem | Priority |
+|---|---------|---------|----------|
+| 1 | HUD editor (`/cb edithud`) | Not built — prints "coming soon" — developer wants Lunar-style drag editor | HIGH — developer explicitly said this is what they want most |
+| 2 | Main GUI layout | Messy, items in wrong slots, mostly empty, "Celestial Nexus" tooltip | MEDIUM |
+| 3 | Help GUI | Half-empty, items show raw Minecraft IDs on hover | MEDIUM |
+| 4 | Color square delay | Noticeable delay between right-click and recolor applying | MEDIUM — AI tried to fix this multiple times and failed |
+| 5 | Random texture breaks | Some blocks occasionally go purple/black | LOW — needs server log to diagnose, can't fix blind |
 
----
-
-### NF1 — HUD Editor Phase 2 (Full Rework)
-**State:** ❌ NOT STARTED — large, dedicated session. Phase 1 confirmed working in-game.
-**Priority:** 🔵
-
-**Phase 1 (done + confirmed):** `client/HudConfig.java` (saves x/y + 7 toggles to `hud-config.json`), `network/OpenHudEditorPayload.java` (S2C signal), `client/gui/HudEditorScreen.java` (drag editor, toggles, ESC confirm), client wiring, `/cb edithud` sends the packet.
-
-**Phase 2 — Positioning & guides:** draggable sidebar; quick-snap TL/TC/TR/BL/BC/BR; center crosshair guides while dragging; magnetic grid overlay; edge snap zones (within 18px); snap to other HUD elements; all guides individually toggleable.
-
-**Phase 2 — Appearance:** style switcher (Pill / Glow box / Plain text, live); background opacity slider; separate text opacity; font size 50–200%; accent color picker; rounded vs sharp corners; gradient option.
-
-**Phase 2 — Content (dual mode):**
-- *Visual chips (default):* toggleable, draggable chips: `[★][Name][ID][Light][Hardness][Sound][Collision][Face][Category][Creator][Frames][Health]`, live preview.
-- *Template text (power user):* `{variable}` placeholders — `{name} {id} {light} {hardness} {sound} {collision} {face} {category} {creator} {frames} {health}`.
-- Extras (both): block thumbnail in corner, animation status + frame number, category, creator, custom per-line prefix.
-
-**Phase 2 — Behavior:** fade in/out on look; sticky mode (default 3s); show/hide keybind (default H, rebindable); auto-hide when a GUI is open.
-
-**Phase 2 — Presets:** named layouts ("Staff Mode", "Clean", "Minimal"); load/switch in-editor; share as a copy-paste code.
-
-**Phase 2 — Access:** pause-menu button (top priority, most Lunar-like); `/cb edithud` (done); H keybind; main `/cb` GUI slot.
-
----
-
----
-
-## Reference
-
-### Build Command
-```powershell
-# Run at the start of every session before deploying
-$env:JAVA_HOME = "C:\Program Files\Microsoft\jdk-21.0.10.7-hotspot"
-$env:PATH = "$env:JAVA_HOME\bin;" + $env:PATH
-Set-Location "C:\Users\66664\OneDrive\Desktop\Coding\CustomBlockss"
-.\gradlew.bat build
-# Deploy: build/libs/customblocks-1.0.0.jar  (NOT -dev or -sources)
-# The live server may be running an older version — always build fresh first.
-# SpotBugs exits 1 as usual — not a failure, the build still succeeds.
-```
-
-### Critical Gotchas
-
-**Read these before touching any code. Violating them causes silent bugs or build failures.**
-
-**1. UTF-8 BOM (MOST IMPORTANT)** — The Edit tool sometimes writes files with a BOM (`﻿`), causing `illegal character` compile errors on every import line. Check after any edit:
-```powershell
-$bytes = [System.IO.File]::ReadAllBytes("path\to\File.java")
-$bytes[0]  # Must be 112 ('p') — if it's 239, you have a BOM
-```
-Strip it if present:
-```powershell
-$path = "path\to\File.java"
-$content = [System.IO.File]::ReadAllText($path).TrimStart([char]0xFEFF)
-[System.IO.File]::WriteAllText($path, $content, [System.Text.UTF8Encoding]::new($false))
-```
-
-**1b. Curly-Quote Corruption (discovered Session 2)** — The Edit tool sometimes converts ASCII `"` into Unicode curly quotes `U+201C "` / `U+201D "` inside string literals. Java won't compile these — you get a cascade of `';' expected`, `illegal character: '“'`, `not a statement` errors that look unrelated. The `verifyMojibake` gradle task does NOT catch it. If a build dies with illegal-character errors right after a GUI/lore edit, run this on the file before debugging the logic:
-```powershell
-$path = "path\to\File.java"
-$content = [System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8)
-$fixed = $content.Replace([char]0x201C, [char]0x0022).Replace([char]0x201D, [char]0x0022)
-[System.IO.File]::WriteAllText($path, $fixed, (New-Object System.Text.UTF8Encoding($false)))
-```
-
-**2. SoundEvents Type Split (Yarn 1.21.1+build.3)**
-- `SoundEvents.BLOCK_NOTE_BLOCK_*` → type is `RegistryEntry<SoundEvent>` → **needs `.value()`**
-- All other SoundEvents constants (ENTITY_EXPERIENCE_ORB_PICKUP, BLOCK_AMETHYST_BLOCK_CHIME, BLOCK_BEACON_ACTIVATE, etc.) → bare `SoundEvent` → **must NOT use `.value()`**
-
-**3. Key Types — Do Not Guess These**
-- `DraftManager.Draft` is a record — use `.payload()` **not** `.data()`
-- `DraftManager.take(uuid)` returns `Optional<Draft>` — check `.isPresent()` first
-- `SlotData` is **NOT a record** — use `d.customId` (public field), **not** `d.id()` or `d.customId()`
-- `GuiState` is a record with exactly these fields in order: `(GuiMode mode, String editingId, int page, boolean confirmDelete, int shapeBoxPage, boolean fromCommand)`
-
-### Key File Map
-| File | Role |
-|------|------|
-| `gui/GuiManager.java` | All GUI open/build/click logic (~8000+ lines) |
-| `gui/FeedbackHelper.java` | Sound/particle/actionBar/title/bossBar feedback |
-| `gui/CbScreenHandler.java` | Screen handler; `refreshWith(SimpleInventory)` |
-| `gui/GuiMode.java` | Enum of all GUI screen types |
-| `gui/GuiState.java` | Immutable state record per player |
-| `core/DraftManager.java` | Save/restore multi-step flow state across disconnect |
-| `core/UndoManager.java` | Undo/redo stacks (global + per-player); 10k depth |
-| `core/LockManager.java` | Per-block lock persistence (`locks.json`) |
-| `core/FavoritesManager.java` | Per-player favorites (`favorites.json.gz`) |
-| `core/SlotManager.java` | Block slot CRUD, persistence |
-| `core/SlotData.java` | Block data object (NOT a record) |
-| `core/ImageProcessor.java` | Image download + background removal |
-| `client/texture/TextureCache.java` | GPU texture cache with CRC32 skip + pre-decode pool |
-| `command/CustomBlockCommand.java` | All `/cb` subcommands (~3000 lines) |
-| `command/ChatHelper.java` | Branded message helpers |
-| `command/PermissionHelper.java` | LuckPerms/OP permission checks |
-| `network/ResourcePackServer.java` | Serves the pack ZIP over HTTP |
-| `network/ResourcePackManager.java` | Schedules + builds the pack, notifies clients |
-| `CustomBlocksConfig.java` | Config persistence (JSON); `maxUndoDepth=10000` |
-
-### Code Patterns Reference
-```java
-// Send action bar overlay
-FeedbackHelper.actionBar(player, "§a§l✔ §r§aCreated: §f" + name);
-
-// Send full-screen title
-FeedbackHelper.title(player, "§a§l✔ Created!", "§f" + name);
-
-// Save draft on disconnect/ESC
-DraftManager.save(uuid, DraftManager.Kind.SESSION_SHELL, Map.of(
-    "guiMode", state.mode().name(),
-    "editingId", state.editingId() != null ? state.editingId() : "",
-    "page", state.page(),
-    "shapeBoxPage", state.shapeBoxPage(),
-    "fromCommand", state.fromCommand(),
-    "confirmDelete", state.confirmDelete()));
-
-// Restore draft
-Optional<DraftManager.Draft> opt = DraftManager.take(uuid);
-Map<String, Object> data = opt.get().payload(); // use .payload() NOT .data()
-
-// Clickable link in chat
-new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.OPEN_URL, url)
-// (see ChatHelper.java; CustomBlockCommand uses this in several places)
-
-// Lock check in editor handler
-if (LockManager.isLocked(id) && slot != 44 && slot != 0 && slot != 2 && slot != 43 && slot != 45) {
-    playError(player);
-    FeedbackHelper.actionBar(player, "§c§l🔒 §r§cLocked — /cb unlock " + id);
-    return;
-}
-```

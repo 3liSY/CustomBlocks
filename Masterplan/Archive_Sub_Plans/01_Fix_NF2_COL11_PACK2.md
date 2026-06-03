@@ -57,3 +57,4 @@
 **The Fix:** 
 1. Re-implement the base block check to only report "Already [Color]" if current.cachedColorFamily *actually matches* the target color.
 2. Implement **Hex Fallbacks**: If a Hex Square cannot find its exact hex variant, it will fall back to searching for a standard named variant (like _red) that matches the hex's closest label.
+

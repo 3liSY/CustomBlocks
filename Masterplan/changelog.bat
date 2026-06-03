@@ -1,0 +1,3 @@
+@echo off
+echo Generating Player-Facing Changelog...
+py tools\cb_changelog.py

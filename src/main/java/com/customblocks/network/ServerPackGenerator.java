@@ -292,14 +292,29 @@ public class ServerPackGenerator {
                 }
                 addGeneratedItemModel(zos, "tab_icon", "customblocks:item/tab_icon", writtenPaths);
 
-                addGeneratedItemModel(zos, "black_square", "minecraft:item/black_dye", writtenPaths);
-                addGeneratedItemModel(zos, "yellow_square", "minecraft:item/yellow_dye", writtenPaths);
-                addGeneratedItemModel(zos, "green_square", "minecraft:item/green_dye", writtenPaths);
-                addGeneratedItemModel(zos, "red_square", "minecraft:item/red_dye", writtenPaths);
-                addGeneratedItemModel(zos, "black_triangle", "minecraft:item/black_dye", writtenPaths);
-                addGeneratedItemModel(zos, "yellow_triangle", "minecraft:item/yellow_dye", writtenPaths);
-                addGeneratedItemModel(zos, "green_triangle", "minecraft:item/green_dye", writtenPaths);
-                addGeneratedItemModel(zos, "red_triangle", "minecraft:item/red_dye", writtenPaths);
+                // Colored tool textures — generated from config hex so changing a hex in /cb config
+                // and saving will produce updated item icons in the next pack push (NF4/COL9).
+                int[] bk = com.customblocks.CustomBlocksMod.parseHexRgb(com.customblocks.CustomBlocksConfig.triangleBlackHex,  10,  10,  10);
+                int[] ye = com.customblocks.CustomBlocksMod.parseHexRgb(com.customblocks.CustomBlocksConfig.triangleYellowHex, 240, 200,  20);
+                int[] gr = com.customblocks.CustomBlocksMod.parseHexRgb(com.customblocks.CustomBlocksConfig.triangleGreenHex,   30, 140,  30);
+                int[] rd = com.customblocks.CustomBlocksMod.parseHexRgb(com.customblocks.CustomBlocksConfig.triangleRedHex,    238,  51,  51);
+                String[][] colorTools = {
+                    {"black",  bk[0]+","+bk[1]+","+bk[2]},
+                    {"yellow", ye[0]+","+ye[1]+","+ye[2]},
+                    {"green",  gr[0]+","+gr[1]+","+gr[2]},
+                    {"red",    rd[0]+","+rd[1]+","+rd[2]}
+                };
+                for (String[] ct : colorTools) {
+                    String col = ct[0];
+                    String[] rgb = ct[1].split(",");
+                    int cr = Integer.parseInt(rgb[0].trim());
+                    int cg = Integer.parseInt(rgb[1].trim());
+                    int cb = Integer.parseInt(rgb[2].trim());
+                    addZipEntry(zos, "assets/" + MOD_ID + "/textures/item/" + col + "_square.png",   makeSquarePng(cr, cg, cb),   writtenPaths);
+                    addZipEntry(zos, "assets/" + MOD_ID + "/textures/item/" + col + "_triangle.png", makeTrianglePng(cr, cg, cb), writtenPaths);
+                    addGeneratedItemModel(zos, col + "_square",   MOD_ID + ":item/" + col + "_square",   writtenPaths);
+                    addGeneratedItemModel(zos, col + "_triangle", MOD_ID + ":item/" + col + "_triangle", writtenPaths);
+                }
                 addGeneratedItemModel(zos, "custom_square", "minecraft:item/light_blue_dye", writtenPaths);
                 addGeneratedItemModel(zos, "custom_triangle", "minecraft:item/light_blue_dye", writtenPaths);
                 addGeneratedItemModel(zos, "rainbow_rectangle", "minecraft:item/painting", writtenPaths);
@@ -354,6 +369,94 @@ public class ServerPackGenerator {
         zos.write(data);
         zos.closeEntry();
     }
+
+    private static byte[] makeSquarePng(int r, int g, int b) {
+        int[][] px = new int[16][16];
+        int dark  = spArgb(255, r/4, g/4, b/4);
+        int main  = spArgb(255, r, g, b);
+        int light = spArgb(255, spLerp(r,255,0.55f), spLerp(g,255,0.55f), spLerp(b,255,0.55f));
+        int shade = spArgb(255, (int)(r*0.65f), (int)(g*0.65f), (int)(b*0.65f));
+        int shine = spArgb(255, 255, 255, 255);
+        for (int row = 2; row <= 13; row++) for (int col = 2; col <= 13; col++) px[row][col] = main;
+        for (int i = 1; i <= 14; i++) { px[1][i]=dark; px[14][i]=dark; px[i][1]=dark; px[i][14]=dark; }
+        for (int row = 2; row <= 4;  row++) for (int col = 2; col <= 12; col++) px[row][col] = light;
+        for (int row = 12; row <= 13; row++) for (int col = 4; col <= 13; col++) px[row][col] = shade;
+        for (int row = 4;  row <= 13; row++) for (int col = 12; col <= 13; col++) px[row][col] = shade;
+        px[2][2]=shine; px[2][3]=shine; px[3][2]=shine;
+        return spPixelsToPng(px);
+    }
+
+    private static byte[] makeTrianglePng(int r, int g, int b) {
+        int[][] px = new int[16][16];
+        int dark  = spArgb(255, r/4, g/4, b/4);
+        int main  = spArgb(255, r, g, b);
+        int light = spArgb(255, spLerp(r,255,0.55f), spLerp(g,255,0.55f), spLerp(b,255,0.55f));
+        int shine = spArgb(255, 255, 255, 255);
+        float apexCx = 7.5f; int apexRow = 1, baseRow = 14; float baseHW = 6.5f;
+        for (int row = apexRow; row <= baseRow; row++) {
+            float t = (float)(row-apexRow)/(baseRow-apexRow); float hw = t*baseHW;
+            int left = Math.round(apexCx-hw), right = Math.round(apexCx+hw);
+            for (int col = left; col <= right; col++) if (col>=0&&col<16) px[row][col] = main;
+        }
+        for (int row = apexRow; row <= baseRow; row++) {
+            float t = (float)(row-apexRow)/(baseRow-apexRow); float hw = t*baseHW;
+            int left = Math.round(apexCx-hw), right = Math.round(apexCx+hw);
+            if (left>=0&&left<16)   px[row][left]  = dark;
+            if (right>=0&&right<16) px[row][right] = dark;
+        }
+        px[apexRow][7]=dark; px[apexRow][8]=dark;
+        for (int col = 1; col <= 14; col++) if (px[baseRow][col]!=0) px[baseRow][col] = dark;
+        for (int row = apexRow+1; row <= apexRow+4; row++) {
+            float t = (float)(row-apexRow)/(baseRow-apexRow); float hw = t*baseHW;
+            int left = Math.round(apexCx-hw)+1, right = Math.round(apexCx+hw)-1;
+            for (int col = left; col <= right; col++)
+                if (col>=0&&col<16&&px[row][col]==main) px[row][col] = light;
+        }
+        if (px[3][7]==light) px[3][7]=shine;
+        if (px[3][8]==light) px[3][8]=shine;
+        return spPixelsToPng(px);
+    }
+
+    private static byte[] spPixelsToPng(int[][] px) {
+        try {
+            int w=16, h=16;
+            byte[] raw = new byte[h*(1+w*4)];
+            for (int row=0; row<h; row++) {
+                int base = row*(1+w*4); raw[base]=0;
+                for (int col=0; col<w; col++) {
+                    int v = px[row][col];
+                    raw[base+1+col*4  ]=(byte)((v>>16)&0xFF);
+                    raw[base+1+col*4+1]=(byte)((v>> 8)&0xFF);
+                    raw[base+1+col*4+2]=(byte)( v     &0xFF);
+                    raw[base+1+col*4+3]=(byte)((v>>24)&0xFF);
+                }
+            }
+            java.util.zip.Deflater def = new java.util.zip.Deflater(java.util.zip.Deflater.BEST_COMPRESSION);
+            def.setInput(raw); def.finish();
+            byte[] comp = new byte[raw.length+128]; int compLen = def.deflate(comp); def.end();
+            byte[] idat = java.util.Arrays.copyOf(comp, compLen);
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            out.write(new byte[]{(byte)0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A});
+            spWriteChunk(out, "IHDR", new byte[]{0,0,0,16,0,0,0,16,8,6,0,0,0});
+            spWriteChunk(out, "IDAT", idat);
+            spWriteChunk(out, "IEND", new byte[0]);
+            return out.toByteArray();
+        } catch (Exception e) { return PLACEHOLDER_PNG; }
+    }
+
+    private static void spWriteChunk(java.io.ByteArrayOutputStream out, String type, byte[] data) throws Exception {
+        byte[] tb = type.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        out.write((data.length>>>24)&0xFF); out.write((data.length>>>16)&0xFF);
+        out.write((data.length>>>8)&0xFF);  out.write(data.length&0xFF);
+        out.write(tb); out.write(data);
+        java.util.zip.CRC32 crc = new java.util.zip.CRC32(); crc.update(tb); crc.update(data);
+        long c = crc.getValue();
+        out.write((int)(c>>>24)&0xFF); out.write((int)(c>>>16)&0xFF);
+        out.write((int)(c>>>8)&0xFF);  out.write((int)c&0xFF);
+    }
+
+    private static int spArgb(int a, int r, int g, int b) { return (a<<24)|(r<<16)|(g<<8)|b; }
+    private static int spLerp(int v, int target, float f) { return Math.max(0,Math.min(255,v+(int)((target-v)*f))); }
 
     private static final byte[] PLACEHOLDER_PNG = {
         (byte)0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A,0x00,0x00,0x00,0x0D,0x49,0x48,0x44,0x52,

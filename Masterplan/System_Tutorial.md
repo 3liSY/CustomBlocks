@@ -28,3 +28,4 @@ Physically drag the Markdown file into the `Completed_Batches/` folder to archiv
 If your conversation is getting too long and you need to start a fresh chat, just copy and paste this exact prompt to the new AI so it doesn't break anything:
 
 > *"Read `Masterplan/THE_ROYAL_DIRECTIVE.md` and `Masterplan/Rules_For_AI.md`. Once you prove you have read them, read our active batch file at `Masterplan/Sub_Plans/[YOUR_BATCH_FILE_NAME].md` and tell me what the plan is to fix the first item on the list. Wait for my permission before writing any code."*
+

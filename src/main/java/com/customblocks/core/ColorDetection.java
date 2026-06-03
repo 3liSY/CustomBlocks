@@ -78,8 +78,11 @@ public final class ColorDetection {
         int[] buckets = new int[15];
         int totalSampled = 0;
 
-        for (int x = 0; x < w; x += 4) {
-            for (int y = 0; y < h; y += 4) {
+        for (int x = 0; x < w; x++) {
+            for (int y = 0; y < h; y++) {
+                // Only sample the outer edges (top row, bottom row, left col, right col)
+                if (x > 0 && x < w - 1 && y > 0 && y < h - 1) continue;
+
                 int argb = img.getRGB(x, y);
                 int alpha = (argb >> 24) & 0xFF;
                 if (alpha < 10) continue; // skip transparent

@@ -174,6 +174,11 @@ public class GuiManager {
     private static final Map<UUID, String> BULK_RECOLOR_EXCLUDE = new ConcurrentHashMap<>();
     private static final Map<UUID, Set<String>> BULK_RECOLOR_SELECTED = new ConcurrentHashMap<>();
     private static final Set<UUID> BULK_RECOLOR_CONFIRM_ARMED = ConcurrentHashMap.newKeySet();
+    private static final Map<UUID, Set<String>> HEX_RECOLOR_SELECTED = new ConcurrentHashMap<>();
+    private static final Map<UUID, Boolean>     HEX_RECOLOR_CANCEL   = new ConcurrentHashMap<>();
+    private static final Map<UUID, String>      HEX_RECOLOR_BG_MODE  = new ConcurrentHashMap<>();
+    /** Packed old RGB (before hex change) so the batch can do a direct color swap. */
+    private static final Map<UUID, Integer>     HEX_RECOLOR_OLD_RGB  = new ConcurrentHashMap<>();
     private static final Map<UUID, Deque<String>> RECENT_BLOCKS = new ConcurrentHashMap<>();
     private static final Map<UUID, com.customblocks.core.MacroManager.ScriptRunResult> LAST_SCRIPT_RESULTS = new ConcurrentHashMap<>();
     private static final int MAX_RECENT = 3;
@@ -370,6 +375,10 @@ public class GuiManager {
         BULK_RECOLOR_EXCLUDE.remove(uuid);
         BULK_RECOLOR_SELECTED.remove(uuid);
         BULK_RECOLOR_CONFIRM_ARMED.remove(uuid);
+        HEX_RECOLOR_SELECTED.remove(uuid);
+        HEX_RECOLOR_CANCEL.remove(uuid);
+        HEX_RECOLOR_BG_MODE.remove(uuid);
+        HEX_RECOLOR_OLD_RGB.remove(uuid);
     }
 
     // ── Draft resume (Phase C2) ──────────────────────────────────────────────
@@ -1253,7 +1262,7 @@ public class GuiManager {
                 case DELETED_BLOCKS_GUI -> openDeletedBlocksGui(player, state.page());
                 case BOX_NUDGE_EDITOR -> openBoxNudgeEditor(player, state.editingId(), state.shapeBoxPage(), state.page());
                 case RECOLOR_CONFIRM -> openMain(player, 0); // transient — job not serialised across reconnect
-                case HEX_RECOLOR_CONFIRM -> openConfigGui(player, false); // transient
+                case HEX_RECOLOR_CONFIRM -> { HEX_RECOLOR_SELECTED.remove(player.getUuid()); openConfigGui(player, false); } // transient
                 case DELETER_CONFIRM -> openMain(player, 0); // transient
                 case SCRIPT_GUI -> openScriptGui(player, state.page());
                 case SCRIPT_SUMMARY -> {
@@ -1365,7 +1374,7 @@ public class GuiManager {
                         if (slot == 20 || slot == 22) { openMain(player, 0); }     // Quick Start / Library
                         else if (slot == 24) { openConfigGui(player); }             // Configuration
                         else if (slot == 31) { openSafetyCenter(player); }         // Safety Center
-                        else if (slot == 49) { openMain(player, 0); }              // Back
+                        else if (slot == 49) { handleEscBack(player); }              // Back
                     }
                 }
                 case FEATURE_MENU -> handleFeatureMenuClick(player, state, slot);
@@ -1820,7 +1829,15 @@ public class GuiManager {
                             CustomBlocksConfig.maxSlots = newVal;
                         }
                         case "defaultTextureSize" -> CustomBlocksConfig.defaultTextureSize = Math.max(16, Math.min(256, Integer.parseInt(text)));
-                        case "bgRemovalTolerance" -> CustomBlocksConfig.bgRemovalTolerance = Math.max(0, Math.min(100, Integer.parseInt(text)));
+                        case "bgRemovalTolerance" -> {
+                            int newTol = Math.max(0, Math.min(100, Integer.parseInt(text)));
+                            if (newTol > 0 && !CustomBlocksConfig.hasChosenBgMode) {
+                                net.minecraft.server.MinecraftServer srv = player.getServer();
+                                if (srv != null) srv.execute(() -> setGlobalToleranceWithCheck(player, newTol));
+                                return true; // Handled async by setGlobalToleranceWithCheck
+                            }
+                            CustomBlocksConfig.bgRemovalTolerance = newTol;
+                        }
                         case "maxUndoDepth" -> CustomBlocksConfig.maxUndoDepth = Math.max(1, Math.min(100, Integer.parseInt(text)));
                         case "downloadTimeoutSeconds" -> CustomBlocksConfig.downloadTimeoutSeconds = Math.max(1, Math.min(120, Integer.parseInt(text)));
                         case "texturePayloadsPerTick" -> CustomBlocksConfig.texturePayloadsPerTick = Math.max(1, Math.min(50, Integer.parseInt(text)));
@@ -1836,6 +1853,7 @@ public class GuiManager {
                                 openConfigGui(player, false);
                                 return true;
                             }
+                            storeOldHex(player.getUuid(), CustomBlocksConfig.triangleGreenHex);
                             CustomBlocksConfig.triangleGreenHex = normalized;
                         }
                         case "triangleYellowHex" -> {
@@ -1845,6 +1863,7 @@ public class GuiManager {
                                 openConfigGui(player, false);
                                 return true;
                             }
+                            storeOldHex(player.getUuid(), CustomBlocksConfig.triangleYellowHex);
                             CustomBlocksConfig.triangleYellowHex = normalized;
                         }
                         case "triangleRedHex" -> { // COL8b
@@ -1854,6 +1873,7 @@ public class GuiManager {
                                 openConfigGui(player, false);
                                 return true;
                             }
+                            storeOldHex(player.getUuid(), CustomBlocksConfig.triangleRedHex);
                             CustomBlocksConfig.triangleRedHex = normalized;
                         }
                         case "colorToolBackgroundMode" -> {
@@ -1881,12 +1901,12 @@ public class GuiManager {
                 }
                 if ("bgRemovalTolerance".equals(key)) openBgStudio(player, false);
                 else if (key.equals("triangleRedHex") || key.equals("triangleGreenHex") || key.equals("triangleYellowHex")) {
-                    // COL9 — rebuild pack for item icons, then offer to recolor existing blocks
+                    // COL9 — rebuild pack for vanilla clients; config sync sent after batch completes
                     net.minecraft.server.MinecraftServer server = player.getServer();
                     if (server != null) com.customblocks.ResourcePackManager.scheduleRebuild(server);
                     try {
-                        java.awt.Color c = java.awt.Color.decode(text.trim());
-                        openHexRecolorConfirmGui(player, key, c.getRed(), c.getGreen(), c.getBlue());
+                        java.awt.Color c = java.awt.Color.decode(normalizeHexInput(text));
+                        openHexRecolorConfirmGui(player, key, c.getRed(), c.getGreen(), c.getBlue(), 0);
                     } catch (Exception ignored) {
                         openConfigGui(player, false);
                     }
@@ -2303,16 +2323,7 @@ public class GuiManager {
         inv.setStack(0, uiGlint(Items.ECHO_SHARD, "§c◀ Back", "§8Return to main menu")); // Royal Directive
         inv.setStack(10, toggleItem("YCbCr Math", CustomBlocksConfig.bgRemovalUseYcbcr,
             "Separates brightness from colour to reduce light edge halos"));
-        boolean autoOn = CustomBlocksConfig.bgRemovalAutoDetect;
-        inv.setStack(11, autoOn
-            ? uiGlint(Items.RECOVERY_COMPASS, "§a§l✔ Auto-Detect: §lON",
-                "§7Analyses each image's border pixels to find",
-                "§7the right tolerance automatically.",
-                "§8Manual slider is ignored when Auto is ON.",
-                "§8Click to turn off")
-            : ui(Items.COMPASS, "§7§l✖ Auto-Detect: §lOFF",
-                "§7Tolerance slider applies as a fixed value.",
-                "§8Click to enable smart per-image detection"));
+
         inv.setStack(13, enabled
             ? uiGlint(Items.EMERALD, "§a§l✔ Background Removal: §lON",
                 "§7Currently §atrimming §7white/transparent edges",
@@ -2323,11 +2334,10 @@ public class GuiManager {
 
         // ── Royal Tolerance Slider (Row 3) ─
         // Use 10 segments of 10 each for cleaner display: slots 18-27 (10 slots)
-        boolean autoDetectOn = CustomBlocksConfig.bgRemovalAutoDetect;
         inv.setStack(18, uiGlint(Items.AMETHYST_CLUSTER,
-            autoDetectOn ? "§b✦ Auto-Detect Active" : "§e✦ Tolerance: §f" + tol,
-            autoDetectOn ? "§7Auto-Detect is ON — manual slider is ignored." : "§7Range: §f0-100",
-            autoDetectOn ? "§8Turn off Auto-Detect to use manual slider." : "§80=OFF • 30=balanced • 60=aggressive • 100=max"));
+            "§e✦ Tolerance: §f" + tol,
+            "§7Range: §f0-100",
+            "§80=OFF • 30=balanced • 60=aggressive • 100=max"));
         // 8 slider segments mapping 0-100 -> slots 19-26
         for (int seg = 0; seg < 8; seg++) {
             int slotIdx = 19 + seg;
@@ -2413,30 +2423,16 @@ public class GuiManager {
             return;
         }
 
-        // Auto-detect toggle
-        if (slot == 11) {
-            CustomBlocksConfig.bgRemovalAutoDetect = !CustomBlocksConfig.bgRemovalAutoDetect;
-            CustomBlocksConfig.save();
-            if (CustomBlocksConfig.bgRemovalAutoDetect) {
-                send(player, "§a[BG Studio] Auto-Detect §aENABLED §7— tolerance is now calculated per image. Slider sets the max cap.");
-            } else {
-                send(player, "§a[BG Studio] Auto-Detect §cDISABLED §7— tolerance slider is now a fixed value.");
-            }
-            refreshScreen(player, buildBgStudioGui());
-            return;
-        }
+
 
         // Master toggle
         if (slot == 13) {
             if (CustomBlocksConfig.bgRemovalTolerance > 0) {
-                CustomBlocksConfig.bgRemovalTolerance = 0;
+                setGlobalToleranceWithCheck(player, 0);
                 send(player, "§a[BG Studio] Background removal §cDISABLED§a.");
             } else {
-                CustomBlocksConfig.bgRemovalTolerance = 30;
-                send(player, "§a[BG Studio] Background removal §aENABLED§a (set to default 30).");
+                setGlobalToleranceWithCheck(player, 30);
             }
-            CustomBlocksConfig.save();
-            refreshScreen(player, buildBgStudioGui());
             return;
         }
 
@@ -2447,35 +2443,23 @@ public class GuiManager {
             int segMax = Math.min(99, segMin + 12);
             int segMid = segMin + (segMax - segMin) / 2;
             int newTol = (button == 1) ? segMid : segMin;
-            CustomBlocksConfig.bgRemovalTolerance = Math.max(0, Math.min(100, newTol));
-            CustomBlocksConfig.save();
-            send(player, "§a[BG Studio] Tolerance set to §f" + CustomBlocksConfig.bgRemovalTolerance);
-            refreshScreen(player, buildBgStudioGui());
+            setGlobalToleranceWithCheck(player, Math.max(0, Math.min(100, newTol)));
             return;
         }
 
         // Max preset (slot 27)
         if (slot == 27) {
-            CustomBlocksConfig.bgRemovalTolerance = 100;
-            CustomBlocksConfig.save();
-            send(player, "§a[BG Studio] Tolerance set to §f100 §7(MAX)");
-            refreshScreen(player, buildBgStudioGui());
+            setGlobalToleranceWithCheck(player, 100);
             return;
         }
 
         // Fine controls
         if (slot == 28) { // -5
-            CustomBlocksConfig.bgRemovalTolerance = Math.max(0, CustomBlocksConfig.bgRemovalTolerance - 5);
-            CustomBlocksConfig.save();
-            send(player, "§a[BG Studio] Tolerance: §f" + CustomBlocksConfig.bgRemovalTolerance);
-            refreshScreen(player, buildBgStudioGui());
+            setGlobalToleranceWithCheck(player, Math.max(0, CustomBlocksConfig.bgRemovalTolerance - 5));
             return;
         }
         if (slot == 30) { // +5
-            CustomBlocksConfig.bgRemovalTolerance = Math.min(100, CustomBlocksConfig.bgRemovalTolerance + 5);
-            CustomBlocksConfig.save();
-            send(player, "§a[BG Studio] Tolerance: §f" + CustomBlocksConfig.bgRemovalTolerance);
-            refreshScreen(player, buildBgStudioGui());
+            setGlobalToleranceWithCheck(player, Math.min(100, CustomBlocksConfig.bgRemovalTolerance + 5));
             return;
         }
         if (slot == 29) { // type value
@@ -2487,10 +2471,7 @@ public class GuiManager {
         if (slot >= 36 && slot <= 40) {
             int[] presets = {0, 20, 30, 50, 75};
             int newTol = presets[slot - 36];
-            CustomBlocksConfig.bgRemovalTolerance = newTol;
-            CustomBlocksConfig.save();
-            send(player, "§a[BG Studio] Preset applied — tolerance §f" + newTol);
-            refreshScreen(player, buildBgStudioGui());
+            setGlobalToleranceWithCheck(player, newTol);
             return;
         }
 
@@ -2518,6 +2499,32 @@ public class GuiManager {
             bulkReapplyBackground(player);
             refreshScreen(player, buildBgStudioGui());
         }
+    }
+
+    private static void setGlobalToleranceWithCheck(ServerPlayerEntity player, int newTol) {
+        if (newTol > 0 && !CustomBlocksConfig.hasChosenBgMode) {
+            player.closeHandledScreen();
+            net.minecraft.text.MutableText msg = net.minecraft.text.Text.literal("§7You are enabling global background removal. Select mode: ");
+            msg.append(net.minecraft.text.Text.literal("§a[Remove Background]")
+                .styled(style -> style.withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.RUN_COMMAND, "/cb _internal_setglobalbg " + newTol + " corners_only"))
+                .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, net.minecraft.text.Text.literal("§7Click to set mode to Remove Background (edges only)")))));
+            msg.append(net.minecraft.text.Text.literal("  "));
+            msg.append(net.minecraft.text.Text.literal("§b[Remove Background + Holes]")
+                .styled(style -> style.withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.RUN_COMMAND, "/cb _internal_setglobalbg " + newTol + " corners_and_trapped"))
+                .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, net.minecraft.text.Text.literal("§7Click to set mode to Remove Background + Holes (full image)")))));
+            player.sendMessage(msg);
+            return;
+        }
+        CustomBlocksConfig.bgRemovalTolerance = newTol;
+        CustomBlocksConfig.save();
+        send(player, "§a[BG Studio] Tolerance: §f" + newTol);
+        if (newTol > 0) {
+            String desc = "corners_only".equals(CustomBlocksConfig.colorToolBackgroundMode) ? "Remove Background" : "Remove Background + Holes";
+            send(player, "§7[Note] Current Global Mode: " + desc);
+        } else {
+            send(player, "§7[Note] Tolerance 0 = No Background Removal");
+        }
+        refreshScreen(player, buildBgStudioGui());
     }
 
     private static Integer parseHexColor(String text) {
@@ -2692,7 +2699,7 @@ public class GuiManager {
             "§7Show floating names above placed custom blocks",
             "§8Height: " + CustomBlocksConfig.hologramHeight + " blocks",
             "§8Click to toggle"));
-        inv.setStack(15, toggleItem("Auto-Detect BG", CustomBlocksConfig.bgRemovalAutoDetect, "Smart tolerance for background removal. Slider acts as baseline."));
+
         // Row 2: Numbers
         inv.setStack(18, numItem("Shadow Threshold", CustomBlocksConfig.shadowThreshold, "Expansion threshold for Color Triangles (default 1.0)"));
         inv.setStack(19, numItem("Block Capacity", CustomBlocksConfig.maxSlots, "How many custom blocks this server can hold (restart required)"));
@@ -2738,8 +2745,8 @@ public class GuiManager {
         Item icon;
         String head;
         switch (mode) {
-            case "corners_only" -> { icon = Items.LIME_DYE; head = "§a§lBackground Only"; }
-            case "corners_and_trapped" -> { icon = Items.LIME_CONCRETE; head = "§a§lBackground + Enclosed Areas"; }
+            case "corners_only" -> { icon = Items.LIME_DYE; head = "§a§lRemove Background"; }
+            case "corners_and_trapped" -> { icon = Items.LIME_CONCRETE; head = "§a§lRemove Background + Holes"; }
             case "none" -> { icon = Items.BARRIER; head = "§7§lNo Background Removal"; }
             default -> { icon = Items.GRAY_DYE; head = "§e§lUnset (pick one)"; }
         }
@@ -2794,24 +2801,18 @@ public class GuiManager {
             isUnset ? "§e§lYou must pick a mode before colour tools work." : "§aCurrent: §f" + formatColorToolMode(mode)));
 
         inv.setStack(10, uiGlint(Items.LIME_DYE,
-            (isDefault ? "§a§l* " : "§7§l") + "Background Only" + (isDefault ? " §a§l(active)" : ""),
-            "§7Recolours pixels reachable from the image edges.",
-            "§7Enclosed regions (hole inside a 0, ring, etc.) stay.",
-            "§8Same behaviour as before this update.",
+            (isDefault ? "§a§l* " : "§7§l") + "Remove Background" + (isDefault ? " §a§l(active)" : ""),
+            "§7Removes background from edges. Trapped holes kept.",
             "§eClick to select."));
 
         inv.setStack(13, uiGlint(Items.LIME_CONCRETE,
-            (isExtra ? "§a§l* " : "§7§l") + "Background + Enclosed Areas" + (isExtra ? " §a§l(active)" : ""),
-            "§7Same as Background Only, plus recolours enclosed",
-            "§7pockets of background colour inside the design.",
-            "§7(e.g. the hole inside a 9 or a ring shape)",
+            (isExtra ? "§a§l* " : "§7§l") + "Remove Background + Holes" + (isExtra ? " §a§l(active)" : ""),
+            "§7Removes background AND matching colors trapped inside.",
             "§eClick to select."));
 
         inv.setStack(16, uiGlint(Items.BARRIER,
             (isNone ? "§a§l* " : "§7§l") + "No Background Removal" + (isNone ? " §a§l(active)" : ""),
-            "§7Imports textures exactly as uploaded. No flood-fill.",
-            "§7Color Triangle is disabled in this mode.",
-            "§7Use if your art already has the right background.",
+            "§7Imports exactly as-is. No colors deleted.",
             "§eClick to select."));
 
         inv.setStack(22, uiGlint(Items.ECHO_SHARD, "§c← Back"));
@@ -2874,12 +2875,7 @@ public class GuiManager {
                 }
                 openConfigGui(player, false);
             }
-            case 15 -> {
-                CustomBlocksConfig.bgRemovalAutoDetect = !CustomBlocksConfig.bgRemovalAutoDetect;
-                CustomBlocksConfig.save();
-                send(player, "§a[Config] bgRemovalAutoDetect = " + CustomBlocksConfig.bgRemovalAutoDetect);
-                openConfigGui(player, false);
-            }
+
             // Numbers
             case 18 -> configPrompt(player, "shadowThreshold", "Shadow Threshold (0.0-2.0):");
             case 19 -> configPrompt(player, "maxSlots", "Block Capacity (1-8192):");
@@ -2987,7 +2983,7 @@ public class GuiManager {
     private static void handleUndoPickerClick(ServerPlayerEntity player, GuiState state, int slot) {
         UUID uuid = player.getUuid();
         int page = state.page();
-        if (slot == 45) { openMain(player, 0); return; }
+        if (slot == 45) { handleEscBack(player); return; }
         if (slot == 46 && page > 0) {
             openScreenFromGuiState(player, GuiState.undoPicker(page - 1), buildUndoPicker(player, page - 1), Text.translatable("customblocks.gui.undo.title"));
             return;
@@ -4819,8 +4815,7 @@ public class GuiManager {
     // ── COL9: Hex Recolor Confirm ─────────────────────────────────────────────
 
     /** COL9 — open the "update N existing blocks?" confirm screen after a hex change. */
-    public static void openHexRecolorConfirmGui(ServerPlayerEntity player, String configKey, int newR, int newG, int newB) {
-        // Find all blocks whose customId contains the color suffix
+    public static void openHexRecolorConfirmGui(ServerPlayerEntity player, String configKey, int newR, int newG, int newB, int uiPage) {
         String colorSuffix = switch (configKey) {
             case "triangleRedHex"   -> "_red";
             case "triangleGreenHex" -> "_green";
@@ -4831,109 +4826,324 @@ public class GuiManager {
 
         java.util.List<SlotData> affected = SlotManager.allSlots().stream()
             .filter(d -> d.customId != null && d.customId.contains(colorSuffix) && d.texture != null && d.texture.length > 0)
+            .sorted(java.util.Comparator.comparing(d -> d.displayName))
             .collect(java.util.stream.Collectors.toList());
 
         if (affected.isEmpty()) {
-            // Nothing to update — just go back to config
             openConfigGui(player, false);
             return;
         }
 
-        int count = affected.size();
-        String colorLabel = switch (configKey) {
-            case "triangleRedHex"    -> "§cRed";
-            case "triangleGreenHex"  -> "§aGreen";
-            case "triangleYellowHex" -> "§eYellow";
-            default -> "color";
-        };
+        // Initialize all selected by default if this is the first time
+        UUID uuid = player.getUuid();
+        Set<String> selected = HEX_RECOLOR_SELECTED.computeIfAbsent(uuid, k -> {
+            Set<String> s = ConcurrentHashMap.newKeySet();
+            for (SlotData d : affected) s.add(d.customId);
+            return s;
+        });
+        // Initialize bg mode to the current global config value (or corners_only if unset)
+        String bgMode = HEX_RECOLOR_BG_MODE.computeIfAbsent(uuid, k -> {
+            String cfg = com.customblocks.CustomBlocksConfig.colorToolBackgroundMode;
+            return (cfg == null || "unset".equals(cfg)) ? "corners_only" : cfg;
+        });
 
-        SimpleInventory inv = new SimpleInventory(27);
-        // Info item at top centre
-        inv.setStack(13, ui(net.minecraft.item.Items.PAINTING,
-            "§f§l" + count + " block" + (count == 1 ? "" : "s") + " use " + colorLabel,
-            "§7These blocks were made with the old shade.",
-            "§7Recolor them to match the new hex?"));
-        // Confirm — green terracotta slot 20
-        inv.setStack(20, uiGlint(net.minecraft.item.Items.LIME_TERRACOTTA,
-            "§a§l✔ Yes, update all " + count + " block" + (count == 1 ? "" : "s"),
-            "§7Recolors each block's texture to the new shade.",
-            "§8This may take a moment."));
-        // Skip — red terracotta slot 24
-        inv.setStack(24, ui(net.minecraft.item.Items.RED_TERRACOTTA,
-            "§c§l✗ Skip",
-            "§7Keep existing blocks as-is."));
-        // Glass fill
-        for (int i = 0; i < 27; i++) if (inv.getStack(i).isEmpty()) inv.setStack(i, glass());
+        int total = affected.size();
+        int maxPage = total == 0 ? 0 : Math.max(0, (total - 1) / 36);
+        uiPage = Math.max(0, Math.min(uiPage, maxPage));
+
+        SimpleInventory inv = new SimpleInventory(54);
+        
+        // Fill slots 9-44 with blocks
+        int start = uiPage * 36;
+        int end = Math.min(start + 36, total);
+        for (int i = start; i < end; i++) {
+            SlotData d = affected.get(i);
+            boolean isSel = selected.contains(d.customId);
+            boolean hasFace = d.hasFaces();
+            
+            ItemStack stack = new ItemStack(CustomBlocksMod.safeSlotItem(d.index));
+            stack.set(DataComponentTypes.CUSTOM_NAME, Text.literal("§f" + d.displayName).styled(s -> s.withItalic(false)));
+            
+            List<Text> lore = new ArrayList<>();
+            lore.add(Text.literal(isSel ? "§a✅ Selected for update" : "§c❌ Skipped"));
+            if (hasFace) {
+                lore.add(Text.literal(""));
+                lore.add(Text.literal("§e⚠ Has custom face textures"));
+                lore.add(Text.literal("§eFace textures will NOT be recolored."));
+            }
+            lore.add(Text.literal(""));
+            lore.add(Text.literal("§8Click to toggle"));
+            stack.set(DataComponentTypes.LORE, new LoreComponent(lore));
+            
+            if (isSel) stack.set(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE, true);
+            
+            inv.setStack(9 + (i - start), stack);
+        }
+
+        // Top bar
+        inv.setStack(4, ui(net.minecraft.item.Items.PAINTING,
+            "§f§l" + selected.size() + " of " + total + " selected",
+            "§7These blocks match the color you edited.",
+            "§7Select which ones to recolor."));
+
+        // Bottom row controls
+        inv.setStack(45, ui(net.minecraft.item.Items.RED_TERRACOTTA, "§c§l✗ Cancel", "§7Keep blocks as-is."));
+        inv.setStack(47, ui(net.minecraft.item.Items.GOLD_INGOT, "§e§lTest 1 Block", "§7Recolors only the first selected block."));
+        inv.setStack(49, uiGlint(net.minecraft.item.Items.LIME_TERRACOTTA,
+            "§a§l✔ Confirm Update",
+            "§7Recolors " + selected.size() + " block(s).",
+            "§eA snapshot will be created automatically",
+            "§ebefore updating. You can restore from",
+            "§e/cb snapshots if anything goes wrong."));
+        inv.setStack(51, ui(net.minecraft.item.Items.SPYGLASS, "§b§lDry Run (Preview)", "§7Outputs a summary to chat.", "§7Shows what will change without saving."));
+
+        // BG mode selector — slot 53, cycles per-batch, never touches /cb config
+        net.minecraft.item.Item bgIcon = switch (bgMode) {
+            case "corners_and_trapped" -> Items.LIME_CONCRETE;
+            case "none"                -> Items.LIGHT_GRAY_CONCRETE;
+            default                    -> Items.LIME_DYE; // corners_only
+        };
+        String bgLabel = switch (bgMode) {
+            case "corners_and_trapped" -> "§aBG: Background + Holes";
+            case "none"                -> "§7BG: No Removal";
+            default                    -> "§aBG: Background Only";
+        };
+        inv.setStack(53, ui(bgIcon, bgLabel, "§7Click to cycle modes.", "§8Won't affect /cb config"));
+
+        // Pagination
+        if (uiPage > 0) inv.setStack(46, ui(Items.ARROW, "§f◀ Previous Page"));
+        if (uiPage < maxPage) inv.setStack(52, ui(Items.ARROW, "§fNext Page ▶"));
+
+        for (int i = 0; i < 54; i++) {
+            if (inv.getStack(i).isEmpty()) inv.setStack(i, glass());
+        }
 
         int packedRgb = (newR << 16) | (newG << 8) | newB;
-        openScreenFromGuiState(player, GuiState.hexRecolorConfirm(configKey, packedRgb),
-            inv, "§8Update " + count + " block" + (count == 1 ? "" : "s") + "?");
+        openScreenFromGuiState(player, GuiState.hexRecolorConfirm(configKey, packedRgb, uiPage),
+            inv, "§8Hex Update Wizard");
     }
 
     /** COL9 — handle clicks on the hex recolor confirm screen. */
     private static void handleHexRecolorConfirmClick(ServerPlayerEntity player, GuiState state, int slot) {
-        if (slot == 20) {
-            // Confirm — recolor all matching blocks on a background thread
-            String configKey = state.editingId();
-            int packed = state.page();
-            int newR = (packed >> 16) & 0xFF;
-            int newG = (packed >> 8)  & 0xFF;
-            int newB =  packed        & 0xFF;
+        String configKey = state.editingId();
+        int packed = state.page();
+        int uiPage = state.shapeBoxPage();
+        int newR = (packed >> 16) & 0xFF;
+        int newG = (packed >> 8)  & 0xFF;
+        int newB =  packed        & 0xFF;
 
-            String colorSuffix = switch (configKey) {
-                case "triangleRedHex"    -> "_red";
-                case "triangleGreenHex"  -> "_green";
-                case "triangleYellowHex" -> "_yellow";
-                default -> null;
-            };
-            if (colorSuffix == null) { openConfigGui(player, false); return; }
+        UUID uuid = player.getUuid();
+        Set<String> selected = HEX_RECOLOR_SELECTED.getOrDefault(uuid, ConcurrentHashMap.newKeySet());
 
-            java.util.List<SlotData> affected = SlotManager.allSlots().stream()
-                .filter(d -> d.customId != null && d.customId.contains(colorSuffix) && d.texture != null && d.texture.length > 0)
-                .collect(java.util.stream.Collectors.toList());
+        String colorSuffix = switch (configKey) {
+            case "triangleRedHex"    -> "_red";
+            case "triangleGreenHex"  -> "_green";
+            case "triangleYellowHex" -> "_yellow";
+            default -> null;
+        };
+        if (colorSuffix == null) { openConfigGui(player, false); return; }
 
-            MinecraftServer server = player.getServer();
-            int fR = newR, fG = newG, fB = newB;
+        java.util.List<SlotData> affected = SlotManager.allSlots().stream()
+            .filter(d -> d.customId != null && d.customId.contains(colorSuffix) && d.texture != null && d.texture.length > 0)
+            .sorted(java.util.Comparator.comparing(d -> d.displayName))
+            .collect(java.util.stream.Collectors.toList());
 
-            player.closeHandledScreen();
-            send(player, "§7[CB] Recoloring " + affected.size() + " block(s)...");
-
-            Thread t = new Thread(() -> {
-                int success = 0;
-                for (SlotData d : affected) {
-                    try {
-                        byte[] newTex = com.customblocks.item.ColorTriangleItem.recolourTextureForPlayer(
-                            d.texture, fR, fG, fB,
-                            CustomBlocksConfig.useTrappedHoleFill(),
-                            player.getUuid());
-                        if (server != null) {
-                            final byte[] finalTex = newTex;
-                            final String id = d.customId;
-                            final SlotData snap = d;
-                            server.execute(() -> {
-                                SlotManager.updateTexture(id, finalTex);
-                                SlotManager.saveAll();
-                                NetworkManager.broadcastUpdate(server,
-                                    new SlotUpdatePayload("retexture", snap.index, id, null, finalTex,
-                                        snap.lightLevel, snap.hardness, snap.soundType, null, null, null));
-                            });
-                        }
-                        success++;
-                    } catch (Exception ignored) {}
-                }
-                final int done = success;
-                if (server != null) server.execute(() -> {
-                    send(player, "§a[CB] Updated §f" + done + "§a block(s) to the new shade.");
-                    com.customblocks.ResourcePackManager.scheduleRebuild(server);
-                    openConfigGui(player, false);
-                });
-            }, "CB-HexRecolor");
-            t.setDaemon(true);
-            t.start();
-        } else {
-            // Skip or any other slot
+        // Cancel
+        if (slot == 45) {
+            HEX_RECOLOR_SELECTED.remove(uuid);
+            HEX_RECOLOR_BG_MODE.remove(uuid);
+            HEX_RECOLOR_OLD_RGB.remove(uuid);
+            // Still sync config so item textures update even though no blocks changed
+            MinecraftServer cancelServer = player.getServer();
+            if (cancelServer != null) com.customblocks.network.NetworkManager.broadcastConfigSync(cancelServer);
             openConfigGui(player, false);
+            return;
         }
+
+        // Pagination
+        int maxPage = affected.isEmpty() ? 0 : Math.max(0, (affected.size() - 1) / 36);
+        if (slot == 46 && uiPage > 0) {
+            openHexRecolorConfirmGui(player, configKey, newR, newG, newB, uiPage - 1);
+            return;
+        }
+        if (slot == 52 && uiPage < maxPage) {
+            openHexRecolorConfirmGui(player, configKey, newR, newG, newB, uiPage + 1);
+            return;
+        }
+
+        // Toggle block
+        if (slot >= 9 && slot <= 44) {
+            int idx = (uiPage * 36) + (slot - 9);
+            if (idx >= 0 && idx < affected.size()) {
+                String id = affected.get(idx).customId;
+                if (selected.contains(id)) selected.remove(id);
+                else selected.add(id);
+                openHexRecolorConfirmGui(player, configKey, newR, newG, newB, uiPage);
+            }
+            return;
+        }
+
+        // BG mode cycle
+        if (slot == 53) {
+            String cur = HEX_RECOLOR_BG_MODE.getOrDefault(uuid, "corners_only");
+            String next = switch (cur) {
+                case "corners_only"       -> "corners_and_trapped";
+                case "corners_and_trapped"-> "none";
+                default                   -> "corners_only";
+            };
+            HEX_RECOLOR_BG_MODE.put(uuid, next);
+            openHexRecolorConfirmGui(player, configKey, newR, newG, newB, uiPage);
+            return;
+        }
+
+        String bgMode = HEX_RECOLOR_BG_MODE.getOrDefault(uuid, "corners_only");
+
+        // Test 1 Block
+        if (slot == 47) {
+            List<SlotData> toUpdate = affected.stream().filter(d -> selected.contains(d.customId)).limit(1).toList();
+            if (toUpdate.isEmpty()) { playError(player); return; }
+            player.closeHandledScreen();
+            runHexUpdateBatch(player, toUpdate, newR, newG, newB, bgMode);
+            HEX_RECOLOR_SELECTED.remove(uuid);
+            HEX_RECOLOR_BG_MODE.remove(uuid);
+            return;
+        }
+
+        // Confirm Update (uiPage == 9999 means we're in the dry-run preview — treat click as "go back")
+        if (slot == 49) {
+            if (uiPage == 9999) { openHexRecolorConfirmGui(player, configKey, newR, newG, newB, 0); return; }
+            List<SlotData> toUpdate = affected.stream().filter(d -> selected.contains(d.customId)).toList();
+            if (toUpdate.isEmpty()) { playError(player); return; }
+            player.closeHandledScreen();
+            com.customblocks.core.SnapshotManager.takeSnapshot("hex_recolor_backup");
+            FeedbackHelper.actionBar(player, "§aSnapshot created.");
+            runHexUpdateBatch(player, toUpdate, newR, newG, newB, bgMode);
+            HEX_RECOLOR_SELECTED.remove(uuid);
+            HEX_RECOLOR_BG_MODE.remove(uuid);
+            return;
+        }
+
+        // Dry Run
+        if (slot == 51) {
+            List<SlotData> toUpdate = affected.stream().filter(d -> selected.contains(d.customId)).toList();
+            if (toUpdate.isEmpty()) { playError(player); return; }
+            send(player, "§b[Dry Run] §7Would update " + toUpdate.size() + " block(s) to RGB(" + newR + "," + newG + "," + newB + ").");
+            
+            // Simple GUI preview (no specific interaction needed, just a visual display)
+            SimpleInventory pre = new SimpleInventory(54);
+            for (int i = 0; i < 54; i++) pre.setStack(i, glass());
+            pre.setStack(4, ui(Items.SPYGLASS, "§b§lDry Run Preview", "§7Old colors on left, New on right", "§8(Showing first few blocks)"));
+            for (int i = 0; i < Math.min(toUpdate.size(), 4); i++) {
+                SlotData d = toUpdate.get(i);
+                pre.setStack(9 + (i*9), ui(CustomBlocksMod.safeSlotItem(d.index), "§cOld: " + d.displayName));
+                pre.setStack(10 + (i*9), ui(Items.ARROW, "§f▶"));
+                
+                // Process the preview texture without background removal
+                try {
+                    byte[] prevTex = com.customblocks.item.ColorTriangleItem.recolourTextureForPlayer(
+                        d.texture, newR, newG, newB, false, player.getUuid()
+                    );
+                    // Just a visual representation, we can't easily spawn a custom item with the new bytes without saving it,
+                    // so we use a placeholder that describes the new color
+                    int hex = (newR << 16) | (newG << 8) | newB;
+                    pre.setStack(11 + (i*9), uiGlint(Items.LIME_DYE, "§aNew: " + d.displayName, "§7RGB: " + newR + "," + newG + "," + newB));
+                } catch (Exception e) {}
+            }
+            pre.setStack(49, ui(Items.RED_TERRACOTTA, "§cClose Preview"));
+            
+            // Re-use hexRecolorConfirm state but point it to a fake page to break interaction, or just push a dummy state
+            STATES.put(uuid, GuiState.hexRecolorConfirm(configKey, packed, 9999));
+            openScreen(player, new SimpleNamedScreenHandlerFactory((s, pi, p) -> new CbScreenHandler(s, pi, pre), Text.literal("§8Dry Run Preview")));
+            return;
+        }
+    }
+
+    private static void runHexUpdateBatch(ServerPlayerEntity player, List<SlotData> toUpdate, int newR, int newG, int newB, String bgMode) {
+        MinecraftServer server = player.getServer();
+        UUID uuid = player.getUuid();
+        HEX_RECOLOR_CANCEL.put(uuid, false);
+
+        // "none" mode — don't change textures at all
+        if ("none".equals(bgMode)) {
+            if (server != null) server.execute(() -> {
+                send(player, "§7[CB] BG mode: No Removal — block textures were not changed.");
+                openConfigGui(player, false);
+            });
+            return;
+        }
+
+        boolean useTrapped = "corners_and_trapped".equals(bgMode);
+
+        // Resolve old RGB for direct color swap (set before config was overwritten)
+        int oldPacked = HEX_RECOLOR_OLD_RGB.getOrDefault(uuid, -1);
+        final int oldR = oldPacked >= 0 ? (oldPacked >> 16) & 0xFF : -1;
+        final int oldG = oldPacked >= 0 ? (oldPacked >>  8) & 0xFF : -1;
+        final int oldB = oldPacked >= 0 ?  oldPacked        & 0xFF : -1;
+        HEX_RECOLOR_OLD_RGB.remove(uuid);
+
+        Thread t = new Thread(() -> {
+            int success = 0;
+            int total = toUpdate.size();
+            List<UndoManager.UndoEntry> undoBatch = new ArrayList<>();
+
+            for (int i = 0; i < total; i++) {
+                if (HEX_RECOLOR_CANCEL.getOrDefault(uuid, false)) {
+                    send(player, "§c[CB] Update cancelled by user.");
+                    break;
+                }
+
+                SlotData d = toUpdate.get(i);
+                FeedbackHelper.actionBar(player, "§aUpdating block " + (i + 1) + " of " + total + "...");
+
+                try {
+                    byte[] newTex;
+                    if (oldR >= 0) {
+                        // Direct swap: replace every pixel that was the old hex with the new hex
+                        newTex = com.customblocks.item.ColorTriangleItem.recolourTextureDirectSwap(
+                            d.texture, oldR, oldG, oldB, newR, newG, newB, useTrapped);
+                    } else {
+                        // Fallback: flood fill (old hex unavailable)
+                        newTex = com.customblocks.item.ColorTriangleItem.recolourTextureForBatch(
+                            d.texture, newR, newG, newB, useTrapped, uuid);
+                    }
+                    
+                    // Create undo snapshot of old state
+                    SlotData oldSnap = d.deepCopy();
+                    undoBatch.add(new UndoManager.UndoEntry(d.customId, oldSnap, "hex_recolor", false, uuid));
+                    
+                    if (server != null) {
+                        final byte[] finalTex = newTex;
+                        final String id = d.customId;
+                        final SlotData snap = d;
+                        server.execute(() -> {
+                            SlotManager.updateTexture(id, finalTex);
+                            SlotManager.saveAll();
+                            NetworkManager.broadcastUpdate(server,
+                                new SlotUpdatePayload("retexture", snap.index, id, null, finalTex,
+                                    snap.lightLevel, snap.hardness, snap.soundType, null, null, null));
+                        });
+                    }
+                    success++;
+                } catch (Exception ignored) {}
+            }
+            
+            final int done = success;
+            if (done > 0) {
+                String hexStr = String.format("#%02X%02X%02X", newR, newG, newB);
+                UndoManager.pushUndoBatch("Hex Update: " + done + " block(s) to " + hexStr, undoBatch, uuid);
+            }
+            
+            if (server != null) server.execute(() -> {
+                send(player, "§a[CB] Updated §f" + done + "§a block(s) to the new shade.");
+                if (done > 0) com.customblocks.ResourcePackManager.scheduleRebuild(server);
+                // Send config sync AFTER blocks are updated — client debounce combines both
+                // into one pack reload so items and blocks update together
+                com.customblocks.network.NetworkManager.broadcastConfigSync(server);
+                openConfigGui(player, false);
+            });
+        }, "CB-HexRecolor");
+        t.setDaemon(true);
+        t.start();
     }
 
     // ── G1: Color Studio ─────────────────────────────────────────────────────
@@ -7301,10 +7511,19 @@ public class GuiManager {
     }
 
     private static String formatColorToolMode(String mode) {
-        if ("corners_only".equals(mode)) return "Background Only";
-        if ("corners_and_trapped".equals(mode)) return "Background + Enclosed Areas";
+        if ("corners_only".equals(mode)) return "Remove Background";
+        if ("corners_and_trapped".equals(mode)) return "Remove Background + Holes";
         if ("none".equals(mode)) return "No Background Removal";
         return "Not Configured";
+    }
+
+    /** Stores the current (old) hex as a packed RGB int before it gets overwritten. */
+    private static void storeOldHex(UUID uuid, String oldHex) {
+        if (oldHex == null || oldHex.isBlank()) return;
+        try {
+            java.awt.Color c = java.awt.Color.decode(oldHex.trim());
+            HEX_RECOLOR_OLD_RGB.put(uuid, (c.getRed() << 16) | (c.getGreen() << 8) | c.getBlue());
+        } catch (Exception ignored) {}
     }
 
     private static String normalizeHexInput(String text) {

@@ -222,14 +222,14 @@ public class CustomBlockCommand {
                                         StringArgumentType.getString(ctx, "name"),
                                         StringArgumentType.getString(ctx, "url").trim(),
                                         IntegerArgumentType.getInteger(ctx, "size")))))
-                            .then(CommandManager.argument("size_text", StringArgumentType.word())
+                            .then(CommandManager.argument("size_label", StringArgumentType.word())
                                 .then(CommandManager.argument("url", StringArgumentType.greedyString())
                                     .executes(ctx -> cmdAddText(
                                         ctx.getSource(),
                                         StringArgumentType.getString(ctx, "id"),
                                         StringArgumentType.getString(ctx, "name"),
                                         StringArgumentType.getString(ctx, "url").trim(),
-                                        StringArgumentType.getString(ctx, "size_text")))))
+                                        StringArgumentType.getString(ctx, "size_label")))))
                             // /cb create <id> <name> <url>  — default 128
                             .then(CommandManager.argument("url", StringArgumentType.greedyString())
                                 .executes(ctx -> cmdAdd(ctx.getSource(),
@@ -641,11 +641,11 @@ public class CustomBlockCommand {
                                     StringArgumentType.getString(ctx, "id"),
                                     StringArgumentType.getString(ctx, "url").trim(),
                                     IntegerArgumentType.getInteger(ctx, "size")))))
-                        .then(CommandManager.argument("size_text", StringArgumentType.word())
+                        .then(CommandManager.argument("size_label", StringArgumentType.word())
                             .then(CommandManager.argument("url", StringArgumentType.greedyString())
                                 .executes(ctx -> cmdRetextureText(ctx.getSource(),
                                     StringArgumentType.getString(ctx, "id"),
-                                    StringArgumentType.getString(ctx, "size_text"),
+                                    StringArgumentType.getString(ctx, "size_label"),
                                     StringArgumentType.getString(ctx, "url").trim()))))
                         .then(CommandManager.argument("url", StringArgumentType.greedyString())
                             .executes(ctx -> cmdRetexture(ctx.getSource(),
@@ -793,10 +793,10 @@ public class CustomBlockCommand {
                             .executes(ctx -> cmdResizeSafe(ctx.getSource(),
                                 StringArgumentType.getString(ctx, "id"),
                                 IntegerArgumentType.getInteger(ctx, "size"))))
-                        .then(CommandManager.argument("size_text", StringArgumentType.greedyString())
+                        .then(CommandManager.argument("size_label", StringArgumentType.greedyString())
                             .executes(ctx -> cmdResizeText(ctx.getSource(),
                                 StringArgumentType.getString(ctx, "id"),
-                                StringArgumentType.getString(ctx, "size_text"))))))
+                                StringArgumentType.getString(ctx, "size_label"))))))
 
                 // ── undo ────────────────────────────────────────────────────
                 .then(CommandManager.literal("undo")
@@ -1286,12 +1286,12 @@ public class CustomBlockCommand {
                                         StringArgumentType.getString(ctx, "face"),
                                         StringArgumentType.getString(ctx, "url").trim(),
                                         IntegerArgumentType.getInteger(ctx, "size")))))
-                            .then(CommandManager.argument("size_text", StringArgumentType.word())
+                            .then(CommandManager.argument("size_label", StringArgumentType.word())
                                 .then(CommandManager.argument("url", StringArgumentType.greedyString())
                                     .executes(ctx -> cmdSetFaceText(ctx.getSource(),
                                         StringArgumentType.getString(ctx, "id"),
                                         StringArgumentType.getString(ctx, "face"),
-                                        StringArgumentType.getString(ctx, "size_text"),
+                                        StringArgumentType.getString(ctx, "size_label"),
                                         StringArgumentType.getString(ctx, "url").trim()))))
                             .then(CommandManager.argument("url", StringArgumentType.greedyString())
                                 .executes(ctx -> cmdSetFace(ctx.getSource(),
@@ -1633,9 +1633,13 @@ public class CustomBlockCommand {
                     .executes(ctx -> cmdToleranceShow(ctx.getSource()))
                     .then(CommandManager.literal("reset")
                         .executes(ctx -> cmdToleranceReset(ctx.getSource())))
-                    .then(CommandManager.argument("value", IntegerArgumentType.integer(10, 80))
+                    .then(CommandManager.argument("value", IntegerArgumentType.integer(0, 100))
                         .executes(ctx -> cmdToleranceSet(ctx.getSource(),
-                            IntegerArgumentType.getInteger(ctx, "value")))));
+                            IntegerArgumentType.getInteger(ctx, "value"), null))
+                        .then(CommandManager.argument("mode", StringArgumentType.word())
+                            .executes(ctx -> cmdToleranceSet(ctx.getSource(),
+                                IntegerArgumentType.getInteger(ctx, "value"),
+                                StringArgumentType.getString(ctx, "mode"))))));
 
                 // ── V4-29 trianglemode ─────────────────────────────────────────
                 tree.then(CommandManager.literal("trianglemode")
@@ -1645,6 +1649,15 @@ public class CustomBlockCommand {
                         .executes(ctx -> cmdTriangleModeSet(ctx.getSource(), "edge")))
                     .then(CommandManager.literal("full")
                         .executes(ctx -> cmdTriangleModeSet(ctx.getSource(), "full"))));
+
+                // Internal hidden command for GUI global bg mode setting
+                tree.then(CommandManager.literal("_internal_setglobalbg")
+                    .requires(PermissionHelper::canUse)
+                    .then(CommandManager.argument("tol", IntegerArgumentType.integer(0, 100))
+                        .then(CommandManager.argument("mode", StringArgumentType.word())
+                            .executes(ctx -> cmdInternalSetGlobalBg(ctx.getSource(),
+                                IntegerArgumentType.getInteger(ctx, "tol"),
+                                StringArgumentType.getString(ctx, "mode"))))));
 
                 // ── Phase 4.3 recent ───────────────────────────────────────────
                 tree.then(CommandManager.literal("recent")
@@ -2097,6 +2110,9 @@ public class CustomBlockCommand {
                                 d.lightLevel, d.hardness, d.soundType, null, null, result.mcmeta()));
                     com.customblocks.core.HistoryTracker.record(getPlayerUuid(src), getPlayerName(src), "created", id, name);
                     ChatHelper.success(src, ChatHelper.formattedKey("cmd.block_created", name, d.index));
+                    if (CustomBlocksConfig.bgRemovalTolerance <= 0) {
+                        ChatHelper.info(src, "§7[Note] Tolerance 0 = No Background Removal");
+                    }
                     com.customblocks.DiscordWebhook.post(
                         "\uD83D\uDFE9 **Block Created** by `" + getPlayerName(src) + "`\n" +
                         "ID: `" + id + "` · Name: `" + name + "` · Slot #" + d.index);
@@ -3037,6 +3053,9 @@ public class CustomBlockCommand {
                         new SlotUpdatePayload("retexture", d.index, id, null, fb,
                                 d.lightLevel, d.hardness, d.soundType, null, null, fa));
                     ChatHelper.success(src, ChatHelper.formattedKey("cmd.texture_updated", id));
+                    if (CustomBlocksConfig.bgRemovalTolerance <= 0) {
+                        ChatHelper.info(src, "§7[Note] Tolerance 0 = No Background Removal");
+                    }
                     com.customblocks.core.HistoryTracker.record(getPlayerUuid(src), getPlayerName(src), "retextured", id);
                     { ServerPlayerEntity _rp = src.getPlayer(); if (_rp != null) { String _h = FirstUseHints.hint(_rp.getUuid(), "first_retexture"); if (_h != null) _rp.sendMessage(Text.literal(_h), false); } }
                 });
@@ -4042,6 +4061,9 @@ public class CustomBlockCommand {
                 if (!skipped.isEmpty()) msg.append(ChatHelper.formattedKey("cmd.import_summary_skipped", skipped.size()));
                 if (!failed.isEmpty()) msg.append(ChatHelper.formattedKey("cmd.import_summary_failed", failed.size()));
                 ChatHelper.success(src, msg.toString());
+                if (created > 0 && CustomBlocksConfig.bgRemovalTolerance <= 0) {
+                    ChatHelper.info(src, "§7[Note] Tolerance 0 = No Background Removal");
+                }
                 ChatHelper.info(src, ChatHelper.formattedKey("cmd.import_slots_line", SlotManager.usedSlots(), CustomBlocksConfig.maxSlots));
                 if (!createdIds.isEmpty())
                     ChatHelper.info(src, ChatHelper.formattedKey("cmd.import_blocks_created_line", String.join("§7, ", createdIds)));
@@ -4339,7 +4361,7 @@ public class CustomBlockCommand {
                 "§7Right-click a placed custom block: §eremove its background color",
                 "§7Mode: Edge fill (perimeter) or Full fill (everywhere)",
                 "§7Switch mode: §f/cb trianglemode edge §7or §f/cb trianglemode full",
-                "§7Adjust sensitivity: §f/cb tolerance <10-80>"));
+                "§7Adjust sensitivity: §f/cb tolerance <0-100>"));
             String disp = Character.toUpperCase(c.charAt(0)) + c.substring(1);
             ChatHelper.success(src, ChatHelper.formattedKey("cmd.give_triangle_done", disp));
             { ServerPlayerEntity _tp = src.getPlayer(); if (_tp != null) { String _h = FirstUseHints.hint(_tp.getUuid(), "hold_triangle"); if (_h != null) _tp.sendMessage(Text.literal(_h), false); } }
@@ -6140,15 +6162,61 @@ public class CustomBlockCommand {
         int current = ColorTriangleItem.effectiveTolerance(player.getUuid());
         boolean overridden = ColorTriangleItem.PLAYER_TOLERANCE.containsKey(player.getUuid());
         String suffix = overridden ? " §8(custom)" : " §8(default)";
-        ChatHelper.info(src, "§7Flood-fill tolerance: §f" + current + suffix + " §7— range 10–80. Set with §f/cb tolerance <value>§7.");
+        ChatHelper.info(src, "§7Flood-fill tolerance: §f" + current + suffix + " §7— range 0–100. Set with §f/cb tolerance <value>§7.");
         return 1;
     }
 
-    private static int cmdToleranceSet(ServerCommandSource src, int value) {
+    private static int cmdToleranceSet(ServerCommandSource src, int value, String modeOpt) {
         ServerPlayerEntity player = src.getPlayer();
         if (player == null) { ChatHelper.error(src, ChatHelper.formattedKey("cmd.console_player_only")); return 0; }
+        
+        boolean hasChosen = ColorTriangleItem.PLAYER_MODE.containsKey(player.getUuid());
+
+        if (value > 0 && modeOpt == null && !hasChosen) {
+            net.minecraft.text.MutableText msg = net.minecraft.text.Text.literal("§7Select mode for this tolerance: ");
+            msg.append(net.minecraft.text.Text.literal("§a[Remove Background]")
+                .styled(style -> style.withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.RUN_COMMAND, "/cb tolerance " + value + " background"))
+                .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, net.minecraft.text.Text.literal("§7Click to set mode to Remove Background (edges only)")))));
+            msg.append(net.minecraft.text.Text.literal("  "));
+            msg.append(net.minecraft.text.Text.literal("§b[Remove Background + Holes]")
+                .styled(style -> style.withClickEvent(new net.minecraft.text.ClickEvent(net.minecraft.text.ClickEvent.Action.RUN_COMMAND, "/cb tolerance " + value + " background_and_holes"))
+                .withHoverEvent(new net.minecraft.text.HoverEvent(net.minecraft.text.HoverEvent.Action.SHOW_TEXT, net.minecraft.text.Text.literal("§7Click to set mode to Remove Background + Holes (full image)")))));
+            src.sendMessage(msg);
+            return 1;
+        }
+
         ColorTriangleItem.PLAYER_TOLERANCE.put(player.getUuid(), value);
-        ChatHelper.success(src, "§aTolerance set to §f" + value + "§a. Range: 10–80.");
+        
+        if (modeOpt != null) {
+            String m = "background_and_holes".equalsIgnoreCase(modeOpt) || "full".equalsIgnoreCase(modeOpt) ? "full" : "edge";
+            com.customblocks.item.ColorTriangleItem.PLAYER_MODE.put(player.getUuid(), m);
+            String desc = "edge".equals(m) ? "Remove Background" : "Remove Background + Holes";
+            ChatHelper.success(src, "§aTolerance set to §f" + value + "§a and mode set to §f" + desc + "§a.");
+        } else {
+            String currentMode = ColorTriangleItem.PLAYER_MODE.getOrDefault(player.getUuid(), "edge");
+            String desc = "edge".equals(currentMode) ? "Remove Background" : "Remove Background + Holes";
+            ChatHelper.success(src, "§aTolerance set to §f" + value + "§a. Range: 0–100.");
+            if (value > 0) {
+                ChatHelper.info(src, "§7[Note] Current Mode: " + desc);
+            }
+        }
+        
+        if (value <= 0) {
+            ChatHelper.info(src, "§7[Note] Tolerance 0 = No Background Removal");
+        }
+        return 1;
+    }
+
+    private static int cmdInternalSetGlobalBg(ServerCommandSource src, int tol, String mode) {
+        ServerPlayerEntity player = src.getPlayer();
+        if (player == null) return 0;
+        com.customblocks.CustomBlocksConfig.bgRemovalTolerance = tol;
+        com.customblocks.CustomBlocksConfig.colorToolBackgroundMode = mode;
+        com.customblocks.CustomBlocksConfig.hasChosenBgMode = true;
+        com.customblocks.CustomBlocksConfig.save();
+        
+        String desc = "corners_only".equals(mode) ? "Remove Background" : "Remove Background + Holes";
+        ChatHelper.success(src, "§aGlobal Background Tolerance set to §f" + tol + "§a and Mode set to §f" + desc + "§a.");
         return 1;
     }
 

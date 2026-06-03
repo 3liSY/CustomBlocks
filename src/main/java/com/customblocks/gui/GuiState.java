@@ -395,9 +395,9 @@ public record GuiState(
         return new GuiState(GuiMode.ARABIC_BROWSER, color != null ? color : "black", page, false, 0, false);
     }
 
-    /** COL9 — hex recolor confirm. editingId = config key, page = packed new RGB (r<<16|g<<8|b). */
-    public static GuiState hexRecolorConfirm(String configKey, int packedRgb) {
-        return new GuiState(GuiMode.HEX_RECOLOR_CONFIRM, configKey, packedRgb, false, 0, false);
+    /** COL9 — hex recolor confirm wizard. editingId = config key, page = packed new RGB, shapeBoxPage = UI page index. */
+    public static GuiState hexRecolorConfirm(String configKey, int packedRgb, int uiPage) {
+        return new GuiState(GuiMode.HEX_RECOLOR_CONFIRM, configKey, packedRgb, false, uiPage, false);
     }
 
     /** NF2 — deleter confirm. editingId = block customId to delete. */

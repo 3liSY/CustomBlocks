@@ -172,6 +172,15 @@ public final class ColorVariantService {
         for (byte[] face : source.faceTextures.values()) {
             if (face != null && face.length > 0) return face;
         }
+        
+        // COL12 — fallback to disk if texture was dropped from RAM
+        java.io.File tFile = new java.io.File("config/customblocks/textures", "slot_" + source.index + ".dat");
+        if (tFile.exists()) {
+            try {
+                return java.nio.file.Files.readAllBytes(tFile.toPath());
+            } catch (Exception ignored) {}
+        }
+        
         return null;
     }
 

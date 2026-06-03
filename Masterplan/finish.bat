@@ -1,0 +1,3 @@
+@echo off
+echo Finishing workflow session...
+py tools\cb_workflow.py finish

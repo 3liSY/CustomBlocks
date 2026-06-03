@@ -433,6 +433,10 @@ public class CustomBlocksMod implements ModInitializer {
                 com.customblocks.network.RpPausePayload.ID,
                 com.customblocks.network.RpPausePayload.CODEC);
 
+        PayloadTypeRegistry.playS2C().register(
+                com.customblocks.network.ConfigSyncPayload.ID,
+                com.customblocks.network.ConfigSyncPayload.CODEC);
+
         // ── AnimSettings C2S handler ─────────────────────────────────────────
 
         ServerPlayNetworking.registerGlobalReceiver(

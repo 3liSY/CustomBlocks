@@ -19,6 +19,7 @@ import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.ItemUsageContext;
+import net.minecraft.item.tooltip.TooltipType;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.text.Text;
@@ -123,6 +124,19 @@ public class ColorTriangleItem extends Item {
         return true;
     }
 
+    @Override
+    public void appendTooltip(ItemStack stack, Item.TooltipContext context, List<Text> tooltip, TooltipType type) {
+        if (isCustomTriangle(stack)) return; // LoreComponent handles custom ones
+        TriangleColor color = resolveColor(stack);
+        String hex = String.format(Locale.ROOT, "%02X%02X%02X", color.r(), color.g(), color.b());
+        tooltip.add(Text.literal("§7Recolors backgrounds of blocks").styled(s -> s.withItalic(false)));
+        tooltip.add(Text.literal("§7Hex color: §f#" + hex).styled(s -> s.withItalic(false)));
+        tooltip.add(Text.literal("§8Right-click a block to make a new colored variant").styled(s -> s.withItalic(false)));
+        tooltip.add(Text.literal("§8Shift+right-click to preview first").styled(s -> s.withItalic(false)));
+        tooltip.add(Text.literal("§7Mode: §f" + formatModeForTooltip() + "  §7Tolerance: §f" + getToleranceForTooltip()).styled(s -> s.withItalic(false)));
+        tooltip.add(Text.literal("§8Use §f/cb config §8to change").styled(s -> s.withItalic(false)));
+    }
+
     public static ItemStack createCustomStack(Item item, int rgb) {
         rgb &= 0xFFFFFF;
         String label = labelForRgb(rgb);
@@ -140,9 +154,10 @@ public class ColorTriangleItem extends Item {
             Text.literal(label).styled(s -> s.withColor(colorRgb).withBold(true).withItalic(false))
                 .append(Text.literal(" Triangle").styled(s -> s.withColor(0xFFFFFF).withBold(false).withItalic(false))));
         stack.set(DataComponentTypes.LORE, new LoreComponent(List.of(
-            Text.literal("§7Recolours connected background pixels").styled(s -> s.withItalic(false)),
-            Text.literal("§7Target colour: §f#" + hexForRgb(rgb)).styled(s -> s.withItalic(false)),
-            Text.literal("§8Right-click a CustomBlock to create a variant").styled(s -> s.withItalic(false)),
+            Text.literal("§7Recolors backgrounds of blocks").styled(s -> s.withItalic(false)),
+            Text.literal("§7Hex color: §f#" + hexForRgb(rgb)).styled(s -> s.withItalic(false)),
+            Text.literal("§8Right-click a block to make a new colored variant").styled(s -> s.withItalic(false)),
+            Text.literal("§8Shift+right-click to preview first").styled(s -> s.withItalic(false)),
             Text.literal("§7Mode: §f" + formatModeForTooltip() + "  §7Tolerance: §f" + getToleranceForTooltip()).styled(s -> s.withItalic(false)),
             Text.literal("§8Use §f/cb config §8to change").styled(s -> s.withItalic(false)))));
         stack.set(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE, true);
@@ -159,7 +174,6 @@ public class ColorTriangleItem extends Item {
             String h = com.customblocks.core.FirstUseHints.hint(sp.getUuid(), "color_triangle");
             if (h != null) {
                 sp.sendMessage(Text.literal(h), false);
-                sp.sendMessage(Text.literal("§7Shift+right-click to preview first.  §8Mode: §f" + formatModeForTooltip()), false);
             }
         }
     }
@@ -212,6 +226,16 @@ public class ColorTriangleItem extends Item {
         TriangleColor color = resolveColor(ctx.getStack());
 
         byte[] workTexture = source.texture;
+        if (workTexture == null || workTexture.length == 0) {
+            java.io.File tFile = new java.io.File("config/customblocks/textures", "slot_" + source.index + ".dat");
+            if (tFile.exists()) {
+                try {
+                    workTexture = java.nio.file.Files.readAllBytes(tFile.toPath());
+                    com.customblocks.core.SlotManager.updateTexture(source.customId, workTexture);
+                } catch (Exception ignored) {}
+            }
+        }
+
         if (workTexture == null || workTexture.length == 0) {
             // Heuristic Fallback: Use north face, then any face
             workTexture = source.faceTextures.get("north");
@@ -519,6 +543,51 @@ public class ColorTriangleItem extends Item {
         int tol = effectiveTolerance(playerUuid);
         String mode = effectiveMode(playerUuid);
         return recolourBackground(src, newR, newG, newB, fillTrapped, tol, mode);
+    }
+
+    /**
+     * Batch-safe recolour — always forces "edge" mode (flood fill from edges only).
+     * Used as a fallback when the old hex is unavailable.
+     */
+    public static byte[] recolourTextureForBatch(byte[] src, int newR, int newG, int newB, boolean fillTrapped, UUID playerUuid) throws Exception {
+        int tol = effectiveTolerance(playerUuid);
+        return recolourBackground(src, newR, newG, newB, fillTrapped, tol, "edge");
+    }
+
+    /**
+     * Direct hex-swap for batch hex updates.
+     * Replaces every pixel within 30 RGB units of (oldR,oldG,oldB) with (newR,newG,newB).
+     * No flood fill — no tolerance guessing. Fixed threshold of 30 catches compression
+     * artifacts without touching design pixels of unrelated colours.
+     */
+    public static byte[] recolourTextureDirectSwap(byte[] src,
+            int oldR, int oldG, int oldB,
+            int newR, int newG, int newB,
+            boolean fillTrapped) throws Exception {
+        BufferedImage img = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(src));
+        if (img == null) throw new Exception("Could not decode image");
+        int w = img.getWidth(), h = img.getHeight();
+        final double THRESHOLD = 30.0;
+        for (int x = 0; x < w; x++) {
+            for (int y = 0; y < h; y++) {
+                int px = img.getRGB(x, y);
+                int a  = (px >> 24) & 0xFF;
+                if (a < 10) continue;
+                int r  = (px >> 16) & 0xFF;
+                int g  = (px >>  8) & 0xFF;
+                int b  =  px        & 0xFF;
+                double dist = Math.sqrt(
+                    (r - oldR) * (r - oldR) +
+                    (g - oldG) * (g - oldG) +
+                    (b - oldB) * (b - oldB));
+                if (dist <= THRESHOLD) {
+                    img.setRGB(x, y, (a << 24) | (newR << 16) | (newG << 8) | newB);
+                }
+            }
+        }
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(img, "PNG", out);
+        return out.toByteArray();
     }
 
     private static void fillTrappedBackgroundRegions(BufferedImage img, boolean[][] visited, int newArgb) {

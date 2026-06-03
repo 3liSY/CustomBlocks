@@ -19,6 +19,7 @@ import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.ItemUsageContext;
+import net.minecraft.item.tooltip.TooltipType;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
@@ -92,6 +93,18 @@ public class ColorSquareItem extends Item {
         return true;
     }
 
+    @Override
+    public void appendTooltip(ItemStack stack, Item.TooltipContext context, List<Text> tooltip, TooltipType type) {
+        if (isCustomSquare(stack)) return; // LoreComponent handles custom ones
+        String hex = builtInHex(colorWord);
+        tooltip.add(Text.literal("§7Swaps background color of blocks").styled(s -> s.withItalic(false)));
+        if (!hex.isEmpty()) tooltip.add(Text.literal("§7Hex color: §f#" + hex).styled(s -> s.withItalic(false)));
+        tooltip.add(Text.literal("§8Right-click to swap background color").styled(s -> s.withItalic(false)));
+        tooltip.add(Text.literal("§8The variant block must already exist").styled(s -> s.withItalic(false)));
+        tooltip.add(Text.literal("§7Mode: §f" + formatModeForTooltip() + "  §7Tolerance: §f" + getToleranceForTooltip()).styled(s -> s.withItalic(false)));
+        tooltip.add(Text.literal("§8Use §f/cb config §8to change").styled(s -> s.withItalic(false)));
+    }
+
     public static ItemStack createCustomStack(Item item, int rgb) {
         rgb &= 0xFFFFFF;
         String label = labelForRgb(rgb);
@@ -109,9 +122,10 @@ public class ColorSquareItem extends Item {
             Text.literal(label).styled(s -> s.withColor(colorRgb).withBold(true).withItalic(false))
                 .append(Text.literal(" Square").styled(s -> s.withColor(0xFFFFFF).withBold(false).withItalic(false))));
         stack.set(DataComponentTypes.LORE, new LoreComponent(List.of(
-            Text.literal("§7Swaps instantly to a matching color variant").styled(s -> s.withItalic(false)),
-            Text.literal("§7Target color: §f#" + hexForRgb(rgb)).styled(s -> s.withItalic(false)),
-            Text.literal("§8Right-click a CustomBlock to swap live").styled(s -> s.withItalic(false)),
+            Text.literal("§7Swaps background color of blocks").styled(s -> s.withItalic(false)),
+            Text.literal("§7Hex color: §f#" + hexForRgb(rgb)).styled(s -> s.withItalic(false)),
+            Text.literal("§8Right-click to swap background color").styled(s -> s.withItalic(false)),
+            Text.literal("§8The variant block must already exist").styled(s -> s.withItalic(false)),
             Text.literal("§7Mode: §f" + formatModeForTooltip() + "  §7Tolerance: §f" + getToleranceForTooltip()).styled(s -> s.withItalic(false)),
             Text.literal("§8Use §f/cb config §8to change").styled(s -> s.withItalic(false)))));
         stack.set(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE, true);
@@ -128,7 +142,6 @@ public class ColorSquareItem extends Item {
             String h = com.customblocks.core.FirstUseHints.hint(sp.getUuid(), "color_square");
             if (h != null) {
                 sp.sendMessage(Text.literal(h), false);
-                sp.sendMessage(Text.literal("§7The variant block must already exist (create it first with a Color Triangle)."), false);
             }
         }
     }
@@ -175,14 +188,6 @@ public class ColorSquareItem extends Item {
             }
             return ActionResult.FAIL;
         }
-        if (!CustomBlocksConfig.isColorToolModeConfigured()) {
-            if (player != null) {
-                player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_color_not_configured")), true);
-                player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_color_config_hint")), true);
-            }
-            return ActionResult.FAIL;
-        }
-
         SlotData current = SlotManager.getBySlot(sb.getSlotKey());
         if (current == null) return ActionResult.PASS;
 
@@ -229,15 +234,27 @@ public class ColorSquareItem extends Item {
             target = baseBlock;
             // COL11 — Self-same check: base block IS the target color, no variant needed
             if (target.customId.equals(current.customId)) {
-                if (player != null) {
-                    player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_square_already_color", color.label())), true);
-                    if (world instanceof ServerWorld sw) {
-                        sw.playSound(null, player.getBlockPos(),
-                            net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_CHIME.value(),
-                            net.minecraft.sound.SoundCategory.PLAYERS, 0.5f, 1.2f);
+                if (matchesColor(current, color.key())) {
+                    if (player != null) {
+                        player.sendMessage(Text.literal(ChatHelper.formattedKey("cmd.tool_square_already_color", color.label())), true);
+                        if (world instanceof ServerWorld sw) {
+                            sw.playSound(null, player.getBlockPos(),
+                                net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_CHIME.value(),
+                                net.minecraft.sound.SoundCategory.PLAYERS, 0.5f, 1.2f);
+                        }
                     }
+                    return ActionResult.SUCCESS;
+                } else {
+                    if (player != null) {
+                        player.sendMessage(Text.literal("§c[CB] §fNo " + color.label().toLowerCase() + " variant found — use the " + color.label() + " Triangle to create one."), true);
+                        if (world instanceof ServerWorld sw) {
+                            sw.playSound(null, player.getBlockPos(),
+                                net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BASS.value(),
+                                net.minecraft.sound.SoundCategory.PLAYERS, 1f, 0.8f);
+                        }
+                    }
+                    return ActionResult.FAIL;
                 }
-                return ActionResult.SUCCESS;
             }
         }
 
@@ -392,6 +409,21 @@ public class ColorSquareItem extends Item {
         Y = Y > 0.008856 ? Math.cbrt(Y) : 7.787*Y + 16.0/116.0;
         Z = Z > 0.008856 ? Math.cbrt(Z) : 7.787*Z + 16.0/116.0;
         return new double[]{116.0*Y - 16.0, 500.0*(X-Y), 200.0*(Y-Z)};
+    }
+    private static boolean matchesColor(SlotData block, String colorKey) {
+        if (colorKey.equalsIgnoreCase(block.cachedColorFamily)) return true;
+        for (String seg : block.customId.split("_", -1)) {
+            if (seg.equalsIgnoreCase(colorKey)) return true;
+            String resolved = ColorNames.resolveFamily(seg);
+            if (resolved != null && resolved.equalsIgnoreCase(colorKey)) return true;
+        }
+        // Fallback: detect background color directly from texture edge pixels.
+        // Handles blocks whose ID has no color word and cachedColorFamily is null/stale.
+        if (block.texture != null && block.texture.length > 0) {
+            ColorDetection.DetectionResult r = ColorDetection.detect(block.texture);
+            if (r.confident() && colorKey.equalsIgnoreCase(r.primary)) return true;
+        }
+        return false;
     }
 
     /**

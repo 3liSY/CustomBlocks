@@ -103,6 +103,24 @@ public final class NetworkManager {
     }
 
     /**
+     * Broadcasts the current triangle/square hex values to all online modded clients
+     * so their item textures and item names update live without reconnecting.
+     */
+    public static void broadcastConfigSync(MinecraftServer server) {
+        ConfigSyncPayload payload = new ConfigSyncPayload(
+                CustomBlocksConfig.triangleBlackHex  != null ? CustomBlocksConfig.triangleBlackHex  : "",
+                CustomBlocksConfig.triangleYellowHex != null ? CustomBlocksConfig.triangleYellowHex : "",
+                CustomBlocksConfig.triangleGreenHex  != null ? CustomBlocksConfig.triangleGreenHex  : "",
+                CustomBlocksConfig.triangleRedHex    != null ? CustomBlocksConfig.triangleRedHex    : ""
+        );
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            if (ServerPlayNetworking.canSend(player, ConfigSyncPayload.ID)) {
+                ServerPlayNetworking.send(player, payload);
+            }
+        }
+    }
+
+    /**
      * Send a slot update to a SINGLE player.
      */
     public static void sendToPlayer(ServerPlayerEntity player, SlotUpdatePayload payload) {

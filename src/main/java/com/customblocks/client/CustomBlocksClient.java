@@ -951,6 +951,16 @@ public class CustomBlocksClient implements ClientModInitializer {
 
         // ── RpPausePayload — server says pause/resume reloads ────────────────
 
+        // Config sync — server changed a hex colour; update local config and regenerate item textures
+        ClientPlayNetworking.registerGlobalReceiver(com.customblocks.network.ConfigSyncPayload.ID, (payload, context) -> {
+            MinecraftClient client = context.client();
+            if (!payload.blackHex().isEmpty())  com.customblocks.CustomBlocksConfig.triangleBlackHex  = payload.blackHex();
+            if (!payload.yellowHex().isEmpty()) com.customblocks.CustomBlocksConfig.triangleYellowHex = payload.yellowHex();
+            if (!payload.greenHex().isEmpty())  com.customblocks.CustomBlocksConfig.triangleGreenHex  = payload.greenHex();
+            if (!payload.redHex().isEmpty())    com.customblocks.CustomBlocksConfig.triangleRedHex    = payload.redHex();
+            scheduleGenerateAndReload(client, fastReloadDebounceMs());
+        });
+
         ClientPlayNetworking.registerGlobalReceiver(com.customblocks.network.RpPausePayload.ID, (payload, context) -> {
             context.client().execute(() -> {
                 if (payload.paused()) {
